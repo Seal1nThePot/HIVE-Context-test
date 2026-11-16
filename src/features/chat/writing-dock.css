@@ -1,0 +1,14 @@
+.writing-dock-controls {display:flex;align-items:center;gap:calc(10px * var(--ui-scale));padding:calc(6px * var(--ui-scale)) calc(11px * var(--ui-scale));border:1px solid #667044;border-radius:calc(20px * var(--ui-scale));background:#27301ff2;box-shadow:0 6px 24px #0006;backdrop-filter:blur(8px);}
+.writing-dock-controls > button {position:relative;flex:none;display:flex;align-items:center;justify-content:center;color:#a9b58b;border:1px solid transparent;background:transparent;padding:0;cursor:pointer;}
+.writing-dock-controls .dock-mode-button {width:calc(38px * var(--ui-scale));height:calc(38px * var(--ui-scale));border-radius:calc(10px * var(--ui-scale));}
+.dock-mode-button svg {width:calc(20px * var(--ui-scale));height:calc(20px * var(--ui-scale));}
+.writing-dock-controls .dock-mode-button.active {color:#d9d3a0;background:#c4b97112;border-color:#b9ae6d33;}
+.writing-dock-controls .dock-mode-button:hover {background:#bac28a17;color:#e6e2bd;}
+.writing-dock-controls .dock-ai-button {width:calc(52px * var(--ui-scale));height:calc(52px * var(--ui-scale));border-radius:50%;border-color:#969d60;background:#475330;color:#dce2bf;box-shadow:inset 0 0 0 1px #c0c88013;}
+.dock-ai-button svg {width:calc(28px * var(--ui-scale));height:calc(28px * var(--ui-scale));}
+.writing-dock-controls .dock-ai-button.active {background:#5a6540;color:#f0edce;border-color:#bdc287;}
+.writing-dock-controls .dock-ai-button:hover {background:#626d45;color:#fff7d5;border-color:#d4ce91;}
+.writing-dock-controls > button:focus-visible {outline:1px solid #e6d692;outline-offset:3px;}
+.writing-dock-controls > button[data-tooltip]:hover:after,.writing-dock-controls > button[data-tooltip]:focus-visible:after {content:attr(data-tooltip);position:absolute;left:50%;bottom:calc(100% + 12px);transform:translateX(-50%);padding:6px 9px;white-space:nowrap;font-size:calc(11px * var(--text-scale));line-height:1.5;border:1px solid #747f50;border-radius:4px;background:#20291df5;color:#dfdfba;box-shadow:0 4px 14px #0006;pointer-events:none;}
+@media(max-width:480px){.writing-dock-controls{gap:calc(5px * var(--ui-scale));padding-left:7px;padding-right:7px;}}
+.writing-dock.floating-mode-dock {position:fixed;z-index:15000;}

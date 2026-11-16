@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.local/
+.test-tmp/
+*.tsbuildinfo
+
+# 个人写作与本地快照，不随仓库发布
+documents/
+*.zip
+reference/

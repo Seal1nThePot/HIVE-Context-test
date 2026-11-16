@@ -1,0 +1,31 @@
+.settings-page .status-customizer {padding:14px 18px;}
+.settings-page .status-customizer > .status-customizer-summary {display:flex;align-items:center;justify-content:space-between;gap:14px;margin:0;}
+.status-customizer-summary h2 {margin:0;font-size:calc(14px * var(--text-scale));}
+.settings-page .status-customizer-summary p {margin:4px 0 0;font-size:calc(11px * var(--text-scale));}
+.status-customizer-summary > button {display:flex;align-items:center;gap:6px;flex:none;padding:6px 10px;}
+.status-customizer-summary .expanded {transform:rotate(180deg);}
+.settings-page .status-customizer > .status-customizer-panel {display:block;margin:14px 0 0;padding-top:12px;border-top:1px solid #3a4432;}
+.status-tray-heading {display:flex;align-items:center;gap:10px;margin:10px 0 6px;font-size:calc(11px * var(--text-scale));}
+.status-tray-heading b {font-weight:500;color:#c8d0b9;}.status-tray-heading small {color:#8e9b80;font:inherit;}
+.status-drop-tray,.status-available-tray {display:flex;align-items:center;align-content:flex-start;flex-wrap:wrap;gap:6px;min-height:43px;padding:7px;border:1px dashed #4a563d;border-radius:5px;}
+.status-drop-tray {background:#1b2118;}.status-available-tray {border-color:transparent;padding:5px 0;}
+.status-drop-tray.accepting,.status-available-tray.accepting {border-color:#b7bd80;background:#303c27;}
+.status-config-chip {position:relative;display:flex;align-items:center;border:1px solid #586744;border-radius:4px;background:#333f2a;}
+.settings-page .status-config-chip button,.settings-page .status-available-tray > button {display:flex;align-items:center;gap:4px;padding:5px 6px;min-height:27px;border:0;background:transparent;font-size:calc(11px * var(--text-scale));color:#d4d9c7;white-space:nowrap;}
+.status-config-chip .status-chip-handle {cursor:grab;touch-action:none;user-select:none;}.status-config-chip.dragging {opacity:.4;}
+.settings-page .status-available-tray > button {border:1px solid #414e36;border-radius:4px;cursor:grab;touch-action:none;user-select:none;}
+.status-config-chip button:hover,.status-available-tray > button:hover {background:#48573a;}
+.status-config-chip.insert-before:before {content:'';position:absolute;left:-5px;top:-4px;bottom:-4px;width:2px;background:#dbcc83;}
+.status-drop-tray.insert-end:after {content:'';height:28px;width:2px;background:#dbcc83;}
+.status-tray-empty {font-size:calc(11px * var(--text-scale));color:#8e9b80;}
+.status-count-setting {display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:12px;}
+.settings-page .status-count-setting label {display:flex;align-items:center;gap:10px;font-size:calc(12px * var(--text-scale));}
+.settings-page .status-count-setting select {padding:5px 8px;font-size:calc(12px * var(--text-scale));}
+.settings-page .status-count-description {margin:9px 0 0;line-height:1.7;font-size:calc(10px * var(--text-scale));}
+.status-config-notice {display:block;min-height:1em;margin-top:4px;font-size:calc(10px * var(--text-scale));color:#a4b18d;}
+.editor-status-bar > .editor-status-items {justify-content:flex-end;gap:14px;}
+.editor-status-items .editor-save-status {max-width:none;flex:none;}
+.editor-status-items .editor-save-status:first-child {margin-right:auto;}
+.editor-status-items .editor-count-mode {min-width:0;width:auto;max-width:140px;padding:0 2px;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;}
+.editor-count-mode option {background:#232b1e;color:#d4d9c7;}
+@media(max-width:600px){.settings-page .status-customizer {padding:12px;}.status-tray-heading {flex-wrap:wrap;gap:4px;}.status-count-setting {flex-wrap:wrap;}.status-customizer-summary p {max-width:190px;}}

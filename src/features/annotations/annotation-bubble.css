@@ -1,0 +1,20 @@
+.annotation-bubble { position: fixed; z-index: 1200; width: 24px; height: 24px; padding: 0; border: 1px solid #bba967; border-radius: 50%; background: #37432b; color: #f4df9a; cursor: pointer; box-shadow: 0 2px 7px #0008; }
+.annotation-bubble:focus-visible { outline: 2px solid #f4df9a; outline-offset: 2px; }
+
+.annotation-bubble-choices { position: fixed; z-index: 1201; display:flex; flex-direction:column; background:#303b27; border:1px solid #bba967; padding:4px; }
+.annotation-bubble-choices button { background:transparent; color:#f4df9a; border:0; padding:5px 10px; cursor:pointer; }
+
+.cm-table-annotation-top, .cm-table-annotation-right, .cm-table-annotation-bottom, .cm-table-annotation-left {
+  box-shadow: inset 0 2px 0 var(--annotation-top, transparent), inset -2px 0 0 var(--annotation-right, transparent), inset 0 -2px 0 var(--annotation-bottom, transparent), inset 2px 0 0 var(--annotation-left, transparent);
+}
+.cm-table-annotation-top { --annotation-top: #e5bf63; }
+.cm-table-annotation-right { --annotation-right: #e5bf63; }
+.cm-table-annotation-bottom { --annotation-bottom: #e5bf63; }
+.cm-table-annotation-left { --annotation-left: #e5bf63; }
+
+.annotation-drag-handle { height: 12px; cursor: grab; touch-action: none; border-radius: 5px 5px 0 0; }
+.annotation-drag-handle:active { cursor: grabbing; }
+.annotation-drag-handle:focus-visible { outline: 1px solid #e5bf63; outline-offset: -2px; }
+
+.inline-annotation-footer .annotation-open-global { margin-right:auto; border:0; background:transparent; color:#aebc98; font-family:inherit; font-size:calc(11px * var(--text-scale,1)); line-height:1.4; cursor:pointer; }
+.inline-annotation-footer .annotation-open-global:hover, .inline-annotation-footer .annotation-open-global:focus-visible { color:#ead79b; }

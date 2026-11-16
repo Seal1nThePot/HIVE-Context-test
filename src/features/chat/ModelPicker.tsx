@@ -1,0 +1,30 @@
+import {useEffect,useLayoutEffect,useRef,useState,type CSSProperties} from 'react';
+import {createPortal} from 'react-dom';
+import {Check,ChevronDown,Search,Settings} from 'lucide-react';
+import {activeModelLabel,modelChoice,type Config} from '../settings/modelConfig';
+import {reasoningLevels,type ReasoningEffort} from './modelReasoning';
+import './model-picker.css';
+const recentKey='hive.modelPicker.recent';
+function readRecent():string[]{try{const v:unknown=JSON.parse(localStorage.getItem(recentKey)||'[]');return Array.isArray(v)?v.filter((x):x is string=>typeof x==='string').slice(0,8):[];}catch{return [];}}
+export default function ModelPicker({config,disabled,onModelChange,reasoningEffort='default',onReasoningChange}:{config:Config;disabled:boolean;onModelChange:(choice:string)=>void;reasoningEffort?:ReasoningEffort;onReasoningChange?:(effort:ReasoningEffort)=>void}){
+ const [open,setOpen]=useState(false),[query,setQuery]=useState(''),[section,setSection]=useState('recent'),[recent,setRecent]=useState(readRecent),[position,setPosition]=useState<{left:number;top?:number;bottom?:number;maxHeight:number}>({left:8,top:8,maxHeight:490});
+ const trigger=useRef<HTMLButtonElement>(null),panel=useRef<HTMLDivElement>(null),search=useRef<HTMLInputElement>(null);
+ const services=config.services.filter(s=>s.enabled&&s.models.length),models=services.flatMap(service=>service.models.map(model=>({value:modelChoice({serviceId:service.id,modelId:model.id}),service,model})));
+ const current=!config.demo&&config.selection?modelChoice(config.selection):'',validCurrent=models.some(x=>x.value===current),validRecent=recent.filter(v=>models.some(x=>x.value===v));
+ const filtered=models.filter(x=>(query.trim() || (section==='recent'?validRecent.includes(x.value):x.service.id===section))&&`${x.model.id} ${x.model.name} ${x.service.name}`.toLowerCase().includes(query.trim().toLowerCase()));
+ if(section==='recent'&&!query.trim())filtered.sort((a,b)=>validRecent.indexOf(a.value)-validRecent.indexOf(b.value));
+ useLayoutEffect(()=>{if(!open)return;const update=()=>{const r=trigger.current?.getBoundingClientRect();if(r){const left=Math.max(8,Math.min(r.left,window.innerWidth-Math.min(520,window.innerWidth-16)-8));const above=Math.max(0,r.top-14),below=Math.max(0,window.innerHeight-r.bottom-14);if(above>=400||above>=below){setPosition({left,bottom:Math.max(8,window.innerHeight-r.top+6),maxHeight:Math.max(0,Math.min(490,above,window.innerHeight-16))});}else{setPosition({left,top:Math.max(8,r.bottom+6),maxHeight:Math.max(0,Math.min(490,below,window.innerHeight-16))});}}};update();window.addEventListener('resize',update);window.addEventListener('scroll',update,true);search.current?.focus();return()=>{window.removeEventListener('resize',update);window.removeEventListener('scroll',update,true);};},[open]);
+ useEffect(()=>{if(!open)return;const outside=(e:PointerEvent)=>{if(!panel.current?.contains(e.target as Node)&&!trigger.current?.contains(e.target as Node))setOpen(false);};const escape=(e:KeyboardEvent)=>{if(e.key==='Escape'){setOpen(false);trigger.current?.focus();}};document.addEventListener('pointerdown',outside);document.addEventListener('keydown',escape);return()=>{document.removeEventListener('pointerdown',outside);document.removeEventListener('keydown',escape);};},[open]);
+ const settings=()=>{setOpen(false);onModelChange('settings');};
+ const choose=(value:string)=>{const next=[value,...validRecent.filter(x=>x!==value)].slice(0,8);setRecent(next);try{localStorage.setItem(recentKey,JSON.stringify(next));}catch{}onModelChange(value);setOpen(false);};
+ return <><button ref={trigger} type="button" className="model-picker-trigger" title={validCurrent?activeModelLabel(config):'选择模型'} aria-haspopup="dialog" aria-expanded={open} disabled={disabled} onClick={()=>{setOpen(!open);setQuery('');}}>选择模型 <ChevronDown size={13}/></button>
+ {open&&createPortal(<div ref={panel} className="model-picker" style={{left:position.left,top:position.top,bottom:position.bottom,maxHeight:position.maxHeight}} role="dialog" aria-label="选择模型">
+ <div className="model-picker-header"><div className="model-picker-search"><Search size={16}/><input ref={search} aria-label="搜索模型" placeholder="搜索模型" value={query} onChange={e=>setQuery(e.target.value)}/></div><button type="button" className="model-picker-settings" title="模型设置" aria-label="模型设置" onClick={settings}><Settings size={17}/></button></div>
+ <div className="model-picker-body"><nav className="model-picker-nav" aria-label="模型服务"><button type="button" className={section==='recent'?'active':''} onClick={()=>setSection('recent')}>最近使用</button>{services.map(s=><button type="button" key={s.id} className={section===s.id?'active':''} onClick={()=>setSection(s.id)}>{s.name}</button>)}</nav><div className="model-picker-list">{filtered.length?filtered.map(x=><button type="button" key={x.value} className="model-picker-item" onClick={()=>choose(x.value)}><span><strong>{x.model.name}</strong><small>{x.service.name}</small></span>{current===x.value&&<Check size={16} aria-label="当前模型"/>}</button>):<div className="model-picker-empty">{models.length?(query?'没有找到匹配的模型':'暂无最近使用的模型，请从左侧选择服务'):<>暂无可用模型 <button type="button" onClick={settings}>前往模型设置</button></>}</div>}</div></div>
+ <div className="model-picker-reasoning"><div><span>推理强度</span><span>{reasoningLevels.find(x=>x.value===reasoningEffort)?.label??'默认'}</span></div><div className="model-picker-range" style={{'--reasoning-progress': `${Math.max(0,reasoningLevels.findIndex(x=>x.value===reasoningEffort))*25}%`} as CSSProperties}><input type="range" aria-label="推理强度" min="0" max="4" step="1" value={Math.max(0,reasoningLevels.findIndex(x=>x.value===reasoningEffort))} disabled={!validCurrent||!onReasoningChange} onChange={e=>onReasoningChange?.(reasoningLevels[Number(e.target.value)].value)}/><div className="model-picker-dots" aria-hidden="true">{reasoningLevels.map(x=><span key={x.value}/>)}</div></div><div className="model-picker-ticks" aria-hidden="true">{reasoningLevels.map(x=><span key={x.value}>{x.label}</span>)}</div></div>
+ </div>,document.body)}</>;
+}
+
+
+
+

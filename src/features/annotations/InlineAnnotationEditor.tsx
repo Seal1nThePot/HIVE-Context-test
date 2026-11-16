@@ -1,0 +1,245 @@
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
+import type { EditorView } from "@codemirror/view";
+import { Check, Send } from "lucide-react";
+import "./annotation-bubble.css";
+import type { AnnotationSource, TextAnnotation } from "./annotations";
+export function clampAnnotationPosition(value:{x:number;y:number},width:number,height:number,viewportWidth:number,viewportHeight:number){
+  return {x:Math.max(8,Math.min(value.x,Math.max(8,viewportWidth-width-8))),y:Math.max(8,Math.min(value.y,Math.max(8,viewportHeight-height-8)))};
+}
+export type ScreenRect={left:number;top:number;right:number;bottom:number};
+export function placeAnnotationWindow(anchor:{x:number;y:number},target:ScreenRect,width:number,height:number,vw:number,vh:number){
+  const gap=5, margin=8;
+  const regions=[{x:margin,y:Math.max(margin,target.bottom+gap),w:vw-2*margin,h:vh-margin-Math.max(margin,target.bottom+gap)},
+    {x:margin,y:margin,w:vw-2*margin,h:Math.min(vh-margin,target.top-gap)-margin},
+    {x:Math.max(margin,target.right+gap),y:margin,w:vw-margin-Math.max(margin,target.right+gap),h:vh-2*margin},
+    {x:margin,y:margin,w:Math.min(vw-margin,target.left-gap)-margin,h:vh-2*margin}];
+  const viable=regions.filter(r=>r.w>0&&r.h>0);const region=viable.find(r=>r.w>=width&&r.h>=height)||viable.sort((a,b)=>Math.min(b.w,width)*Math.min(b.h,height)-Math.min(a.w,width)*Math.min(a.h,height))[0];
+  if(!region)return {x:margin,y:margin,width:Math.max(1,vw-2*margin),height:Math.max(1,vh-2*margin)};
+  const w=Math.min(width,region.w),h=Math.min(height,region.h);
+  return {x:Math.max(region.x,Math.min(anchor.x,region.x+region.w-w)),y:Math.max(region.y,Math.min(anchor.y+29,region.y+region.h-h)),width:w,height:h};
+}
+export function tableAnnotationIds(element:HTMLElement):string[] {
+  try {const ids=JSON.parse(element.dataset.tableAnnotationIds||'[]');return Array.isArray(ids)?ids.filter((id):id is string=>typeof id==='string'):[];}catch{return [];}
+}
+export function tableBatchIds(item:TextAnnotation,items:TextAnnotation[],editor:EditorView|null,groups:Map<string,string[]>):string[] {
+  if(!editor)return [item.id];
+  const cells=[...editor.dom.querySelectorAll<HTMLElement>('[data-table-annotation-ids]')];
+  const table=cells.find(cell=>tableAnnotationIds(cell).includes(item.id))?.closest('[data-table-widget]');
+  if(!table)return [item.id];
+  const present=new Set(cells.filter(cell=>cell.closest('[data-table-widget]')===table).flatMap(tableAnnotationIds));
+  const group=groups.get(item.id)||items.filter(value=>value.source===item.source&&value.file===item.file&&value.createdAt===item.createdAt).map(value=>value.id);
+  return group.filter(id=>present.has(id)&&items.some(value=>value.id===id));
+}
+export type InlineAnnotationRequest = {
+  id: string;
+  ids?: string[];
+  nonce: string;
+  focus?: boolean;
+};
+export default function InlineAnnotationEditor({
+  items,
+  request,
+  editorFor,
+  onEdit,
+  onSend,
+  onOpenGlobal,
+  saving,
+  busy,
+  toolActive=false,
+  bubblePlacement="right",
+}: {
+  items: TextAnnotation[];
+  request: InlineAnnotationRequest | null;
+  editorFor: (source: AnnotationSource) => EditorView | null;
+  onEdit: (id: string, note: string) => void;
+  onSend: (ids: string[]) => void;
+  onOpenGlobal: () => void;
+  saving: boolean;
+  busy: boolean;
+  toolActive?:boolean;
+  bubblePlacement?:"left"|"right"|"above"|"below";
+}) {
+  const [shown, setShown] = useState<{
+      id: string;
+      ids: string[];
+      pinned: boolean;
+      focus: boolean;
+    } | null>(null),
+    [position, setPosition] = useState({ x: 12, y: 180 });
+  const box = useRef<HTMLDivElement>(null);
+  const [hovered, setHovered] = useState<string|null>(null);
+  const [bubblePosition, setBubblePosition] = useState({x:0,y:0});
+  const hoverTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
+  const groups=useRef(new Map<string,string[]>());
+  const hoveredCell=useRef<HTMLElement|null>(null);
+  const outlined=useRef<HTMLElement[]>([]);
+  const clearOutline=()=>{for(const cell of outlined.current)cell.classList.remove('cm-table-annotation-top','cm-table-annotation-right','cm-table-annotation-bottom','cm-table-annotation-left');outlined.current=[];};
+  useEffect(()=>()=>clearOutline(),[]);
+  useEffect(()=>{setChoices([]);if(toolActive){setHovered(null);setShown(null);clearOutline();}},[toolActive]);
+  useEffect(()=>{if(request){const ids=request.ids?.length?request.ids:[request.id];if(ids.length>1)for(const id of ids)groups.current.set(id,ids);setShown({id:request.id,ids,pinned:true,focus:request.focus !== false});}else setShown(null);},[request]);
+  useEffect(()=>{
+    const over=(event:PointerEvent)=>{
+      const target=event.target as Element;
+      if(toolActive&&!target.closest('[data-table-widget]'))return;
+      if(target.closest('.annotation-bubble,.annotation-bubble-choices,.inline-annotation-editor')) { if(hoverTimer.current)clearTimeout(hoverTimer.current); return; }
+      const cell=target.closest<HTMLElement>('[data-table-annotation-ids]');
+      const mark=target.closest<HTMLElement>('[data-annotation-id]');
+      hoveredCell.current=cell;
+      const id=cell ? tableAnnotationIds(cell)[0] : mark?.dataset.annotationId;
+      if(id){if(hoverTimer.current)clearTimeout(hoverTimer.current);setHovered(id);}
+      else {if(hoverTimer.current)clearTimeout(hoverTimer.current);hoverTimer.current=setTimeout(()=>setHovered(null),350);}
+    };
+    const focus=(event:FocusEvent)=>{const target=event.target as Element,cell=target.closest<HTMLElement>('[data-table-annotation-ids]'),mark=target.closest<HTMLElement>('[data-annotation-id]');const id=cell?tableAnnotationIds(cell)[0]:mark?.dataset.annotationId;if(id&&(!toolActive||cell))setHovered(id);};
+    const open=(event:Event)=>{const id=(event as CustomEvent<{id:string}>).detail?.id;if(id&&!toolActive)setShown(current=>current?.id===id?null:{id,ids:[id],pinned:true,focus:false});};
+    document.addEventListener('hive:open-annotation',open);document.addEventListener('pointerover',over);document.addEventListener('focusin',focus);
+    return()=>{document.removeEventListener('hive:open-annotation',open);document.removeEventListener('pointerover',over);document.removeEventListener('focusin',focus);if(hoverTimer.current)clearTimeout(hoverTimer.current);};
+  },[toolActive]);
+  const bubbleItem=items.find(value=>value.id===hovered);
+  const [choices,setChoices]=useState<string[]>([]);
+  const [bubbles,setBubbles]=useState<{id:string;ids:string[];candidateIds:string[];source:AnnotationSource;file:string;x:number;y:number;target:ScreenRect}[]>([]);
+  function measureAllBubbles(){
+    const result:typeof bubbles=[],seen=new Set<string>();
+    for(const item of items){
+      if(item.stale)continue;const editor=editorFor(item.source);if(!editor||!editor.dom.isConnected||editor.dom.closest('[inert]')||!editor.dom.getClientRects().length)continue;
+      const cells=[...editor.dom.querySelectorAll<HTMLElement>('[data-table-annotation-ids]')],ownCell=cells.find(cell=>tableAnnotationIds(cell).includes(item.id));
+      const ids=ownCell?tableBatchIds(item,items,editor,groups.current):[item.id],key=ids.slice().sort().join('\0');if(!ids.length||seen.has(key))continue;seen.add(key);
+      const table=ownCell?.closest('[data-table-widget]');
+      const rects=ownCell?cells.filter(cell=>cell.closest('[data-table-widget]')===table&&tableAnnotationIds(cell).some(id=>ids.includes(id))).flatMap(cell=>[...cell.getClientRects()]):[...editor.dom.querySelectorAll<HTMLElement>('[data-annotation-id]')].filter(mark=>mark.dataset.annotationId===item.id).flatMap(mark=>[...mark.getClientRects()]);
+      const clip=editor.scrollDOM.getBoundingClientRect();const visible=rects.filter(r=>r.width>0&&r.height>0&&r.right>Math.max(0,clip.left)&&r.left<Math.min(window.innerWidth,clip.right)&&r.bottom>Math.max(0,clip.top)&&r.top<Math.min(window.innerHeight,clip.bottom));if(!visible.length)continue;
+      const target={left:Math.min(...visible.map(r=>r.left)),top:Math.min(...visible.map(r=>r.top)),right:Math.max(...visible.map(r=>r.right)),bottom:Math.max(...visible.map(r=>r.bottom))};
+      let x=target.right+4,y=(target.top+target.bottom-24)/2;if(bubblePlacement==='left')x=target.left-28;if(bubblePlacement==='above'){x=(target.left+target.right-24)/2;y=target.top-28;}if(bubblePlacement==='below'){x=(target.left+target.right-24)/2;y=target.bottom+4;}
+      const same=!ownCell&&result.find(b=>b.source===item.source&&b.file===item.file&&b.target.left===target.left&&b.target.top===target.top&&b.target.right===target.right&&b.target.bottom===target.bottom);
+      if(same)same.candidateIds.push(item.id);
+      else result.push({id:item.id,ids,candidateIds:[item.id],source:item.source,file:item.file,x:Math.max(2,Math.min(window.innerWidth-26,x)),y:Math.max(2,Math.min(window.innerHeight-26,y)),target});
+    }
+    setBubbles(old=>JSON.stringify(old)===JSON.stringify(result)?old:result);
+  }
+  useLayoutEffect(()=>{measureAllBubbles();});
+  useEffect(()=>{let frame=0;const schedule=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(measureAllBubbles);};
+    const observer=new MutationObserver(schedule);for(const source of ['document','scratch'] as const){const editor=editorFor(source);if(editor)observer.observe(editor.dom,{subtree:true,childList:true,attributes:true,attributeFilter:['data-annotation-id','data-table-annotation-ids']});}
+    window.addEventListener('scroll',measureAllBubbles,true);window.addEventListener('resize',measureAllBubbles);return()=>{observer.disconnect();cancelAnimationFrame(frame);window.removeEventListener('scroll',measureAllBubbles,true);window.removeEventListener('resize',measureAllBubbles);};},[items,bubblePlacement]);
+  useEffect(()=>{setChoices([]);},[hovered]);
+  function measureBubble(){
+    if(!bubbleItem){clearOutline();return;}
+    const editor=editorFor(bubbleItem.source);if(!editor || !editor.dom.isConnected || editor.dom.closest('[inert]') || !editor.dom.getClientRects().length){clearOutline();return;}
+    const allTableCells=[...editor.dom.querySelectorAll<HTMLElement>('[data-table-annotation-ids]')];
+    const anchorCell=allTableCells.find(cell=>tableAnnotationIds(cell).includes(bubbleItem.id));
+    const anchorTable=anchorCell?.closest('[data-table-widget]');
+    const idsInTable=new Set(allTableCells.filter(cell=>cell.closest('[data-table-widget]')===anchorTable).flatMap(tableAnnotationIds));
+    const group=anchorTable?(groups.current.get(bubbleItem.id)||items.filter(value=>value.source===bubbleItem.source&&value.file===bubbleItem.file&&value.createdAt===bubbleItem.createdAt&&idsInTable.has(value.id)).map(value=>value.id)):[bubbleItem.id];
+    const tableCells=[...editor.dom.querySelectorAll<HTMLElement>('[data-table-annotation-ids]')].filter(el=>tableAnnotationIds(el).some(id=>group.includes(id)));
+    const marks=[...editor.dom.querySelectorAll<HTMLElement>('[data-annotation-id]')].filter(el=>el.dataset.annotationId===bubbleItem.id);
+    const mark=tableCells.find(el=>el.matches(':hover'))||tableCells.find(el=>el.contains(document.activeElement))||tableCells[0]||marks.find(el=>el.matches(':hover'))||marks.find(el=>el===document.activeElement)||marks[0];if(!mark || !mark.isConnected || !mark.getClientRects().length){clearOutline();return;}
+    const table=mark.closest<HTMLElement>('[data-table-widget]');
+    let rect:DOMRect;
+    if(table){
+      const cells=tableCells.filter(cell=>table.contains(cell)&&cell.getClientRects().length);
+      const rects=cells.map(cell=>cell.getBoundingClientRect());
+      const left=Math.min(...rects.map(r=>r.left)),top=Math.min(...rects.map(r=>r.top)),right=Math.max(...rects.map(r=>r.right)),bottom=Math.max(...rects.map(r=>r.bottom));
+      rect=rects.length?new DOMRect(left,top,right-left,bottom-top):table.getBoundingClientRect();
+      clearOutline();
+      cells.forEach((cell,index)=>{const r=rects[index],near=(a:number,b:number)=>Math.abs(a-b)<1;
+        if(near(r.top,top))cell.classList.add('cm-table-annotation-top');
+        if(near(r.right,right))cell.classList.add('cm-table-annotation-right');
+        if(near(r.bottom,bottom))cell.classList.add('cm-table-annotation-bottom');
+        if(near(r.left,left))cell.classList.add('cm-table-annotation-left');
+      });outlined.current=cells;
+    }
+    else clearOutline();
+  }
+  useLayoutEffect(()=>{measureBubble();});
+  useEffect(()=>{if(hovered&&!items.some(value=>value.id===hovered))setHovered(null);if(shown&&!items.some(value=>value.id===shown.id))setShown(null);},[items,hovered,shown]);
+  useEffect(()=>{window.addEventListener('scroll',measureBubble,true);window.addEventListener('resize',measureBubble);return()=>{window.removeEventListener('scroll',measureBubble,true);window.removeEventListener('resize',measureBubble);};},[bubbleItem,bubblePlacement]);
+  function openBubble(id:string){
+    const bubbleItem=items.find(item=>item.id===id);if(!bubbleItem)return;
+    const clicked=bubbles.find(b=>b.id===id);if(clicked){setBubblePosition({x:clicked.x,y:clicked.y});}
+    const editor=editorFor(bubbleItem.source);
+    const cells=editor?[...editor.dom.querySelectorAll<HTMLElement>('[data-table-annotation-ids]')]:[];
+    const cell=cells.find(el=>el===hoveredCell.current&&tableAnnotationIds(el).includes(bubbleItem.id))||cells.find(el=>el.contains(document.activeElement)&&tableAnnotationIds(el).includes(bubbleItem.id))||cells.find(el=>tableAnnotationIds(el).includes(bubbleItem.id));
+    const currentBatch=tableBatchIds(bubbleItem,items,editor,groups.current);
+    if(shown && shown.ids.some(id=>currentBatch.includes(id)||clicked?.candidateIds.includes(id))){setShown(null);setChoices([]);return;}
+    const ids=cell?tableAnnotationIds(cell).filter(id=>items.some(item=>item.id===id)):(clicked?.candidateIds||[]);
+    const representatives=ids.filter((id,index)=>{const item=items.find(value=>value.id===id)!;return !ids.slice(0,index).some(other=>tableBatchIds(item,items,editor,groups.current).includes(other));});
+    if(representatives.length>1){setChoices(representatives);return;}
+    setChoices([]);setShown(current=>current?.id===bubbleItem.id?null:{id:bubbleItem.id,ids:tableBatchIds(bubbleItem,items,editor,groups.current),pinned:true,focus:false});
+  }
+  const item = items.find((value) => value.id === shown?.id);
+  const [windowLimit,setWindowLimitState]=useState({width:360,height:window.innerHeight-16});
+  const setWindowLimit=(next:{width:number;height:number})=>setWindowLimitState(old=>old.width===next.width&&old.height===next.height?old:next);
+  const moved=useRef(false), previousShown=useRef<string|null>(null);
+  const drag=useRef<{pointer:number;startX:number;startY:number;origin:{x:number;y:number};wasMoved:boolean;element:HTMLElement}|null>(null);
+  const clampPosition=(value:{x:number;y:number})=>{
+    const bounds=box.current?.getBoundingClientRect(),width=bounds?.width||360,height=bounds?.height||180;
+    return clampAnnotationPosition(value,width,height,window.innerWidth,window.innerHeight);
+  };
+  const movePosition=(value:{x:number;y:number})=>{const next=clampPosition(value);setPosition(old=>Math.abs(old.x-next.x)<0.5&&Math.abs(old.y-next.y)<0.5?old:next);};
+  function measure() {
+    if(!shown||!item)return;
+    if(moved.current){setPosition(old=>{const next=clampPosition(old);return old.x===next.x&&old.y===next.y?old:next;});return;}
+    const editor=editorFor(item.source);if(!editor||!editor.dom.isConnected)return;
+    const active=bubbles.find(b=>b.ids.some(id=>shown.ids.includes(id))||b.candidateIds.some(id=>shown.ids.includes(id)));
+    if(active){const rect=box.current?.getBoundingClientRect(),placed=placeAnnotationWindow(active,active.target,rect?.width||360,rect?.height||180,window.innerWidth,window.innerHeight);setWindowLimit({width:placed.width,height:placed.height});setPosition(old=>old.x===placed.x&&old.y===placed.y?old:{x:placed.x,y:placed.y});return;}
+    const point=editor.coordsAtPos(Math.min(item.from,editor.state.doc.length)),content=editor.contentDOM.getBoundingClientRect();
+    const target=point?{left:point.left,right:point.right,top:point.top,bottom:point.bottom}:content;
+    const rect=box.current?.getBoundingClientRect(),placed=placeAnnotationWindow({x:target.right+4,y:target.top},target,rect?.width||360,rect?.height||180,window.innerWidth,window.innerHeight);
+    setWindowLimit({width:placed.width,height:placed.height});setPosition(old=>old.x===placed.x&&old.y===placed.y?old:{x:placed.x,y:placed.y});
+  }
+  useLayoutEffect(()=>{const key=shown?shown.id+'\0'+shown.ids.join('\0'):null;if(previousShown.current!==key){previousShown.current=key;moved.current=false;}measure();});
+  useEffect(()=>{window.addEventListener('scroll',measure,true);window.addEventListener('resize',measure);return()=>{window.removeEventListener('scroll',measure,true);window.removeEventListener('resize',measure);};},[item,shown,bubbles,bubblePlacement]);
+  function endDrag(cancel:boolean){const current=drag.current;if(!current)return;drag.current=null;if(current.element.hasPointerCapture(current.pointer))current.element.releasePointerCapture(current.pointer);if(cancel){moved.current=current.wasMoved;movePosition(current.origin);}}
+  useEffect(()=>{const cancel=()=>endDrag(true),key=(event:KeyboardEvent)=>{if(event.key==='Escape'&&drag.current){event.preventDefault();event.stopImmediatePropagation();endDrag(true);}};window.addEventListener('blur',cancel);window.addEventListener('keydown',key,true);return()=>{window.removeEventListener('blur',cancel);window.removeEventListener('keydown',key,true);endDrag(true);};},[]);
+  function beginDrag(event:ReactPointerEvent<HTMLElement>){if(event.button!==0||!event.isPrimary)return;event.preventDefault();const element=event.currentTarget;drag.current={pointer:event.pointerId,startX:event.clientX,startY:event.clientY,origin:position,wasMoved:moved.current,element};moved.current=true;element.setPointerCapture(event.pointerId);}
+  function dragMove(event:ReactPointerEvent<HTMLElement>){const current=drag.current;if(!current||event.pointerId!==current.pointer)return;movePosition({x:current.origin.x+event.clientX-current.startX,y:current.origin.y+event.clientY-current.startY});}
+  return createPortal(
+    <>
+    {bubbles.map(bubble=><button key={bubble.id} type="button" className="annotation-bubble" data-annotation-key={bubble.id} title={`标注：${items.find(item=>item.id===bubble.id)?.original.slice(0,30)||''}`} aria-label="打开标注要求" aria-expanded={!!shown&&shown.ids.some(id=>bubble.ids.includes(id)||bubble.candidateIds.includes(id))} style={{left:bubble.x,top:bubble.y}} onPointerEnter={()=>{setHovered(bubble.id);if(hoverTimer.current)clearTimeout(hoverTimer.current);}} onClick={()=>openBubble(bubble.id)}>✎</button>)}
+    {choices.length>0 && <div className="annotation-bubble-choices" role="menu" style={{left:Math.max(2,Math.min(window.innerWidth-130,bubblePosition.x)),top:Math.max(2,Math.min(window.innerHeight-Math.min(choices.length*34+8,window.innerHeight-4)-2,bubblePosition.y+28)),maxHeight:"calc(100vh - 8px)",overflowY:"auto"}}>{choices.map((id,index)=><button type="button" role="menuitem" key={id} onClick={()=>{const selected=items.find(value=>value.id===id);if(selected)setShown({id,ids:tableBatchIds(selected,items,editorFor(selected.source),groups.current),pinned:true,focus:false});setChoices([]);}}>标注 {index+1}</button>)}</div>}
+    {shown && item && <div
+      ref={box}
+      className="inline-annotation-editor"
+      role="dialog"
+      aria-label="原位标注要求"
+      onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();setShown(null);}}}
+      style={{ left: position.x, top: position.y, maxWidth:windowLimit.width, maxHeight:windowLimit.height, overflowY:"auto" }}
+    >
+      <div className="annotation-drag-handle" role="button" tabIndex={0} aria-label="拖动标注要求窗口" onPointerDown={beginDrag} onPointerMove={dragMove} onPointerUp={event=>{if(drag.current?.pointer===event.pointerId)endDrag(false);}} onPointerCancel={()=>endDrag(true)} onLostPointerCapture={()=>{if(drag.current)endDrag(true);}} onKeyDown={event=>{const delta:Record<string,[number,number]>={ArrowLeft:[-10,0],ArrowRight:[10,0],ArrowUp:[0,-10],ArrowDown:[0,10]};if(delta[event.key]){event.preventDefault();moved.current=true;movePosition({x:position.x+delta[event.key][0],y:position.y+delta[event.key][1]});}}}/>
+        <textarea
+          key={shown.id}
+          aria-label="这处文字的标注要求"
+          autoFocus={shown.focus}
+          value={item.note}
+          onChange={(event) => {const live=new Set(items.map(value=>value.id));for(const id of shown.ids)if(live.has(id))onEdit(id,event.target.value);}}
+          placeholder="直接在这里写疑问、修改要求或想讨论的方向…"
+        />
+      {item.stale && (
+        <p className="annotation-warning">
+          原文已变化，当前显示上次位置附近。重新选择文字后，可从标注标题的右键菜单更新位置。
+        </p>
+      )}
+      <div className="inline-annotation-footer">
+        <button type="button" className="annotation-open-global" aria-label="打开全局标注栏" onClick={()=>{setShown(null);onOpenGlobal();}}>全局标注</button>
+        <span className="annotation-save-status" role="status">{saving ? "正在保存…" : "已自动保留要求"}</span>
+        <button className="text-button" onClick={() => setShown(null)}>
+          <Check size={12} />
+          完成
+        </button>
+        <button
+          className="gold-button"
+          disabled={busy || item.stale}
+          onClick={() => {
+            setShown(null);
+            onSend(shown.ids.filter(id=>items.some(value=>value.id===id)));
+          }}
+        >
+          <Send size={12} />
+          发送
+        </button>
+      </div>
+    </div>}
+    </>,
+    document.body,
+  );
+}
+
+

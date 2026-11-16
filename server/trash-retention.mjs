@@ -1,0 +1,66 @@
+import {promises as fs,createReadStream} from 'node:fs';
+import path from 'node:path';
+import {createHash,randomUUID} from 'node:crypto';
+import {removeMetadata} from './metadata-paths.mjs';
+
+const conflict=()=>Object.assign(new Error('回收站内容已变化或预览已过期，请重新预览并确认。'),{status:409});
+const invalid=()=>Object.assign(new Error('回收站记录或数据不可用。'),{status:409});
+const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+const absent=async p=>{try{return await fs.lstat(p);}catch(e){if(e.code==='ENOENT')return null;throw e;}};
+export function trashRetention({root,state,files},now=Date.now) {
+  const trash=path.resolve(root,'.hive-trash'), tokens=new Map();
+  async function rootCheck(){const s=await absent(trash);if(!s){await fs.mkdir(trash);return rootCheck();}if(s.isSymbolicLink()||!s.isDirectory())throw invalid();return s;}
+  function inside(target){const rel=path.relative(trash,path.resolve(target));if(!rel||rel.startsWith('..'+path.sep)||rel==='..'||path.isAbsolute(rel))throw invalid();}
+  const identity=s=>JSON.stringify([s.dev,s.ino,s.mode]);
+  async function tree(target,hash,plan){
+    inside(target);const s=await fs.lstat(target);if(s.isSymbolicLink()||(!s.isFile()&&!s.isDirectory()))throw invalid();
+    const relative=path.relative(trash,target),type=s.isDirectory()?'folder':'file';
+    const node={relative,type,identity:identity(s)};
+    hash.update(JSON.stringify([relative,s.dev,s.ino,s.mode,s.size,s.mtimeMs,s.ctimeMs]));
+    if(type==='folder')for(const n of (await fs.readdir(target)).sort())await tree(path.join(target,n),hash,plan);
+    else {const content=createHash('sha256');for await(const chunk of createReadStream(target)){hash.update(chunk);content.update(chunk);}node.fingerprint=content.digest('hex');node.stat=JSON.stringify([s.size,s.mtimeMs,s.ctimeMs]);}
+    plan.push(node);
+  }
+  async function deletePlan(entry){
+    let removed=0;const planned=new Map(entry.plan.map(node=>[node.relative,node]));
+    try {
+      for(const node of entry.plan){
+        await rootCheck();const target=path.resolve(trash,node.relative);inside(target);
+        const relativeParts=node.relative.split(path.sep);let current=trash;
+        for(let i=0;i<relativeParts.length-1;i++){current=path.join(current,relativeParts[i]);const expected=planned.get(path.relative(trash,current));const stat=await fs.lstat(current);if(!expected||expected.type!=='folder'||stat.isSymbolicLink()||!stat.isDirectory()||identity(stat)!==expected.identity)throw conflict();}
+        const stat=await fs.lstat(target);if(stat.isSymbolicLink()||identity(stat)!==node.identity||(node.type==='folder'?!stat.isDirectory():!stat.isFile()))throw conflict();
+        if(node.type==='file'){
+          if(JSON.stringify([stat.size,stat.mtimeMs,stat.ctimeMs])!==node.stat)throw conflict();
+          const hash=createHash('sha256');for await(const chunk of createReadStream(target))hash.update(chunk);if(hash.digest('hex')!==node.fingerprint)throw conflict();
+          const final=await fs.lstat(target);if(final.isSymbolicLink()||identity(final)!==node.identity||JSON.stringify([final.size,final.mtimeMs,final.ctimeMs])!==node.stat)throw conflict();
+          await fs.unlink(target);
+        }else await fs.rmdir(target);
+        removed++;
+      }
+    }catch(error){error.partialDataDeleted=removed>0;throw error;}
+  }
+  async function manifestInfo(id){
+    if(!uuid.test(id))throw invalid();await rootCheck();const manifest=path.join(trash,id+'.json'),data=path.join(trash,id);inside(manifest);inside(data);
+    const stat=await fs.lstat(manifest);if(stat.isSymbolicLink()||!stat.isFile())throw invalid();
+    const raw=await fs.readFile(manifest,'utf8');let record;try{record=JSON.parse(raw);}catch{throw invalid();}
+    if(record.id!==id||!['file','folder'].includes(record.type)||typeof record.path!=='string'||!record.path||record.path.includes('\\')||record.path.split('/').some(p=>!p||p==='..'||p.startsWith('.')||/[:*?"<>|\0]/.test(p))||!Number.isFinite(Date.parse(record.deletedAt))||typeof record.deletedAt!=='string'||(record.type==='file'&&!/\.md$/i.test(record.path)))throw invalid();
+    const dataStat=await absent(data);
+    if(dataStat&&(dataStat.isSymbolicLink()||(record.type==='file'&&!dataStat.isFile())||(record.type==='folder'&&!dataStat.isDirectory())))throw invalid();
+    return {item:{id,path:record.path,type:record.type,deletedAt:record.deletedAt,...(!dataStat?{missing:true}:{})},manifestFingerprint:JSON.stringify([stat.dev,stat.ino,stat.mode,stat.size,stat.mtimeMs,stat.ctimeMs,raw]),data};
+  }
+  async function snapshot(id){
+    const info=await manifestInfo(id),hash=createHash('sha256'),plan=[];hash.update(info.manifestFingerprint);
+    if(!info.item.missing)await tree(info.data,hash,plan);else hash.update('missing');
+    return {item:info.item,fingerprint:hash.digest('hex'),plan};
+  }
+  async function records(){await rootCheck();const result=[];for(const name of await fs.readdir(trash)){if(!/\.json$/i.test(name))continue;const id=name.slice(0,-5);if(!uuid.test(id))continue;result.push(await manifestInfo(id));}return result;}
+  async function list(){return (await records()).map(x=>x.item).sort((a,b)=>b.deletedAt.localeCompare(a.deletedAt));}
+  async function preview(days){return files.transaction(async()=>{if(![7,15,30,90].includes(days))throw Object.assign(new Error('清理天数无效。'),{status:400});const time=now(),cutoff=time-days*86400000, candidates=(await records()).filter(x=>Date.parse(x.item.deletedAt)<cutoff),selected=[];for(const candidate of candidates){const entry=await snapshot(candidate.item.id);if(Date.parse(entry.item.deletedAt)>=cutoff||JSON.stringify(entry.item)!==JSON.stringify(candidate.item))throw conflict();selected.push(entry);}for(const [key,value] of tokens)if(time>=value.expiresAt)tokens.delete(key);while(tokens.size>=32)tokens.delete(tokens.keys().next().value);const token=randomUUID(),expiresAt=time+300000;tokens.set(token,{selected,expiresAt});return {token,days,cutoff:new Date(cutoff).toISOString(),expiresAt:new Date(expiresAt).toISOString(),items:selected.map(x=>x.item),count:selected.length};});}
+  async function purge(token){return files.transaction(async()=>{const saved=tokens.get(token);tokens.delete(token);if(!saved||now()>=saved.expiresAt)throw conflict();
+    try{for(const entry of saved.selected){const latest=await snapshot(entry.item.id);if(latest.fingerprint!==entry.fingerprint)throw conflict();}}catch{throw conflict();}
+    const deletedIds=[],failed=[];
+    for(const entry of saved.selected){const {id}=entry.item;let dataDeleted=false;try{const latest=await snapshot(id);if(latest.fingerprint!==entry.fingerprint)throw conflict();if(!entry.item.missing)await deletePlan(entry);dataDeleted=true;await removeMetadata(state,'@trash/'+id);await fs.unlink(path.join(trash,id+'.json'));deletedIds.push(id);}catch(error){const detail=dataDeleted?'内容已永久删除，但记录或元数据清理失败：'+error.message:error.partialDataDeleted?'文件夹内容可能已部分永久删除，剩余内容和记录已保留：'+error.message:error.message;failed.push({id,path:entry.item.path,error:detail,...(dataDeleted?{dataDeleted:true}:{}),...(error.partialDataDeleted?{partialDataDeleted:true}:{})});}}
+
+    return {deletedIds,failed};});}
+  return {list,preview,purge};
+}

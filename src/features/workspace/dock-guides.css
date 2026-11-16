@@ -1,0 +1,13 @@
+.dock-guides-overlay {position:fixed;inset:0;z-index:11000;pointer-events:none;}
+.dock-guide-region {position:absolute;box-sizing:border-box;border:1px dashed #c6bc784d;background:#bcb37606;pointer-events:none;}
+.dock-guide {position:absolute;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;box-sizing:border-box;border:1px solid #9fa96b;border-radius:5px;background:#263421f2;color:#e1dbaf;box-shadow:0 3px 14px #0008;pointer-events:none;overflow:hidden;}
+.dock-guide small {font-size:calc(8px * var(--text-scale,1));line-height:1.1;}
+.dock-guide.outer-guide {background:#343d28f5;border-color:#c5b96e;}
+.dock-guide.stack-guide {border-color:#7d937b;background:#28382df5;}
+.dock-guide.ready {border:2px solid #f3e0a2;background:#687144f5;color:#fff8d9;}
+.intentional-dock-preview {border-radius:3px;}
+.dock-preview-tabs {display:flex;align-items:stretch;gap:3px;height:calc(28px * var(--ui-scale,1));padding:2px 4px 0;box-sizing:border-box;overflow:hidden;background:#20291de8;border-bottom:1px solid #c4ae66;}
+.dock-preview-tabs > span {min-width:0;max-width:40%;padding:3px 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:#445033b8;color:#c9cea9;font-size:calc(10px * var(--text-scale,1));}
+.dock-preview-tabs > .incoming-tab {background:#b9a05b55;border-bottom:2px solid #e4cf8d;color:#fff0bd;}
+.stack-dock-preview > span {top:calc(28px * var(--ui-scale,1) + 12px);}
+.dock-drag-hint {position:absolute;left:50%;bottom:calc(90px * var(--ui-scale,1));transform:translateX(-50%);max-width:calc(100vw - 24px);box-sizing:border-box;padding:7px 13px;border:1px solid #7e8658;border-radius:5px;background:#202b1cf0;color:#e0d7aa;box-shadow:0 3px 15px #0006;font-size:calc(11px * var(--text-scale,1));text-align:center;}

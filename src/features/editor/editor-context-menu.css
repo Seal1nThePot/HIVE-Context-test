@@ -1,0 +1,11 @@
+.editor-context-menu {position:fixed;z-index:12000;box-sizing:border-box;width:max-content;min-width:210px;max-width:calc(100vw - 16px);max-height:calc(100dvh - 108px);overflow:auto;padding:5px;border:1px solid #69764d;border-radius:5px;background:#252f21;box-shadow:0 8px 28px #0008;color:#cbd5b7;}
+.editor-context-menu > button {display:flex;align-items:center;gap:9px;width:100%;padding:9px;text-align:left;font-size:calc(11px * var(--text-scale,1));border-radius:3px;white-space:nowrap;}
+.editor-context-menu > button > span {flex:1;}
+.editor-context-menu kbd {margin-left:18px;font-family:inherit;font-size:calc(9px * var(--text-scale,1));color:#8d9d7d;}
+.editor-context-menu > button:hover:not(:disabled),.editor-context-menu > button:focus-visible {outline:none;background:#b3a35d20;color:#e7d59d;}
+.editor-context-menu > button:disabled {opacity:.4;cursor:default;}
+.editor-context-menu hr {margin:4px;border:0;border-top:1px solid #48523b;}
+.editor-clipboard-toolbar {display:flex;align-items:stretch;gap:2px;}
+.editor-clipboard-toolbar button {display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-width:50px;padding:7px 5px;border-radius:3px;font-size:calc(10px * var(--text-scale,1));white-space:nowrap;}
+.editor-clipboard-toolbar button:hover:not(:disabled),.editor-clipboard-toolbar button:focus-visible {outline:none;background:#b3a35d20;color:#e7d59d;}
+.editor-clipboard-toolbar button:disabled {opacity:.4;cursor:default;}

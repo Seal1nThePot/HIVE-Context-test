@@ -1,0 +1,402 @@
+.workspace-switcher {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  min-width: 200px;
+  text-align: left;
+}
+.workspace-switcher > .folder-emblem {
+  height: 31px;
+  width: 31px;
+  background: #b6a66812;
+  border-color: #8c825038;
+  border-radius: 7px;
+  color: #c8b879;
+}
+.workspace-switcher > span:nth-child(2) {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.workspace-switcher b {
+  font-size: calc(12px * var(--text-scale, 1));
+  font-weight: 500;
+  color: #d9d7c3;
+  letter-spacing: 0.4px;
+}
+.workspace-switcher small {
+  font-size: calc(8px * var(--text-scale, 1));
+  color: #7e8a71;
+}
+.workspace-switcher > svg {
+  color: #81906e;
+  margin-left: 7px;
+}
+.annotation-entry {
+  position: relative;
+  margin-right: 3px;
+}
+.annotation-entry > small {
+  position: absolute;
+  right: -4px;
+  top: -2px;
+  min-width: 13px;
+  padding: 0 3px;
+  border-radius: 6px;
+  font-size: calc(8px * var(--text-scale, 1));
+  line-height: 13px;
+  color: #d8c78c;
+  background: #3c472e;
+  border: 1px solid #617046;
+}
+.cm-text-annotation {
+  background: #c5aa6324;
+  border-bottom: 2px solid #bfa76988;
+  border-radius: 2px;
+}
+.chat-view-tabs {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 18px;
+  border-bottom: 1px solid #333d2d;
+}
+.chat-view-tabs button {
+  height: 36px;
+  padding: 0 1px;
+  border-bottom: 2px solid transparent;
+  gap: 6px;
+  color: #7d9070;
+  font-size: calc(10px * var(--text-scale, 1));
+}
+.chat-view-tabs button[aria-selected="true"] {
+  color: #d7c48c;
+  border-bottom-color: #b6a166;
+}
+.chat-view-tabs small {
+  font-size: calc(8px * var(--text-scale, 1));
+  border: 1px solid #485a38;
+  padding: 0 4px;
+  line-height: 14px;
+  border-radius: 6px;
+}
+.conversation-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.annotation-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.annotation-list-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 13px 7px;
+  flex: none;
+}
+.annotation-list-heading > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: calc(10px * var(--text-scale, 1));
+  color: #c5bf98;
+  white-space: nowrap;
+}
+.annotation-list-heading > span small {
+  color: #7d9567;
+  font-size: calc(9px * var(--text-scale, 1));
+}
+.annotation-list-heading > button:not(.icon-button) {
+  margin-left: auto;
+  padding: 2px 0;
+  font-size: calc(8px * var(--text-scale, 1));
+  color: #93a37b;
+  white-space: nowrap;
+}
+.annotation-list-heading .icon-button {
+  height: 22px;
+  width: 22px;
+}
+.annotation-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 5px 13px 12px;
+}
+.annotation-card {
+  border: 1px solid #455536;
+  border-radius: 7px;
+  margin-bottom: 11px;
+  background: #252d20;
+  padding: 10px;
+}
+.annotation-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: calc(9px * var(--text-scale, 1));
+  margin-bottom: 7px;
+}
+.annotation-card-head label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #c6c5a9;
+  white-space: nowrap;
+}
+.annotation-card-head input {
+  accent-color: #bca566;
+  margin: 0;
+}
+.annotation-card-head > small {
+  font-size: calc(8px * var(--text-scale, 1));
+  flex: 1;
+  color: #788f65;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  text-align: right;
+}
+.annotation-card-head .icon-button {
+  width: 22px;
+  height: 22px;
+}
+.annotation-card blockquote {
+  margin: 0 0 10px;
+  padding: 6px 8px;
+  max-height: 130px;
+  overflow: auto;
+  font-size: calc(11px * var(--text-scale, 1));
+  line-height: 1.9;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #c8d3b7;
+  border-left: 2px solid #aa995f;
+  background: #131c102d;
+}
+.annotation-card > textarea {
+  display: block;
+  resize: vertical;
+  min-height: 57px;
+  height: 65px;
+  width: 100%;
+  padding: 7px 8px;
+  background: #192114;
+  border: 1px solid #485b36;
+  border-radius: 4px;
+  line-height: 1.8;
+  font-size: calc(10px * var(--text-scale, 1));
+  color: #ccd7b9;
+}
+.annotation-card > textarea::placeholder {
+  color: #6b815b;
+}
+.annotation-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+}
+.annotation-card-footer > span {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: calc(8px * var(--text-scale, 1));
+  color: #788d61;
+  margin-right: auto;
+  white-space: nowrap;
+}
+.annotation-card-footer > button {
+  font-size: calc(8px * var(--text-scale, 1));
+  gap: 3px;
+  padding: 4px 2px;
+  color: #a2b781;
+}
+.annotation-card-footer > .icon-button {
+  width: 20px;
+  height: 22px;
+  padding: 0;
+}
+.annotation-card-footer > .annotation-send-one {
+  padding: 4px 6px;
+  border: 1px solid #5c6f41;
+  border-radius: 4px;
+  color: #c4bd87;
+  background: #343d26;
+}
+.annotation-stale {
+  border-color: #8a7047;
+  background: #332e22;
+}
+.annotation-stale blockquote {
+  border-left-color: #ad8150;
+}
+.annotation-warning {
+  font-size: calc(9px * var(--text-scale, 1));
+  color: #c1a276;
+  line-height: 1.8;
+  margin-top: 7px;
+}
+.annotation-submit {
+  flex: none;
+  padding: 10px 13px 12px;
+  border-top: 1px solid #39472d;
+  background: #20281b;
+}
+.annotation-submit > label {
+  display: block;
+  font-size: calc(9px * var(--text-scale, 1));
+  color: #a5b58c;
+}
+.annotation-submit > label > span {
+  color: #6c8458;
+  font-size: calc(8px * var(--text-scale, 1));
+  margin-left: 4px;
+}
+.annotation-submit textarea {
+  display: block;
+  resize: vertical;
+  width: 100%;
+  height: 45px;
+  min-height: 35px;
+  border: 1px solid #445a32;
+  border-radius: 4px;
+  background: #192313;
+  padding: 6px 8px;
+  line-height: 1.7;
+  font-size: calc(9px * var(--text-scale, 1));
+  margin: 6px 0 9px;
+}
+.annotation-submit textarea::placeholder {
+  color: #6b8159;
+}
+.annotation-submit > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+.annotation-submit small {
+  font-size: calc(8px * var(--text-scale, 1));
+  line-height: 1.6;
+  color: #788f62;
+  max-width: 47%;
+}
+.annotation-submit .gold-button {
+  font-size: calc(9px * var(--text-scale, 1));
+  padding: 7px 9px;
+}
+.annotation-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 25px 16px;
+  color: #81976a;
+  min-height: 170px;
+}
+.annotation-empty > svg {
+  color: #b6a470;
+  opacity: 0.8;
+}
+.annotation-empty h3 {
+  font-size: calc(12px * var(--text-scale, 1));
+  font-weight: 500;
+  color: #b8c2a3;
+  margin: 16px 0 9px;
+}
+.annotation-empty p {
+  font-size: calc(10px * var(--text-scale, 1));
+  line-height: 1.9;
+  text-align: center;
+  color: #7f966c;
+}
+.annotation-empty kbd {
+  margin-top: 18px;
+  padding: 3px 6px;
+  border: 1px solid #475b33;
+  border-radius: 4px;
+  font-size: calc(9px * var(--text-scale, 1));
+}
+.writing-orb {
+  position: fixed;
+  z-index: 28;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 25%, #697346, #333f25 60%, #252f1c);
+  border: 1px solid #a3935b;
+  box-shadow:
+    0 5px 24px #0008,
+    inset 0 1px 3px #e0d4a338;
+  color: #dec987;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  padding: 0;
+}
+.writing-orb:hover {
+  box-shadow:
+    0 5px 30px #0009,
+    0 0 0 4px #b09c4d14;
+  color: #f1deaa;
+}
+.writing-orb:active {
+  cursor: grabbing;
+}
+.writing-orb > i {
+  position: absolute;
+  right: 1px;
+  top: 1px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d8c376;
+  border: 2px solid #303e23;
+}
+.orb-busy {
+  animation: orb-pulse 1.8s ease-in-out infinite;
+}
+@keyframes orb-pulse {
+  50% {
+    box-shadow:
+      0 5px 24px #0008,
+      0 0 0 7px #cfb45d18;
+  }
+}
+@media (max-width: 760px) {
+  .workspace-switcher {
+    min-width: 0;
+  }
+  .workspace-switcher b {
+    font-size: calc(11px * var(--text-scale, 1));
+  }
+  .workspace-switcher small {
+    display: none;
+  }
+  .workspace-switcher > .folder-emblem {
+    height: 27px;
+    width: 27px;
+  }
+  .workspace-switcher > svg {
+    margin-left: 0;
+  }
+  .chat-view-tabs {
+    padding: 0 13px;
+  }
+  .annotation-submit > div {
+    flex-wrap: wrap;
+  }
+}
