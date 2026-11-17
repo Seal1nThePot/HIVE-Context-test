@@ -5,8 +5,10 @@ import { promises as fs } from "node:fs";
 import { workspaceStore } from "./workspace.mjs";
 import { modelConfigStore } from "./model-config.mjs";
 import {imageStore,MAX_IMAGE_BYTES} from './images.mjs';
+import {importStore} from './imports.mjs';
 import {resolveReferences} from './references.mjs';
 import {reasoningOptions} from './generation-options.mjs';
+import {templateStore} from './templates.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const project = path.resolve(here, "..");
@@ -20,6 +22,7 @@ let port = Number(process.env.HIVE_PORT ?? 4317);
 await fs.mkdir(root, { recursive: true });
 const modelSettings = await modelConfigStore(local, {envKey:process.env.HIVE_API_KEY || ""});
 const spaces = await workspaceStore(local, root);
+const templates = await templateStore(process.env.HIVE_TEMPLATES_DIR || path.join(local,'templates'),path.join(project,'templates'),{sourceDirectory:process.env.HIVE_TEMPLATES_SOURCE || (!project.includes('.asar')?path.join(project,'templates'):undefined)});
 const scratchPath = "自由草稿.md";
 const app = express();
 app.disable("x-powered-by");
@@ -37,8 +40,12 @@ app.use("/api", (req, res, next) => {
   next();
 });
 app.use(express.json({ limit: "3mb" }));
+app.get('/api/templates',async(_req,res)=>res.json(await templates.list()));
+app.get('/api/templates/:id',async(req,res)=>res.json(await templates.read(req.params.id)));
+app.post('/api/templates/:id',async(req,res)=>res.json(await templates.save(req.params.id,req.body)));
+app.post('/api/templates/:id/open',async(req,res)=>res.json(await templates.open(req.params.id)));
 app.get('/api/workspace', (_req,res)=>res.json(spaces.read()));
-const workspaceRoutes = new Set(['writing-outline','annotations','scratch','outline','tree','file','folder','rename','workspace','explorer','images','references']);
+const workspaceRoutes = new Set(['writing-outline','annotations','scratch','outline','tree','file','folder','rename','workspace','explorer','images','references','import']);
 const mutationQueues=new Map();
 app.use('/api', (req,res,next)=>{
   if(!workspaceRoutes.has(req.path.split('/')[1])) return next();
@@ -150,6 +157,15 @@ app.post('/api/explorer/trash/preview',async(req,res)=>res.json(await req.worksp
 app.post('/api/explorer/trash/purge',async(req,res)=>res.json(await req.workspace.explorer.purgeTrash(req.body.token)));
 app.get('/api/explorer/search',async(req,res)=>res.json(await req.workspace.explorer.search(req.query.folder,req.query.query)));
 app.post('/api/explorer',async(req,res)=>res.json(await req.workspace.explorer.manage(req.body)));
+app.post('/api/import',express.raw({type:'application/octet-stream',limit:MAX_IMAGE_BYTES}),async(req,res)=>{
+  res.json(await importStore(req.workspace).store(req.query.name,req.body));
+});
+app.get('/api/import',async(req,res)=>res.json(await importStore(req.workspace).list()));
+app.get('/api/import/image',async(req,res)=>{
+  const image=await importStore(req.workspace).read(req.query.path);
+  res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Security-Policy',"default-src 'none'; sandbox");
+  res.type(image.mime).send(image.buffer);
+});
 app.post('/api/images',express.raw({type:'application/octet-stream',limit:MAX_IMAGE_BYTES}),async(req,res)=>{
   res.json(await imageStore(req.workspace).store(req.query.document,req.query.name,req.body));
 });
@@ -331,7 +347,7 @@ const server = app.listen(port, "127.0.0.1", () => {
   console.log(`HIVE ready: http://127.0.0.1:${port}\nDocuments: ${spaces.read().root}`);
   if (process.send) process.send({ type: 'hive-ready', port });
 });
-function shutdown() { server.close(() => process.exit(0)); server.closeAllConnections(); }
+function shutdown() { templates.close();server.close(() => process.exit(0)); server.closeAllConnections(); }
 if (process.send) {
   process.on('message', message => { if (message?.type === 'hive-shutdown') shutdown(); });
   process.on('disconnect', shutdown);

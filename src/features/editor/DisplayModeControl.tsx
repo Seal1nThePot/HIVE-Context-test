@@ -3,10 +3,13 @@ import {useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
 import {BookOpen,Check,Code2,Eye,Focus} from 'lucide-react';
 import type {DisplayMode} from './markdownDisplay';
+import {useTypography} from '../typography/typographyStore';
+import {applyTypographyPreset,isTypographyCustomized,typographyPresets,type TypographyPreset} from '../typography/typographyPreferences';
 import './display-mode.css';
 
 export default function DisplayModeControl({label,displayMode,typewriter,onDisplayMode,onTypewriter}:{label:string;displayMode:DisplayMode;typewriter:boolean;onDisplayMode:(mode:DisplayMode)=>void;onTypewriter:(enabled:boolean)=>void}){
   const document=usePanelDocument(),window=document.defaultView!;
+  const {preferences,setTypography,saveError}=useTypography();
   const [open,setOpen]=useState(false),[position,setPosition]=useState({x:0,y:0});
   const button=useRef<HTMLButtonElement>(null),menu=useRef<HTMLDivElement>(null);
   useLayoutEffect(()=>{
@@ -33,6 +36,9 @@ export default function DisplayModeControl({label,displayMode,typewriter,onDispl
     }}>
       <button type="button" role="menuitemradio" aria-checked={displayMode==='live'} onClick={()=>finish(()=>onDisplayMode('live'))}><span className="display-mode-check">{displayMode==='live'&&<Check size={12}/>}</span><Eye size={14}/>实时预览</button>
       <button type="button" role="menuitemradio" aria-checked={displayMode==='source'} onClick={()=>finish(()=>onDisplayMode('source'))}><span className="display-mode-check">{displayMode==='source'&&<Check size={12}/>}</span><Code2 size={14}/>源码模式</button>
+      <hr/><p className="display-mode-section">正文排版{isTypographyCustomized(preferences)?' · 已自定义':''}</p>
+      {(Object.keys(typographyPresets) as TypographyPreset[]).map(preset=><button key={preset} type="button" role="menuitemradio" aria-checked={preferences.preset===preset} onClick={()=>finish(()=>setTypography(applyTypographyPreset(preset)))}><span className="display-mode-check">{preferences.preset===preset&&<Check size={12}/>}</span>{typographyPresets[preset].label}</button>)}
+      {saveError&&<p role="status">{saveError}</p>}
       <hr/><button type="button" role="menuitemcheckbox" aria-checked={typewriter} onClick={()=>finish(()=>onTypewriter(!typewriter))}><span className="display-mode-check">{typewriter&&<Check size={12}/>}</span><Focus size={14}/>打字机模式</button>
     </div>,document.body)}
   </div>;

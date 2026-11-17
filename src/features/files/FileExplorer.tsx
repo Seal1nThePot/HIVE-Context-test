@@ -1,7 +1,7 @@
 import {usePanelDocument} from '../../shared/panelDocument';
 import {useEffect,useRef,useState,type Dispatch,type SetStateAction} from 'react';
 import {createPortal} from 'react-dom';
-import {ArrowDownWideNarrow,ChevronDown,ChevronRight,FileText,Folder,FolderPlus,Plus,Search,Sparkles} from 'lucide-react';
+import {ArrowDownWideNarrow,ChevronDown,ChevronRight,FileText,Folder,FolderPlus,Plus,Search,Sparkles,Upload} from 'lucide-react';
 import {flattenEntries,mapEntryPath,parentPath,readOrder,remapOrder,reorderEntry,sortEntries,sortDirection,menuActions,type Entry,type ExplorerOrder,type SortMode,type SortDirection} from './explorerState';
 import './file-explorer.css';
 import type {ReferenceSource} from '../chat/referenceSources';
@@ -10,13 +10,14 @@ import {useFileWorkspace} from './WorkspaceContext';
 export type FileAction={action:string;path?:string;parent?:string;name?:string;type?:'file'|'folder';id?:string};
 export type FileResult={path:string;from?:string;type:'file'|'folder';id?:string;deletedAt?:string};
 type Props={entries:Entry[];workspaceId:string;root:string;file:string;dirty:boolean;filter:string;setFilter:(value:string)=>void;collapsed:Set<string>;setCollapsed:Dispatch<SetStateAction<Set<string>>>;
-  onReferenceDrop?:(source:ReferenceSource)=>void;onOpen:(path:string,newTab?:boolean)=>Promise<void>;onAction:(action:FileAction)=>Promise<FileResult>;onAI:(path:string)=>void;renameRequest?:{path:string;key:string}};
+  onRefresh?:()=>Promise<void>;onReferenceDrop?:(source:ReferenceSource)=>void;onOpen:(path:string,newTab?:boolean)=>Promise<void>;onAction:(action:FileAction)=>Promise<FileResult>;onAI:(path:string)=>void;renameRequest?:{path:string;key:string}};
 type Menu={x:number;y:number;entry?:Entry;sort?:boolean};
 type Drop={path:string;where:'before'|'after'|'inside'};
-export default function FileExplorer({entries,workspaceId,root,file,dirty,filter,setFilter,collapsed,setCollapsed,onOpen,onAction,onAI,renameRequest,onReferenceDrop}:Props){
+export default function FileExplorer({entries,workspaceId,root,file,dirty,filter,setFilter,collapsed,setCollapsed,onOpen,onAction,onAI,renameRequest,onReferenceDrop,onRefresh}:Props){
   const document=usePanelDocument(),window=document.defaultView!;
   const storage='hive.explorer.v1:'+workspaceId;
   const space=useFileWorkspace();
+  const [externalDrop,setExternalDrop]=useState(false),[importStatus,setImportStatus]=useState(''),[images,setImages]=useState<{name:string;path:string}[]>([]),[preview,setPreview]=useState<{name:string;url:string}|null>(null);
   const [searchResult,setSearchResult]=useState<{scope:string;query:string;matches:{path:string;line:number|null;excerpt:string}[];truncated:boolean}|null>(null),[searching,setSearching]=useState(false);
 
   const [order,setOrder]=useState<ExplorerOrder>(()=>{try{return readOrder(localStorage.getItem(storage));}catch{return readOrder(null);}});
@@ -28,6 +29,45 @@ export default function FileExplorer({entries,workspaceId,root,file,dirty,filter
     const timer=setTimeout(()=>{void space.request('/api/explorer/search?folder='+encodeURIComponent(scope)+'&query='+encodeURIComponent(filter),{signal:controller.signal}).then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);if(alive)setSearchResult({...data,scope,query:filter});}).catch(error=>{if(alive&&error.name!=='AbortError')setError(error.message);}).finally(()=>{if(alive)setSearching(false);});},250);
     return()=>{alive=false;clearTimeout(timer);controller.abort();};
   },[scope,filter,space.request,entries]);
+  const importInput=useRef<HTMLInputElement>(null),importLease=useRef<AbortController|null>(null),currentWorkspace=useRef(workspaceId);
+  currentWorkspace.current=workspaceId;
+  useEffect(()=>{setBusy(false);return()=>{importLease.current?.abort();importLease.current=null;};},[workspaceId]);
+  async function refreshImages(valid:()=>boolean=()=>true){const response=await space.request('/api/import');const data=await response.json();if(!response.ok)throw new Error(data.error);if(valid())setImages(data);}
+  useEffect(()=>{let alive=true;void space.request('/api/import').then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);if(alive)setImages(data);}).catch(error=>{if(alive)setError(error.message);});return()=>{alive=false;};},[space.request]);
+  useEffect(()=>()=>{if(preview)URL.revokeObjectURL(preview.url);},[preview]);
+  useEffect(()=>{
+    const prevent=(event:DragEvent)=>{if(Array.from(event.dataTransfer?.types||[]).includes('Files'))event.preventDefault();};
+    const clear=()=>setExternalDrop(false);
+    window.addEventListener('dragover',prevent);window.addEventListener('drop',prevent);window.addEventListener('drop',clear);window.addEventListener('blur',clear);
+    return()=>{window.removeEventListener('dragover',prevent);window.removeEventListener('drop',prevent);window.removeEventListener('drop',clear);window.removeEventListener('blur',clear);};
+  },[window]);
+  async function importDropped(sources:File[]){
+    if(importLease.current||busy){setImportStatus('文件操作进行中，请稍后重试。');return;}
+    if(!sources.length){setImportStatus('未取得文件，请拖入文件而不是文件夹。');return;}
+    const lease=new AbortController();importLease.current=lease;
+    const valid=()=>importLease.current===lease&&!lease.signal.aborted&&currentWorkspace.current===workspaceId;
+    setBusy(true);setImportStatus('正在导入…');const ok:string[]=[],failed:string[]=[];
+    try{
+      for(const source of sources){
+        if(!valid())return;
+        try{
+          if(source.size>12*1024*1024)throw new Error('文件超过 12 MB。');
+          const response=await space.request('/api/import?name='+encodeURIComponent(source.name),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:source,signal:lease.signal});
+          const result=await response.json();if(!valid())return;if(!response.ok)throw new Error(result.error||'导入失败。');ok.push(result.path);
+        }catch(error){if(!valid())return;failed.push(source.name+'：'+(error as Error).message);}
+      }
+      if(!valid())return;
+      let refreshError='';try{await Promise.all([onRefresh?.(),refreshImages(valid)]);}catch(error){refreshError='列表刷新失败：'+(error as Error).message;}
+      if(!valid())return;
+      setFilter('');setScope('');setImportStatus([ok.length?'已导入 '+ok.length+' 个：'+ok.join('、'):'',failed.length?'未导入 '+failed.length+' 个：'+failed.join('；'):'',refreshError].filter(Boolean).join('。'));
+    }finally{if(valid()){importLease.current=null;setBusy(false);}}
+  }
+  async function showImage(item:{name:string;path:string}){try{const response=await space.request('/api/import/image?path='+encodeURIComponent(item.path));if(!response.ok){const data=await response.json();throw new Error(data.error);}setPreview({name:item.name,url:URL.createObjectURL(await response.blob())});}catch(error){setError((error as Error).message);}}
+  async function copyImage(item:{name:string;path:string}){
+    const from=file.split('/').slice(0,-1),to=item.path.split('/');while(from.length&&to.length&&from[0]===to[0]){from.shift();to.shift();}
+    const relative=[...from.map(()=> '..'),...to].map(part=>part==='..'?part:encodeURIComponent(part).replace(/[!'()*]/g,char=>'%'+char.charCodeAt(0).toString(16).toUpperCase())).join('/');
+    try{await navigator.clipboard.writeText('!['+item.name.replace(/[\\\[\]]/g,'\\$&')+']('+relative+')');setImportStatus('已复制图片的 Markdown 引用'+(file?'':'（相对于工作区根目录）')+'。');}catch{setError('无法复制，请检查剪贴板权限。');}
+  }
   const container=useRef<HTMLDivElement>(null),menuRef=useRef<HTMLDivElement>(null),search=useRef<HTMLInputElement>(null),drag=useRef<string|null>(null),renaming=useRef(false),cancelRename=useRef(false);
   const skipClick=useRef(false),dragCleanup=useRef<(()=>void)|null>(null);
   useEffect(()=>()=>dragCleanup.current?.(),[document]);
@@ -140,21 +180,32 @@ export default function FileExplorer({entries,workspaceId,root,file,dirty,filter
   };
   const actionOrder=menuActions(menu?.entry?.type);if(actionOrder.includes('ai')){actionOrder.splice(actionOrder.indexOf('ai'),1);const tab=actionOrder.indexOf('tab');actionOrder.splice(tab<0?0:tab+1,0,'ai');}
   const menuItems:{label:string;key?:string;run:()=>void;emphasis?:boolean}[]=menu?.sort?sortOptions.map(option=>({label:(order.mode===option.mode&&(!option.direction||sortDirection(order)===option.direction)?'✓ ':'')+option.label,run:()=>{store({...order,mode:option.mode,...(option.direction?{direction:option.direction}:{})});setMenu(null);}})):actionOrder.map(action=>({...actions[action],emphasis:action==='ai'}));
-  return <div ref={container} className="file-explorer" aria-busy={busy} onKeyDown={event=>{
-    if((event.target as HTMLElement).closest('input,textarea,[role="menu"]'))return;
+  return <div ref={container} className={'file-explorer '+(externalDrop?'external-drop-active':'')} aria-busy={busy}
+    onDragEnter={event=>{if(Array.from(event.dataTransfer.types).includes('Files')){event.preventDefault();setExternalDrop(true);}}}
+    onDragOver={event=>{if(Array.from(event.dataTransfer.types).includes('Files')){event.preventDefault();event.dataTransfer.dropEffect='copy';}}}
+    onDragLeave={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node))setExternalDrop(false);}}
+    onDrop={event=>{if(!Array.from(event.dataTransfer.types).includes('Files'))return;event.preventDefault();event.stopPropagation();setExternalDrop(false);if(busy){setImportStatus('文件操作进行中，请稍后重试。');return;}void importDropped(Array.from(event.dataTransfer.files));}}
+    onKeyDown={event=>{
+    if((event.target as HTMLElement).closest('input,textarea,button,a,select,[role="menu"]'))return;
     const ctrl=event.ctrlKey||event.metaKey,key=event.key.toLowerCase();
     if(ctrl&&key==='n'){event.preventDefault();void create(event.shiftKey?'folder':'file');}
     else if(focused){if(event.key==='F2'){event.preventDefault();beginRename(focused);}if(event.key==='Delete'){event.preventDefault();setDeleting(focused);}if(ctrl&&event.key==='Enter'&&focused.type==='file'){event.preventDefault();void operation('tab',focused);}if(ctrl&&event.shiftKey&&key==='c'){event.preventDefault();void operation('copy',focused);}if(ctrl&&event.shiftKey&&key==='f'&&focused.type==='folder'){event.preventDefault();void operation('search',focused);}}
   }} onContextMenu={event=>{event.preventDefault();setMenu({x:event.clientX,y:event.clientY});}}>
+    {externalDrop&&<div className="explorer-external-drop" aria-hidden="true">松开以导入 Markdown 或图片<br/><small>复制到当前文件库</small></div>}
     <div className="explorer-search"><Search size={13}/><input ref={search} aria-label="筛选文件" placeholder={scope?'在文件夹中查找…':'查找文件…'} value={filter} onChange={event=>setFilter(event.target.value)}/></div>
     <div className="explorer-tools"><span title={scope}>{scope?scope.split('/').at(-1):'全部文档'}</span>{scope&&<button type="button" onClick={()=>{setScope('');setFilter('');}}>全部</button>}<div>
+      <input ref={importInput} type="file" hidden multiple accept=".md,.png,.jpg,.jpeg,.gif,.webp" onChange={event=>{const files=Array.from(event.currentTarget.files||[]);event.currentTarget.value='';if(files.length)void importDropped(files);}}/>
+      <button type="button" aria-label="导入文件" title="导入文件" disabled={busy} onClick={()=>importInput.current?.click()}><Upload size={14}/></button>
       <button type="button" aria-label="文件排序" title="排序" aria-haspopup="menu" onClick={event=>{const rect=event.currentTarget.getBoundingClientRect();setMenu({x:rect.x,y:rect.bottom,sort:true});}}><ArrowDownWideNarrow size={14}/></button>
       <button type="button" aria-label="新建文件夹" title="新建文件夹（Ctrl+Shift+N）" disabled={busy} onClick={()=>void create('folder')}><FolderPlus size={14}/></button>
       <button type="button" aria-label="新建文档" title="新建文档（Ctrl+N）" disabled={busy} onClick={()=>void create('file')}><Plus size={15}/></button>
     </div></div>
     {scope&&filter&&<small className="explorer-search-status" role="status">{searching?'正在查找文件名与正文…':currentResults?`找到 ${currentResults.matches.length} 份文档${currentResults.truncated?'，仅显示前 200 份':''}`:'查找文件名与正文'}</small>}
     {error&&<p className="explorer-error" role="alert">{error}<button type="button" aria-label="关闭文件操作提示" onClick={()=>setError('')}>×</button></p>}
+    {importStatus&&<p className="explorer-import-status" role="status">{importStatus}<button type="button" aria-label="关闭导入结果" onClick={()=>setImportStatus('')}>×</button></p>}
     <div role="tree" aria-label="文件和文件夹" className={'explorer-tree '+(drop?.path===''?'drop-inside':'')}>{row(entries)}{!all.some(matches)&&<p className="empty-note">{filter?'没有匹配的文件。':'从一份新文档开始。'}</p>}<div className="explorer-root-drop">拖到空白处移至根目录</div></div>
+    {images.length>0&&<div className="explorer-images"><strong>导入的图片</strong>{images.map(item=><div className="explorer-image-row" key={item.path}><button type="button" title="预览图片" onClick={()=>void showImage(item)}>{item.name}</button><button type="button" title="复制 Markdown 引用" aria-label={'复制 '+item.name+' 的 Markdown 引用'} onClick={()=>void copyImage(item)}>复制引用</button></div>)}</div>}
+    {preview&&createPortal(<dialog className="explorer-dialog explorer-image-preview" aria-label="图片预览" ref={element=>{if(element&&!element.open)element.showModal();}} onCancel={event=>{event.preventDefault();setPreview(null);}}><h2>{preview.name}</h2><img src={preview.url} alt={preview.name}/><button type="button" onClick={()=>setPreview(null)}>关闭</button></dialog>,document.body)}
     {menu&&createPortal(<div ref={menuRef} role="menu" aria-label={menu.sort?'文件排序':'文件操作'} className="explorer-menu" style={{left:menu.x,top:menu.y}} onKeyDown={event=>{const nodes=Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')||[]),index=nodes.indexOf(document.activeElement as HTMLButtonElement);if(['ArrowUp','ArrowDown','Home','End'].includes(event.key)){event.preventDefault();nodes[event.key==='Home'?0:event.key==='End'?nodes.length-1:(index+(event.key==='ArrowDown'?1:-1)+nodes.length)%nodes.length]?.focus();}if(event.key==='Escape'){event.preventDefault();closeMenu();}if(event.key==='Tab')closeMenu();}}>{menuItems.map(item=><button key={item.label} role="menuitem" type="button" className={item.emphasis?'explorer-menu-ai':undefined} disabled={busy} onClick={()=>void item.run()}><span>{item.emphasis&&<Sparkles size={14} aria-hidden="true"/>}{item.label}</span>{item.key&&<kbd>{item.key}</kbd>}</button>)}</div>,document.body)}
     {(move||deleting)&&createPortal(<dialog className="explorer-dialog" aria-label={move?'移动到文件夹':'删除到回收站'} ref={element=>{if(element&&!element.open)element.showModal();}} onCancel={event=>{event.preventDefault();if(!busy){setMove(null);setDeleting(null);}}}>
       <h2>{move?'移动到文件夹':'删除到回收站'}</h2>

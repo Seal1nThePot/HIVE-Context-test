@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "id": "mediterranean-blue",
+  "name": "地中海蓝",
+  "description": "包含深色方案与浅色方案；R6 浅色外围略加中性灰，中央正文保持纯白，深色沿用 R5；1px 分层细描边、AI 白星与冰蓝悬停；black 对应深色，white 对应浅色。",
+  "bases": [
+    "black",
+    "white"
+  ],
+  "colorsFile": "colors.json"
+}

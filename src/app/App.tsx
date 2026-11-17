@@ -1,3 +1,6 @@
+import {useApplyTheme} from '../features/theme/applyTheme';
+import {flushThemeFiles} from '../features/theme/templateFiles';
+import {flushThemePreferences} from '../features/theme/themeStore';
 import {applyStoredDocumentChange,mapStoredSessionContext} from '../features/editor/storedDocumentChanges';
 import type {Transaction} from '@codemirror/state';
 import {captureEditorView} from '../features/editor/editorViewSnapshot';
@@ -66,8 +69,9 @@ import {
 } from "lucide-react";
 import Editor from "../features/editor/Editor";
 import DisplayModeControl from '../features/editor/DisplayModeControl';
+import {prepareDocumentTabClose} from '../features/editor/closeDocumentTab';
 import FindReplacePanel from '../features/editor/FindReplacePanel';
-import NotePropertiesDialog from '../features/editor/NotePropertiesDialog';
+import NotePropertiesPanel from '../features/editor/NotePropertiesDialog';
 import EditorInsertDialog,{type InsertTarget} from '../features/editor/EditorInsertDialog';
 import TableOfContents from '../features/outline/TableOfContentsPanel';
 import type {RibbonCommand} from '../features/ribbon/Ribbon';
@@ -127,6 +131,7 @@ export default function App() {
   return <WorkspaceProvider key={info.id} info={info} onChange={setInfo}><DesktopPanelsProvider><WritingApp/></DesktopPanelsProvider></WorkspaceProvider>;
 }
 function WritingApp() {
+  useApplyTheme();
   const desktopPanels = useDesktopPanels();
   const closing = useRef(false);
   const [closingWindow,setClosingWindow] = useState(false);
@@ -156,7 +161,7 @@ function WritingApp() {
   const canDetachDocumentTab=desktopPanels.enabled&&editorIds.filter(id=>workspace.isOpen(id)).length>=2;
   function panelLabel(id:string) {
     if(sessions.current.has(id))return sessions.current.get(id)?.landing?'新标签页':sessions.current.get(id)?.disk?.path.split('/').at(-1)||'未命名稿';
-    return ({files:'文档',conversation:'对话',outline:'大纲',toc:'标题目录',scratch:'草稿',annotations:'标注',basis:'依据',search:'查找替换',trash:'回收站'} as Record<string,string>)[id]||id;
+    return ({files:'文档',conversation:'对话',outline:'大纲',toc:'标题目录',scratch:'草稿',annotations:'标注',basis:'依据',search:'查找替换',trash:'回收站',properties:'笔记属性'} as Record<string,string>)[id]||id;
   }
   const leftPanel = workspace.panel("files"), rightPanel = workspace.panel("conversation");
   const leftOpen = workspace.isOpen("files"), chatOpen = workspace.isOpen("conversation");
@@ -214,6 +219,7 @@ function WritingApp() {
   const [config, setConfig] = useState<Config>(initialConfig),
     [settings, setSettings] = useState(false),
     [settingsSection, setSettingsSection] = useState<SettingsSection>('models'),
+    [settingsRestoreKey, setSettingsRestoreKey] = useState(0),
     [configBusy, setConfigBusy] = useState(false);
   const [dialog, setDialog] = useState<Dialog | null>(null),
     [error, setError] = useState(""),
@@ -296,6 +302,7 @@ function WritingApp() {
     if(update.docChanged||update.selectionSet)redraw();
   }, []);
   function ribbonCommand(command:RibbonCommand){
+    if(command==='properties'){workspace.open('properties');return;}
     const source=activeTextSource.current,editor=source==='scratch'?scratchView.current:view.current;
     if(!editor)return;
     const id=activeSession.current,path=source==='scratch'?'自由草稿.md':sessions.current.get(id)?.disk?.path||'';
@@ -359,10 +366,11 @@ function WritingApp() {
     setInlineRequest(null);setScratchReady(value=>value+1);setError("");
   }
   function closeEditor(id: string) {
-    if(!desktopPanels.attach(id))return;
+    if(!desktopPanels.attach(id))return false;
     const session=sessions.current.get(id);if(session){captureEditorView(session);session.contentVersion=(session.contentVersion||0)+1;}
     workspace.close(id);
     if(activeSession.current===id){const next=editorIds.find(value=>value!==id&&workspace.isOpen(value));if(next)workspace.open(next);}
+    return true;
   }
   function minimizeEditor(id:string) {
     if(!desktopPanels.attach(id))return;
@@ -374,6 +382,37 @@ function WritingApp() {
   const { beginRead,refresh, showFile, openFile, safeSwitch, openSaveAs, save, openBlankTab, openInLanding, createInLanding, openExplorerFile, manageFile, reloadFromDisk, switchWorkspace, submitDialog, importFile } = useFileActions({
     api,appAlive,promptRef,dialogRef, uid, workspace, sessions, activeSession, activeTextSource, editorState, view, disk, proposal, undo, prompt, dialog, file, dirty, running, structuring, switching, viewApplying, creatingNote, savingPaths, fileWorkspace, saveSession, applyDiskFile, annotations, references, bindings, stop, redraw, inform, setFile, setDirty, setError, setFileBusy, setNewNoteBusy, setEntries, setRoot, setConfirm, setDialog, setFilter, setRenameRequest, setCollapsed, setTrashRevision, setInlineRequest, setOutline, setSelection, setMessages, setLastRequest, setPrompt, setStream, setWritingNodeId,
   });
+  const closingDocumentTab=useRef(false),closeTabUi=useRef({prompt,fileBusy});
+  closeTabUi.current={prompt,fileBusy};
+  async function closeDocumentTab(id:string) {
+    const session=sessions.current.get(id);
+    if(!session||closingDocumentTab.current)return;
+    const originalPath=session.disk?.path,originalVersion=session.contentVersion||0;
+    const valid=()=>sessions.current.get(id)===session&&session.disk?.path===originalPath&&(session.contentVersion||0)===originalVersion;
+    const composing=()=>desktopPanels.isComposing()||!!session.view?.composing;
+    const blocked=()=>running.current||structuring.current||switching.current||viewApplying.current||creatingNote.current||closeTabUi.current.fileBusy||!!dialogRef.current;
+    const pending=()=>id===activeSession.current?!!proposal.current||!!closeTabUi.current.prompt.trim():!!session.context?.proposal||!!session.context?.prompt.trim();
+    closingDocumentTab.current=true;
+    try {
+      const result=await prepareDocumentTabClose({blocked,composing,pending,dirty:()=>session.dirty,save:()=>saveSession(id,true),valid});
+      if(result!=='ready'){
+        setError(result==='composing'?'请先完成当前输入法组词，再关闭标签页。':result==='blocked'?'请先停止 AI 生成或等待当前操作完成，再关闭标签页。':result==='pending'?'请先处理待审建议和未发送的消息，再关闭标签页。':result==='unsaved'?'文档未能保存或保存期间有新修改，请先处理保存冲突或另存，再关闭标签页。':'标签页状态已变化，请处理当前操作后重试。');return;
+      }
+      if(composing()){setError('请先完成当前输入法组词，再关闭标签页。');return;}
+      if(!valid()||blocked()||pending()||session.dirty){setError('标签页状态已变化，请处理当前操作后重试。');return;}
+      if(id!=='editor'&&!closeEditor(id))return;
+      setError('');
+      session.contentVersion=(session.contentVersion||0)+1;
+      session.disk=null;session.state=null;session.view=null;session.dirty=false;session.landing=true;
+      session.context=undefined;session.restoreScroll=undefined;session.restoreScrollLeft=undefined;
+      if(activeSession.current===id){
+        disk.current=null;view.current=null;editorState.current=null;proposal.current=null;undo.current=[];
+        setFile('');setDirty(false);setMessages([hello]);setPrompt('');setWritingNodeId(null);setLastRequest(null);
+        setOutline([]);setSelection({from:0,to:0,text:''});setInlineRequest(null);setStream('');
+      }
+      redraw();
+    } finally {closingDocumentTab.current=false;}
+  }
   function stop() {
     stopWritingGeneration({generation,controller,requestAnchor,running,proposal},{setBusy,setStream});
   }
@@ -491,6 +530,8 @@ function WritingApp() {
         };
         await Promise.race([prepare(),new Promise<never>((_resolve,reject)=>{timeout=setTimeout(()=>reject(new Error('保存等待超时，内容仍保留在窗口中。请检查服务和保存状态后重试退出。')),20000);})]);
         if([...sessions.current.values()].some(session=>session.dirty)||savingPaths.current.size)throw new Error('还有内容正在保存，请稍后重试退出。');
+        flushThemePreferences();
+        await flushThemeFiles();
         window.hiveDesktop?.finishClose(true);
       }catch(error){setError((error as Error).message);window.focus();window.hiveDesktop?.finishClose(false);}
       finally{clearTimeout(timeout);documents.forEach((doc,index)=>{doc.body.inert=previousInert[index];});closing.current=false;setClosingWindow(false);}
@@ -503,9 +544,9 @@ function WritingApp() {
     for(const doc of documents)for(const type of ['beforeinput','keydown','paste','drop'])doc.addEventListener(type,block,true);
     return()=>{for(const doc of documents)for(const type of ['beforeinput','keydown','paste','drop'])doc.removeEventListener(type,block,true);};
   },[closingWindow,desktopPanels.windows]);
-  useEffect(()=>{if(settings||help||confirm||filePickerTarget||dialog&&!dialog.target)window.focus();},[settings,help,confirm,filePickerTarget,dialog]);
+  useEffect(()=>{if(help||confirm||filePickerTarget||dialog&&!dialog.target)window.focus();},[settings,help,confirm,filePickerTarget,dialog]);
 
-  function openSettings(section:SettingsSection='models') {setSettingsSection(section);setSettings(true);}
+  function openSettings(section:SettingsSection='models') {setSettingsSection(section);setSettingsRestoreKey(value=>value+1);setSettings(true);if(settings)desktopPanels.focus('settings');}
   async function updateSettings(route:string,body:unknown) {
     setConfigBusy(true);
     try {setConfig(await api<Config>(route,body));}
@@ -607,7 +648,7 @@ function WritingApp() {
       <Ribbon visible={appearanceSettings.appearance.ribbonVisible} collapsed={appearanceSettings.appearance.ribbonCollapsed}
         onCommand={ribbonCommand} editorReady={activeTextSource.current==='scratch'?workspace.isOpen('scratch')&&!!scratchView.current:!!view.current}
         onCollapsedChange={value=>appearanceSettings.setAppearance(old=>({...old,ribbonCollapsed:value}))}
-        onVisibilityChange={value=>{appearanceSettings.setAppearance(old=>({...old,ribbonVisible:value}));if(!value){inform('已隐藏顶部编辑栏，可在设置 → 外观中重新显示。');document.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.focus();}}}
+        onVisibilityChange={value=>{appearanceSettings.setAppearance(old=>({...old,ribbonVisible:value}));if(!value){inform('已隐藏顶部编辑栏，可在设置 → 界面中重新显示。');document.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.focus();}}}
         onSettings={()=>openSettings('appearance')} viewControls={<ViewControls mode={mode} workspaceId={fileWorkspace.info.id} onCapture={captureView} onApply={applyView}/>}/>
       <div className="workbench-host nearby-workbench-host">
         <div className="nearby-workbench-middle">
@@ -636,7 +677,7 @@ function WritingApp() {
             id="sidebar-panel-files"
             aria-label="文档列表"
           >
-            <FileExplorer entries={entries} workspaceId={fileWorkspace.info.id} root={root} file={file} dirty={dirty} filter={filter} setFilter={setFilter} collapsed={collapsed} setCollapsed={setCollapsed} renameRequest={renameRequest}
+            <FileExplorer onRefresh={refresh} entries={entries} workspaceId={fileWorkspace.info.id} root={root} file={file} dirty={dirty} filter={filter} setFilter={setFilter} collapsed={collapsed} setCollapsed={setCollapsed} renameRequest={renameRequest}
               onOpen={openExplorerFile} onAction={manageFile}
               onReferenceDrop={addReference} onAI={path=>{const entry=entries.flatMap(function walk(value):Entry[]{return [value,...(value.children||[]).flatMap(walk)];}).find(entry=>entry.path===path);if(entry)addReference({path,type:entry.type});}}/>
           </div>
@@ -676,6 +717,7 @@ function WritingApp() {
             }}>
               <span>{session.landing?'新标签页':session.disk?.path.split("/").at(-1) || "未命名稿"}</span>
               {session.dirty && <i className="dirty-dot" />}
+              <button type="button" className="document-tab-close" data-no-drag aria-label={`关闭${panelLabel(id)}标签页`} title="关闭标签页" onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();void closeDocumentTab(id);}}><X size={13}/></button>
             </div>
             <NewTabButton onClick={()=>openBlankTab(id)} disabled={busy||newNoteBusy||fileBusy}/>
             <div className="tab-spacer" />
@@ -874,12 +916,14 @@ function WritingApp() {
                 retrySave={annotations.retrySave}
               />
 </PanelFrame>
+        <PanelFrame chrome={chrome} id="properties" title="笔记属性" className="properties-workspace"><NotePropertiesPanel target={(()=>{if(activeTextSource.current==='scratch'){const editor=scratchView.current;if(!editor)return null;return {editor,file:'自由草稿.md',valid:()=>activeTextSource.current==='scratch'&&scratchView.current===editor};}const session=sessions.current.get(activeEditorId),editor=session?.view,path=session?.disk?.path;if(!editor||!path||session?.landing)return null;return {editor,file:path,valid:()=>activeTextSource.current==='document'&&activeSession.current===activeEditorId&&sessions.current.get(activeEditorId)?.view===editor&&sessions.current.get(activeEditorId)?.disk?.path===path};})()} targetKey={activeTextSource.current==='scratch'?'scratch:自由草稿.md':'document:'+activeEditorId+':'+file} onApplied={()=>inform('笔记属性已应用。')}/></PanelFrame>
         <PanelFrame chrome={chrome} id="basis" title="依据" className="basis-workspace"><InputBasisPanel request={lastRequest} file={file} mode={mode} sources={references.sources} entries={entries} workspaceId={fileWorkspace.info.id} onChange={references.setSources}/>{references.saveError&&<p role="status">{references.saveError}</p>}</PanelFrame>
         <PanelFrame chrome={chrome} id="trash" title="回收站" className="trash-workspace"><TrashPanel open={workspace.isOpen('trash')} refreshKey={trashRevision} onRestore={id=>manageFile({action:'restore',id})} onChanged={()=>setTrashRevision(value=>value+1)}/></PanelFrame>
         <PanelFrame chrome={chrome} id="search" title="查找替换" className="find-replace-workspace"><FindReplacePanel editor={activeTextSource.current==='scratch'?scratchView.current:view.current} open={workspace.isOpen('search')} onClose={()=>workspace.close('search')} label={activeTextSource.current==='scratch'?'自由草稿.md':file.split('/').at(-1)||'未命名稿'}/></PanelFrame>
         {workspace.tabGroups.map(group=><WorkspaceTabs key={group.id} group={group} style={group.style} label={panelLabel} onSelect={workspace.open}
           positionLocked={workspace.isPositionLocked(group.active)} lockHint={workspace.panel(group.active).lockHint} onNewTab={group.panels.every(id=>sessions.current.has(id))?()=>openBlankTab(group.active):undefined} newTabDisabled={busy||newNoteBusy||fileBusy}
           onTabDrag={canDetachDocumentTab&&group.panels.every(id=>sessions.current.has(id))?workspace.beginTabDrag:undefined} isDirty={id=>!!sessions.current.get(id)?.dirty}
+          onCloseTab={group.panels.every(id=>sessions.current.has(id))?id=>void closeDocumentTab(id):undefined}
           onRaise={workspace.panel(group.active).raise} onDrag={workspace.beginGroupDrag} handles={workspace.panel(group.active).groupHandles} controls={<PanelControls chrome={chrome} id={group.active} groupMembers={group.panels} />}/>)}
         {workspace.chrome}
         {!workspace.openIds.length && <div className="empty-workspace"><p>单击边缘图标，或从「视图 → 面板」打开需要的面板。</p><button onClick={()=>workspace.open("editor")}>打开正文编辑区</button></div>}
@@ -927,10 +971,9 @@ function WritingApp() {
           </button>
         </div>
       )}
-      {settings && <SettingsPage panelIconDragPreferences={panelIconDragPreferences} annotationPreferences={annotationPreferences} config={config} initialSection={settingsSection} appearance={appearanceSettings} statusPreferences={statusPreferences} onSwitchWorkspace={switchWorkspace} busy={configBusy}
+      {settings && <SettingsPage panelIconDragPreferences={panelIconDragPreferences} annotationPreferences={annotationPreferences} config={config} initialSection={settingsSection} restoreKey={settingsRestoreKey} appearance={appearanceSettings} statusPreferences={statusPreferences} onSwitchWorkspace={switchWorkspace} busy={configBusy}
         onRequest={updateSettings} onReload={async()=>setConfig(await api<Config>('/config'))} onClose={()=>setSettings(false)}/>}
       {filePickerTarget&&<FilePicker entries={entries} onOpen={async path=>{const id=filePickerTarget;await openInLanding(path,id);requestAnimationFrame(()=>{if(activeSession.current===id)sessions.current.get(id)?.view?.focus();});}} onClose={()=>setFilePickerTarget(null)}/>}
-      {dialog?.kind==='properties'&&dialog.target&&<NotePropertiesDialog target={dialog.target} onClose={()=>setDialog(null)} onApplied={()=>{const target=dialog.target!;setDialog(null);requestAnimationFrame(()=>{if(target.valid())target.editor.focus();});inform('笔记属性已应用。');}}/>}
       {dialog&&(dialog.kind==='image'||dialog.kind==='table')&&dialog.target&&<EditorInsertDialog kind={dialog.kind} target={dialog.target} onClose={()=>setDialog(null)} onInserted={()=>{const target=dialog.target!;setDialog(null);if(dialog.kind==='image')void refresh().catch(error=>setError(error.message));requestAnimationFrame(()=>{if(target.valid())target.editor.focus();});inform(dialog.kind==='image'?'已插入图片。':'已插入表格。');}}/>}
       {dialog && dialog.kind!=='image'&&dialog.kind!=='table'&&dialog.kind!=='properties'&&(
         <div className="modal-backdrop">

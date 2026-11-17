@@ -1,0 +1,117 @@
+.theme-settings input[type=color] { width:38px; height:34px; padding:2px; border:1px solid var(--line); border-radius:5px; background:var(--panel); cursor:pointer; }
+.theme-role-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:12px; padding:14px 0 4px; }
+.theme-role-grid > div { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+.theme-role-grid code { font-size:11px; color:var(--muted); }
+.theme-back { margin-bottom:16px; color:var(--text); }
+html .document-pane .cm-content,html .scratch-workspace .cm-content,html .cm-editor .cm-line,html .cm-editor .cm-markdown-h1,html .cm-editor .cm-markdown-h2,html .cm-editor .cm-markdown-h3,html .cm-editor .cm-markdown-h4,html .cm-editor .cm-markdown-h5,html .cm-editor .cm-markdown-h6 { color:var(--hive-document-text) !important; }
+
+.theme-color-field { display:inline-flex; align-items:center; flex-wrap:wrap; gap:5px; }
+.settings-page .theme-color-field input[type=text] { width:90px; padding:6px; }
+.theme-color-field small { flex-basis:100%; color:var(--hive-danger); }
+
+html .cm-editor { color:var(--hive-document-text) !important; }
+html .cm-content,html .cm-line { caret-color:var(--hive-document-text) !important; }
+html.hive-theme-light .cm-gutters { background:var(--panel) !important; color:var(--muted) !important; border-color:var(--line) !important; }
+html.hive-theme-light .cm-selectionBackground,html.hive-theme-light .cm-content ::selection { background:var(--gold-bg) !important; }
+html.hive-theme-light .cm-preview-link { color:var(--hive-link) !important; }
+
+.cm-editor .cm-preview-link, .settings-page a, .app-shell a { color:var(--hive-link) !important; }
+.status-dot { background-color:var(--hive-success) !important; }
+.annotation-warning, .properties-warning { color:var(--hive-warning) !important; }
+.settings-feedback.error, .error-toast, .file-picker-error, .properties-error, .insert-error, .view-dialog-error { color:var(--hive-danger) !important; }
+
+.theme-color-swatch { position:relative; display:inline-block; width:38px; height:34px; border:1px solid var(--line); border-radius:5px; flex:none; }
+.theme-settings .theme-color-swatch input[type=color] { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
+.theme-color-swatch:focus-within { outline:2px solid var(--gold); outline-offset:2px; }
+
+/* Separate surfaces are semantic, independent of legacy color matching. */
+html .workbench.free-workbench { background:var(--hive-workspace-bg) !important; }
+html .document-pane, html .document-pane .cm-editor, html .scratch-workspace .cm-editor { background:var(--hive-document-bg) !important; }
+html .sidebar.workspace-panel, html .chat-panel.workspace-panel, html .independent-workspace-panel { background:var(--hive-panel-bg) !important; border-color:var(--hive-surface-border) !important; }
+html .sidebar-title, html .chat-header, html .document-tabs, html .independent-panel-header,
+html .workspace-tabs, html .panel-status-footer { background:var(--hive-header-bg) !important; border-color:var(--hive-panel-inner-border) !important; }
+html .workspace-group-header { border-color:var(--hive-surface-border); border-bottom-color:var(--hive-panel-inner-border) !important; }
+html .workspace-group-header .workspace-tabs > button { border-right-color:var(--hive-panel-inner-border) !important; }
+html .document-tabs .document-tab, html .workspace-tabs > button[aria-selected=true] { background:var(--hive-raised-bg) !important; color:var(--text) !important; }
+.theme-auto-contrast { display:inline-flex !important; align-items:center; gap:6px; white-space:nowrap; }
+
+/* Each surface is independently editable within the selected base-color scheme. */
+html .app-header { background:var(--hive-titlebar-bg) !important; border-color:var(--hive-surface-border) !important; }
+html .office-ribbon,html .office-ribbon .ribbon-body { background:var(--hive-ribbon-bg) !important; }
+html .office-ribbon .ribbon-tabs { background:var(--hive-ribbon-title-bg) !important; }
+html .office-ribbon { box-sizing:border-box; border:0; border-bottom:1px solid var(--hive-ribbon-border); }
+html .ribbon-tabs,html .ribbon-group { border-color:var(--hive-ribbon-border) !important; }
+html .app-header button,html .sidebar [role=treeitem],html .sidebar-title,html .chat-header,html .independent-panel-header { color:var(--text); }
+html .office-ribbon .ribbon-tabs button { color:var(--hive-ribbon-title-text); }
+html .office-ribbon .ribbon-body button { color:var(--hive-ribbon-content-text); }
+html .office-ribbon .ribbon-body .ribbon-heading-select:not(:disabled),
+html .office-ribbon .ribbon-body .ribbon-group > small,
+html .office-ribbon .ribbon-body .view-mode > b,
+html .office-ribbon .ribbon-body .view-mode > small,
+html .office-ribbon .ribbon-body .saved-view-select > span,
+html .office-ribbon .ribbon-body .saved-view-select > select:not(:disabled) { color:var(--hive-ribbon-content-text); }
+html .ribbon-tabs button[aria-selected=true] { color:var(--gold); }
+html .ribbon-tabs button[aria-selected=true]::after { background:var(--gold); }
+html .workspace-panel,html .desktop-panel-shell { border-color:var(--hive-surface-border) !important; }
+/* The split remains as wide as its hit target; only its center is a visible line. */
+html .workspace-divider { background:var(--hive-workspace-bg); }
+html .workspace-divider::after { content:''; position:absolute; pointer-events:none; background:var(--hive-surface-border); }
+html .workspace-divider.axis-x::after { top:0; bottom:0; left:50%; width:1px; }
+html .workspace-divider.axis-y::after { left:0; right:0; top:50%; height:1px; }
+html .workspace-divider:not(.layout-locked):hover::after,html .workspace-divider:focus-visible::after { background:var(--gold); }
+html .nearby-panel-rail.edge-left { background-color:var(--hive-left-rail-bg); }
+html .nearby-panel-rail.edge-right { background-color:var(--hive-right-rail-bg); }
+html .nearby-panel-rail.edge-left button:not(:hover):not(:focus-visible):not(.active) { color:var(--hive-left-rail-icon); }
+html .nearby-panel-rail.edge-right button:not(:hover):not(:focus-visible):not(.active) { color:var(--hive-right-rail-icon); }
+html .panel-control-menu,html .panel-action-rail,html .display-mode-menu,html .panel-manager,html .model-picker,html .ribbon-tool-tooltip,html .explorer-menu,html .editor-context-menu { background:var(--hive-popup-bg) !important; border-color:var(--hive-popup-border) !important; color:var(--hive-popup-text); }
+html .panel-action-rail > button { color:var(--hive-popup-text); }
+html .panel-action-rail > button:hover,html .panel-action-rail > button:focus-visible { background:var(--hive-selection-bg); }
+html .panel-action-rail > button:last-child { border-color:var(--hive-popup-border); }
+html .workspace-panel input:not([type=checkbox]):not([type=range]),html .workspace-panel select,html .workspace-panel .composer { background:var(--hive-input-bg); border-color:var(--hive-input-border); color:var(--text); }
+html .workspace-panel .composer textarea { color:var(--text); }
+html .workspace-panel input::placeholder,html .workspace-panel textarea::placeholder { color:var(--muted); }
+html .sidebar [role=treeitem][aria-selected=true],html .settings-sidebar nav button.active { background:var(--hive-selection-bg) !important; }
+html .settings-page { background:var(--hive-settings-bg) !important; color:var(--text); }
+html .settings-sidebar { background:var(--hive-settings-sidebar) !important; border-color:var(--hive-settings-border) !important; }
+html .settings-card { background:var(--hive-settings-card) !important; border-color:var(--hive-settings-border) !important; }
+html .settings-page .setting-row { border-color:var(--hive-settings-border) !important; }
+html .settings-page .settings-search,html .settings-page .settings-service-search,html .settings-page input:not([type=range]):not([type=checkbox]),html .settings-page select { background:var(--hive-input-bg); border-color:var(--hive-input-border); color:var(--text); }
+html .settings-page .settings-search input:not([type=range]):not([type=checkbox]),html .settings-page .settings-service-search input:not([type=range]):not([type=checkbox]) { background:transparent; border:0; }
+html .settings-page h1,html .settings-page .setting-row-title,html .settings-page label,html .settings-sidebar nav button { color:var(--text); }
+html .settings-page p,html .settings-page-heading p,html .settings-page .setting-row-info p,html .settings-brand small,html .settings-card p { color:var(--muted); }
+html .settings-page h2,html .settings-page h3 { color:inherit; }
+html .settings-title-icon { background:var(--hive-settings-card); color:var(--gold); }
+html .settings-primary { background:var(--hive-accent); border-color:var(--hive-accent); color:var(--hive-on-accent); }
+html .settings-secondary { background:var(--hive-input-bg); color:var(--hive-input-text); border-color:var(--hive-input-border); }
+html .settings-secondary:hover:not(:disabled) { background:var(--hive-selection-bg); color:var(--hive-selection-text); }
+html .settings-page { color:var(--hive-settings-text); }
+html .settings-sidebar { color:var(--hive-settings-sidebar-text); }
+html .settings-card { color:var(--hive-settings-card-text); }
+html .settings-page p,html .settings-page label,html .settings-page .setting-row-title,html .settings-page h1,html .settings-sidebar nav button,html .settings-brand small,html .settings-card p { color:inherit; }
+html .settings-page input:not([type=color]):not([type=range]),html .settings-page select { color:var(--hive-input-text); }
+html .settings-sidebar nav button.active { color:var(--hive-selection-text); }
+html .settings-primary { color:var(--hive-on-accent); }
+html .app-header,html .app-header button { color:var(--hive-titlebar-text); }
+html .sidebar-title,html .chat-header,html .document-tabs,html .independent-panel-header,html .workspace-tabs,html .panel-status-footer { color:var(--hive-header-text); }
+html .sidebar [role=treeitem][aria-selected=true] { color:var(--hive-selection-text); }
+html .workspace-panel input:not([type=checkbox]):not([type=range]),html .workspace-panel select,html .workspace-panel .composer,html .workspace-panel .composer textarea { color:var(--hive-input-text); }
+html .workspace-panel input::placeholder,html .workspace-panel textarea::placeholder { color:var(--hive-input-text); opacity:1; }
+html .cm-editor .cm-preview-link { color:var(--hive-document-text)!important; text-decoration:underline; }
+html .settings-page a,html .app-shell a { color:inherit!important; text-decoration:underline; }
+html .annotation-warning,html .properties-warning,html .settings-feedback.error,html .error-toast,html .file-picker-error,html .properties-error,html .insert-error,html .view-dialog-error { color:inherit!important; }
+
+.theme-detail-section { margin-top:20px; padding-top:18px; border-top:1px solid var(--hive-settings-border); }
+.theme-detail-section h2 { margin-bottom:14px; }
+.theme-detail-section h3 { margin:16px 0 10px; font-size:calc(12px * var(--text-scale)); font-weight:500; }
+.theme-detail-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:16px 20px; }
+.theme-detail-grid > div { display:flex; flex-direction:column; align-items:flex-start; gap:7px; min-width:0; }
+.theme-detail-grid > div > span { font-size:calc(12px * var(--text-scale)); }
+.theme-dock-follow { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin:14px 0; }
+.theme-dock-follow > label { display:flex; align-items:center; gap:7px; }
+.theme-color-opacity { display:flex !important; align-items:center; gap:6px; flex-basis:100%; margin:0 !important; }
+.theme-color-opacity input[type=range] { width:90px; margin:0; }
+.theme-color-opacity output { font-size:10px; color:var(--muted); }
+
+/* Native toolbar hosts keep a transparent canvas around the rounded controls. */
+html body.desktop-toolbar-window .desktop-panel-shell,
+html body.desktop-toolbar-window .workbench.free-workbench { background:transparent !important; }

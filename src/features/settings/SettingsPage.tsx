@@ -1,8 +1,10 @@
+import ThemeSettings from '../theme/ThemeSettings';
 import SettingRow from './SettingRow';
 import WorkspaceSettings from "../files/WorkspaceSettings";
 import {StatusBarSettings,type StatusPreferences} from "../editor/EditorStatusBar";
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, ArrowDown, ArrowUp, Bot, Check, ChevronRight, Keyboard, Palette, PencilLine, Plus, Search, Server, SlidersHorizontal, Trash2, X } from 'lucide-react';
+import { useEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { DesktopPanel, useDesktopPanels } from '../workspace/DesktopPanels';
+import { ArrowLeft, ArrowDown, ArrowUp, Bot, Check, ChevronRight, Keyboard, LayoutPanelTop, Minus, Palette, PencilLine, Plus, Search, Server, SlidersHorizontal, Trash2, X } from 'lucide-react';
 import AppearanceSettings from './AppearanceSettings';
 import AnnotationSettings from './AnnotationSettings';
 import type {usePanelIconDragPreferences} from './usePanelIconDragPreferences';
@@ -11,42 +13,64 @@ import { useAppearance } from './useAppearance';
 import { activeModelLabel, modelOptions, modelChoice, parseModelChoice, type Config, type ModelService } from './modelConfig';
 import './settings.css';
 
-export type SettingsSection='appearance'|'features'|'writing'|'models'|'shortcuts'|'workspace';
-type Props={panelIconDragPreferences:ReturnType<typeof usePanelIconDragPreferences>;annotationPreferences:ReturnType<typeof useAnnotationPreferences>;statusPreferences:StatusPreferences;onSwitchWorkspace:(root:string)=>Promise<void>;config:Config;initialSection:SettingsSection;appearance:ReturnType<typeof useAppearance>;busy:boolean;
+export type SettingsSection='appearance'|'appearance-reserved'|'features'|'writing'|'models'|'shortcuts'|'workspace';
+type Props={panelIconDragPreferences:ReturnType<typeof usePanelIconDragPreferences>;annotationPreferences:ReturnType<typeof useAnnotationPreferences>;statusPreferences:StatusPreferences;onSwitchWorkspace:(root:string)=>Promise<void>;config:Config;initialSection:SettingsSection;restoreKey:number;appearance:ReturnType<typeof useAppearance>;busy:boolean;
   onRequest:(route:string,body:unknown)=>Promise<void>;onReload:()=>Promise<void>;onClose:()=>void};
 type ServiceDraft=Omit<ModelService,'id'|'hasKey'>&{id?:string;key:string;clearKey:boolean};
-const sections=[{id:'workspace' as const,label:'写作空间',description:'文件夹与文件同步',Icon:Server},{id:'appearance' as const,label:'外观',description:'界面、文字与底部栏',Icon:Palette},
+const sections=[{id:'workspace' as const,label:'仓库管理',description:'仓库目录与自动保存',Icon:Server},{id:'appearance' as const,label:'界面',description:'顶部编辑栏、文字、正文排版与底部栏',Icon:LayoutPanelTop},
+  {id:'appearance-reserved' as const,label:'外观',description:'外观设置',Icon:Palette},
   {id:'features' as const,label:'功能',description:'悬浮工具与面板',Icon:SlidersHorizontal},
   {id:'writing' as const,label:'写作',description:'续写与写作节奏',Icon:PencilLine},
   {id:'models' as const,label:'模型',description:'AI 服务与模型管理',Icon:Bot},
   {id:'shortcuts' as const,label:'快捷键',description:'编辑与面板操作',Icon:Keyboard}];
 
-export default function SettingsPage({panelIconDragPreferences,annotationPreferences,statusPreferences,onSwitchWorkspace,config,initialSection,appearance,busy,onRequest,onReload,onClose}:Props){
+export default function SettingsPage(props:Props){
+  return <DesktopPanel id="settings" title="设置" open><SettingsContent {...props}/></DesktopPanel>;
+}
+
+function SettingsContent({panelIconDragPreferences,annotationPreferences,statusPreferences,onSwitchWorkspace,config,initialSection,restoreKey,appearance,busy,onRequest,onReload,onClose}:Props){
   const [section,setSection]=useState(initialSection),[search,setSearch]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const [draft,setDraft]=useState<ServiceDraft|null>(null),[modelId,setModelId]=useState(''),[modelName,setModelName]=useState(''),[filter,setFilter]=useState(''),[removeId,setRemoveId]=useState<string|null>(null),[discard,setDiscard]=useState(false);
   const [limit,setLimit]=useState(String(config.continuationLimit));
   const closeButton=useRef<HTMLButtonElement>(null),panel=useRef<HTMLDivElement>(null),returnFocus=useRef<HTMLElement|null>(null);
   const editing=!!draft,sectionInfo=sections.find(item=>item.id===section)!;
+  useEffect(()=>{if(!draft)setSection(initialSection);},[initialSection,draft]);
+  useEffect(()=>{const close=(event:Event)=>{if((event as CustomEvent).detail!=='settings')return;event.preventDefault();if(busy)return;if(draft)setDiscard(true);else onClose();};window.addEventListener('hive:panel-close-requested',close);return()=>window.removeEventListener('hive:panel-close-requested',close);},[busy,draft,onClose]);
   useEffect(()=>{setLimit(String(config.continuationLimit));},[config.continuationLimit]);
+  const desktop=useDesktopPanels();
+  const detached=desktop.windows.has('settings');
+  const [position,setPosition]=useState({x:Math.max(8,window.innerWidth-820),y:48});
+  const [minimized,setMinimized]=useState(false),[openingNative,setOpeningNative]=useState(desktop.enabled);
+  useEffect(()=>setMinimized(false),[restoreKey]);
   useEffect(()=>{
-    returnFocus.current=document.activeElement as HTMLElement;
-    const siblings=Array.from(panel.current?.parentElement?.children||[]).filter(element=>element!==panel.current&&element instanceof HTMLElement) as HTMLElement[];
-    const previous=siblings.map(element=>element.inert);siblings.forEach(element=>{element.inert=true;});
-    closeButton.current?.focus();
-    return()=>{siblings.forEach((element,index)=>{element.inert=previous[index];});returnFocus.current?.focus();};
+    if(!desktop.enabled)return;
+    const timer=window.setTimeout(()=>{
+      const rect=panel.current?.getBoundingClientRect();
+      if(!rect){setOpeningNative(false);return;}
+      desktop.detach('settings',{rect:()=>({x:rect.left,y:rect.top,width:rect.width,height:rect.height}),onReady:()=>setOpeningNative(false),onFailure:()=>setOpeningNative(false)});
+    },0);
+    return()=>window.clearTimeout(timer);
   },[]);
   useEffect(()=>{
-    const key=(event:KeyboardEvent)=>{
-      if(event.key==='Escape'){if(panel.current?.querySelector('[data-status-dragging="true"]'))return;event.preventDefault();event.stopPropagation();if(busy)return;if(removeId){setRemoveId(null);return;}if(editing){setDiscard(true);return;}onClose();}
-      if(event.key==='Tab'){
-        const nodes=Array.from(panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),[tabindex="0"]')||[]).filter(el=>el.getBoundingClientRect().height>0);
-        const first=nodes[0],last=nodes.at(-1);
-        if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}
-        else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}
-      }
-    };
-    window.addEventListener('keydown',key,true);return()=>window.removeEventListener('keydown',key,true);
-  },[busy,editing,removeId,onClose]);
+    returnFocus.current=document.activeElement as HTMLElement;
+    closeButton.current?.focus();
+    return()=>{if(returnFocus.current?.isConnected)returnFocus.current.focus();};
+  },[]);
+  function drag(event:ReactPointerEvent<HTMLElement>){
+    if(event.button!==0 || !event.isPrimary || (event.target as Element).closest('button'))return;
+    if(detached){desktop.beginDrag('settings',event);return;}
+    event.preventDefault();
+    const target=event.currentTarget, win=target.ownerDocument.defaultView!, pointer=event.pointerId;
+    const start={x:event.clientX,y:event.clientY}, rect=panel.current!.getBoundingClientRect();
+    target.setPointerCapture(pointer);
+    const move=(e:PointerEvent)=>{if(e.pointerId!==pointer)return;setPosition({x:Math.max(0,Math.min(win.innerWidth-80,rect.left+e.clientX-start.x)),y:Math.max(0,Math.min(win.innerHeight-36,rect.top+e.clientY-start.y))});};
+    const end=(e:PointerEvent)=>{if(e.pointerId!==pointer)return;target.removeEventListener('pointermove',move);target.removeEventListener('pointerup',end);target.removeEventListener('pointercancel',end);if(target.hasPointerCapture(pointer))target.releasePointerCapture(pointer);};
+    target.addEventListener('pointermove',move);target.addEventListener('pointerup',end);target.addEventListener('pointercancel',end);
+  }
+  function key(event:React.KeyboardEvent){
+    if(event.key!=='Escape'||panel.current?.querySelector('[data-status-dragging="true"]'))return;
+    event.preventDefault();event.stopPropagation();if(busy)return;if(removeId){setRemoveId(null);return;}if(editing){setDiscard(true);return;}onClose();
+  }
   async function run(route:string,body:unknown,success?:string){
     setError('');setNotice('');try{await onRequest(route,body);if(success)setNotice(success);return true;}
     catch(error){setError((error as Error).message);return false;}
@@ -72,20 +96,31 @@ export default function SettingsPage({panelIconDragPreferences,annotationPrefere
   const currentService=draft?.id?config.services.find(item=>item.id===draft.id):undefined;
   const shownServices=config.services.filter(item=>(item.name+' '+item.endpoint+' '+item.models.map(model=>model.name+' '+model.id).join(' ')).toLowerCase().includes(filter.toLowerCase()));
   const options=modelOptions(config);
-  return <div ref={panel} className="settings-page" role="dialog" aria-modal="true" aria-label="设置">
+  return <div ref={panel} data-panel-id="settings" className={'settings-floating workspace-panel'+(minimized?' settings-floating-minimized':'')} role="dialog" aria-label="设置" style={{...(detached?{}:{left:position.x,top:position.y}),...(openingNative?{visibility:'hidden'}:{})}} onKeyDown={key}>
+    <div className="settings-floating-title panel-drag-header" onPointerDown={drag}><b>设置</b><div className="settings-floating-actions">
+      <button type="button" aria-label={minimized?'恢复设置':'最小化设置'} title={minimized?'恢复设置':'最小化设置'} onClick={()=>{if(detached)window.hiveDesktop?.windowCommand('minimize','settings');else setMinimized(value=>!value);}}><Minus size={16}/></button>
+      <button type="button" aria-label="关闭设置" disabled={busy} onClick={()=>{if(draft)setDiscard(true);else onClose();}}><X size={16}/></button>
+    </div></div>
+    {detached&&['n','s','e','w','ne','nw','se','sw'].map(edge=><div key={edge} className={'panel-resize panel-resize-'+edge} onPointerDown={event=>desktop.beginDrag('settings',event,edge)}/>)}
+    <div className="settings-page" style={minimized?{display:'none'}:undefined}>
     <aside className="settings-sidebar">
       <div className="settings-brand"><span>H</span><b>HIVE</b><small>设置</small></div>
       <label className="settings-search"><Search size={15}/><input aria-label="搜索设置" placeholder="搜索设置…" value={search} disabled={editing} onChange={event=>setSearch(event.target.value)}/></label>
-      <nav aria-label="设置分类">{sections.filter(item=>(item.label+item.description).includes(search)).map(({id,label,description,Icon})=><button key={id} type="button" className={section===id?'active':''} title={description} aria-current={section===id?'page':undefined} disabled={editing} onClick={()=>navigate(id)}><Icon size={16}/><span>{label}</span></button>)}</nav>
-      {search&&!sections.some(item=>(item.label+item.description).includes(search))&&<p className="settings-nav-empty">没有匹配的设置分类</p>}
+      <nav aria-label="设置分类">{sections.filter(item=>(item.label+item.description).toLowerCase().includes(search.trim().toLowerCase())).map(({id,label,description,Icon})=><button key={id} type="button" className={section===id?'active':''} title={description} aria-current={section===id?'page':undefined} disabled={editing} onClick={()=>navigate(id)}><Icon size={16}/><span>{label}</span></button>)}</nav>
+      {search.trim()&&!sections.some(item=>(item.label+item.description).toLowerCase().includes(search.trim().toLowerCase()))&&<p className="settings-nav-empty">没有匹配的设置分类</p>}
       <button ref={closeButton} type="button" className="settings-return" onClick={()=>{if(draft)setDiscard(true);else onClose();}} disabled={busy}><ArrowLeft size={16}/>返回写作</button>
     </aside>
     <main className="settings-content">
-      <header className="settings-page-heading"><div className="settings-title-icon"><sectionInfo.Icon size={22}/></div><div><h1>{draft?(draft.id?'编辑 AI 服务':'添加 AI 服务'):sectionInfo.label==='模型'?'模型配置':sectionInfo.label}</h1><p>{draft?'设置连接方式，并手动管理这个服务下的模型。':sectionInfo.description}</p></div><button type="button" className="settings-close" aria-label="关闭设置" disabled={busy} onClick={()=>{if(draft)setDiscard(true);else onClose();}}><X size={20}/></button></header>
+      <header className="settings-page-heading"><div className="settings-title-icon"><sectionInfo.Icon size={22}/></div><div><h1>{draft?(draft.id?'编辑 AI 服务':'添加 AI 服务'):sectionInfo.label==='模型'?'模型配置':sectionInfo.label}</h1><p>{draft?'设置连接方式，并手动管理这个服务下的模型。':sectionInfo.description}</p></div></header>
       {error&&<div className="settings-feedback error" role="alert"><span>{error}</span>{(error.includes('其他窗口')||error.includes('重新载入'))&&<button type="button" disabled={busy} onClick={async()=>{try{await onReload();setError('');setNotice('已重新载入配置。');}catch(error){setError((error as Error).message);}}}>重新载入配置</button>}</div>}
       {notice&&<p className="settings-feedback" role="status"><Check size={14}/>{notice}</p>}
-      {section==='appearance'&&<section className="settings-card"><AppearanceSettings {...appearance}/></section>}
-      {section==='appearance'&&<StatusBarSettings preferences={statusPreferences}/>}
+      {section==='appearance'&&<>
+        <section className="settings-card"><AppearanceSettings {...appearance} group="ribbon"/></section>
+        <section className="settings-card"><AppearanceSettings {...appearance} group="text"/></section>
+        <section className="settings-card"><AppearanceSettings {...appearance} group="typography"/></section>
+        <StatusBarSettings preferences={statusPreferences}/>
+      </>}
+      {section==='appearance-reserved'&&<ThemeSettings/>}
       {section==='features'&&<><section className="settings-card feature-settings"><h2>悬浮工具</h2><SettingRow title="显示底部悬浮工具栏" description="显示标注工具、写作模式和 AI 开关。关闭后仍可通过右上角面板按钮或 Ctrl+J 打开 AI。"><input className="setting-switch" aria-label="显示底部悬浮工具栏" type="checkbox" checked={appearance.appearance.floatingToolbarVisible!==false} onChange={event=>appearance.setAppearance(old=>({...old,floatingToolbarVisible:event.target.checked}))}/></SettingRow></section>
       <section className="settings-card feature-settings"><h2>面板位置</h2><SettingRow title="锁定与解锁手势" description="在面板标题栏操作。锁定后仍可打开、关闭和收纳；标签组共享位置。"><select aria-label="面板锁定手势" value={appearance.appearance.panelLockGesture||'doubleClick'} onChange={event=>appearance.setAppearance(old=>({...old,panelLockGesture:event.target.value==='longPress'?'longPress':'doubleClick'}))}><option value="doubleClick">双击标题栏</option><option value="longPress">长按标题栏（0.6 秒）</option></select></SettingRow><SettingRow title="图标拖动标识" description="长按侧栏图标拖动时，选择跟随指针的标识样式。"><select aria-label="图标拖动标识" value={panelIconDragPreferences.preferences.holdStyle} onChange={event=>panelIconDragPreferences.setPreferences(old=>({...old,holdStyle:event.target.value==='bar'?'bar':'circle'}))}><option value="circle">圆形</option><option value="bar">长条</option></select></SettingRow><SettingRow title="图标长按时间" description="设置 0.05–3 秒；短按仍然展开或收起面板。"><PanelIconDelay label="图标长按时间" value={panelIconDragPreferences.preferences.holdDelayMs} onChange={holdDelayMs=>panelIconDragPreferences.setPreferences(old=>({...old,holdDelayMs}))}/></SettingRow><SettingRow title="最短触发时间" description="设置 0.05–3 秒；实际触发时间取长按时间与最短触发时间中较大的值。"><PanelIconDelay label="最短触发时间" value={panelIconDragPreferences.preferences.minimumTriggerMs} onChange={minimumTriggerMs=>panelIconDragPreferences.setPreferences(old=>({...old,minimumTriggerMs}))}/></SettingRow>{panelIconDragPreferences.saveError&&<p role="status">{panelIconDragPreferences.saveError}</p>}</section>{appearance.saveError&&<p role="status">{appearance.saveError}</p>}</>}
       {section==='features'&&<AnnotationSettings {...annotationPreferences}/>}
@@ -127,6 +162,7 @@ export default function SettingsPage({panelIconDragPreferences,annotationPrefere
         {removeId&&<div className="settings-discard" role="alert"><span>确认移除「{draft.name}」及其模型配置？</span><button type="button" disabled={busy} onClick={async()=>{if(await run('/model-services/remove',{id:removeId,revision:config.revision},'服务已移除。')){setDraft(null);setRemoveId(null);}}}>确认移除</button><button type="button" onClick={()=>setRemoveId(null)}>保留服务</button></div>}
       </fieldset></form>}
     </main>
+    </div>
   </div>;
 }
 

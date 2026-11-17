@@ -1,0 +1,6 @@
+.theme-template-management .setting-row-info { min-width:0; }
+.theme-template-management .setting-row-info p { overflow-wrap:anywhere; }
+.theme-template-management .theme-template-status { margin:12px 0; color:var(--muted); overflow-wrap:anywhere; }
+.theme-template-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-top:24px; }
+.theme-template-heading h3 { margin:0; }
+.theme-template-management .setting-row-description { overflow-wrap:anywhere; }

@@ -1,5 +1,5 @@
-import {EditorState,StateEffect,StateField,type Extension} from '@codemirror/state';
-import {Decoration,EditorView,WidgetType,type DecorationSet} from '@codemirror/view';
+import {EditorState,StateEffect,StateField,Transaction,type Extension} from '@codemirror/state';
+import {Decoration,EditorView,ViewPlugin,WidgetType,type DecorationSet} from '@codemirror/view';
 import {previewPlan,visibleReplacements,localPreviewUpdate,type PreviewReplacement} from './markdownPresentation';
 import {localImageUrl,type ImageContext} from './insertions';
 import {TableWidget,type TableMark} from './tableWidget';
@@ -7,21 +7,25 @@ import {annotationHighlights,setAnnotationMarks} from '../annotations/annotation
 import {markdownParseState} from './markdownParse';
 import {tableSegments} from './tableViewport';
 import {MathWidget} from './mathWidget';
+import {frontmatterVisible,subscribeFrontmatterVisibility} from './frontmatterVisibility';
+import {typographyUpdateQueue} from '../typography/typographyUpdateQueue';
 
 export type DisplayMode='live'|'source';
 export const setDisplayMode=StateEffect.define<DisplayMode>(),setPreviewFocus=StateEffect.define<boolean>();
 export const displayModeField=StateField.define<DisplayMode>({create:()=> 'live',update(value,tr){for(const effect of tr.effects)if(effect.is(setDisplayMode))value=effect.value;return value;},provide:field=>EditorView.editorAttributes.from(field,value=>({'data-display-mode':value}))});
 const previewFocus=StateField.define<boolean>({create:()=>false,update(value,tr){for(const effect of tr.effects)if(effect.is(setPreviewFocus))value=effect.value;return value;}});
+export const setFrontmatterVisibility=StateEffect.define<boolean>();
+export const frontmatterVisibilityField=StateField.define<boolean>({create:()=>frontmatterVisible(),update(value,tr){for(const effect of tr.effects)if(effect.is(setFrontmatterVisibility))value=effect.value;return value;}});
 const setImageContext=StateEffect.define<ImageContext|null>(),imageContext=StateField.define<ImageContext|null>({create:()=>null,update(value,tr){for(const effect of tr.effects)if(effect.is(setImageContext))value=effect.value;return value;}});
 
 class PreviewWidget extends WidgetType{
-  constructor(readonly item:PreviewReplacement,readonly context:ImageContext|null){super();}
-  eq(other:PreviewWidget){return (this.item===other.item||this.item.kind===other.item.kind&&this.item.from===other.item.from&&this.item.to===other.item.to&&this.item.text===other.item.text&&this.item.src===other.item.src)&&this.context?.workspace===other.context?.workspace&&this.context?.file===other.context?.file;}
+  constructor(readonly item:PreviewReplacement,readonly context:ImageContext|null,readonly propertyText?:string){super();}
+  eq(other:PreviewWidget){return (this.item===other.item||this.item.kind===other.item.kind&&this.item.from===other.item.from&&this.item.to===other.item.to&&this.item.text===other.item.text&&this.item.src===other.item.src)&&this.propertyText===other.propertyText&&this.context?.workspace===other.context?.workspace&&this.context?.file===other.context?.file;}
   toDOM(view:EditorView){
     const document=view.dom.ownerDocument;
     const item=this.item;
     const edit=(element:HTMLElement,from=item.from)=>element.addEventListener('mousedown',event=>{event.preventDefault();event.stopPropagation();view.dispatch({selection:{anchor:from},userEvent:'select.pointer'});view.focus();});
-    if(item.kind==='properties'){const block=document.createElement('div');block.className='cm-preview-properties';block.textContent='笔记属性';block.title='点击编辑属性源码';edit(block);return block;}
+    if(item.kind==='properties'){const block=document.createElement('div');block.className='cm-preview-properties';block.textContent=this.propertyText||'';block.title='点击编辑属性源码';edit(block);return block;}
     if(item.kind==='rule'){const hr=document.createElement('hr');hr.className='cm-preview-rule';edit(hr);return hr;}
     const span=document.createElement('span');span.className='cm-preview-'+item.kind;
     span.textContent=item.kind==='image'?'▧ '+item.text:item.text||'';
@@ -39,7 +43,7 @@ class PreviewWidget extends WidgetType{
 export const markdownPreview=StateField.define<DecorationSet>({
   create:build,
   update(value,tr){
-    if(tr.docChanged||tr.effects.some(effect=>effect.is(setDisplayMode)||effect.is(setPreviewFocus)||effect.is(setImageContext)||effect.is(setAnnotationMarks)))return build(tr.state);
+    if(tr.docChanged||tr.effects.some(effect=>effect.is(setDisplayMode)||effect.is(setPreviewFocus)||effect.is(setImageContext)||effect.is(setAnnotationMarks)||effect.is(setFrontmatterVisibility)))return build(tr.state);
     if(tr.selection&&tr.state.field(previewFocus,false)&&activeLines(tr.startState)!==activeLines(tr.state))return build(tr.state);
     return value;
   },
@@ -59,7 +63,11 @@ function build(state:EditorState){
     else if(style.to>style.from)ranges.push(Decoration.mark({class:style.className,attributes}).range(style.from,style.to));
   }
   const marks:TableMark[]=[];state.field(annotationHighlights,false)?.between(0,state.doc.length,(from,to,decoration)=>{const id=decoration.spec.attributes?.['data-annotation-id'];if(id)marks.push({from,to,id,note:decoration.spec.attributes?.['aria-label']||'文本标注'});});
-  for(const item of visibleReplacements(state,state.field(previewFocus,false)===true)){
+  const showProperties=state.field(frontmatterVisibilityField,false)!==false;
+  const items=visibleReplacements(state,state.field(previewFocus,false)===true);
+  if(!showProperties){const property=previewPlan(state).replacements.find(item=>item.kind==='properties');if(property&&!items.includes(property))items.push(property);}
+  for(const item of items){
+    if(item.kind==='properties'&&!showProperties){ranges.push(Decoration.replace({block:true,inclusiveEnd:false}).range(item.from,item.to));continue;}
     if(item.kind==='table'){
       const segments=tableSegments(item,state.doc);
       if(!segments.length){ranges.push(Decoration.widget({widget:new WideTableNotice(),block:true,side:-1}).range(item.from));continue;}
@@ -70,16 +78,15 @@ function build(state:EditorState){
         ranges.push(Decoration.widget({widget,block:item.block,side:-1}).range(item.from));
         ranges.push(Decoration.mark({class:'cm-math-source'}).range(item.from,item.to));
       }else ranges.push(Decoration.replace({block:item.block,widget}).range(item.from,item.to));
-    }else ranges.push(Decoration.replace({block:item.block,widget:item.kind?new PreviewWidget(item,state.field(imageContext,false)||null):undefined}).range(item.from,item.to));
+    // A hidden source line may end exactly where the next line's decoration starts.
+    // Keep that endpoint outside the block replacement so its heading/paragraph style survives.
+    }else ranges.push(Decoration.replace({block:item.block,inclusiveEnd:false,widget:item.kind?new PreviewWidget(item,state.field(imageContext,false)||null,item.kind==='properties'?state.sliceDoc(item.from,item.to).trimEnd():undefined):undefined}).range(item.from,item.to));
   }
   return Decoration.set(ranges,true);
 }
 export const markdownDisplayTheme=EditorView.baseTheme({
   '.cm-format-underline':{textDecoration:'underline',textUnderlineOffset:'3px'},
   '.cm-preview-strong':{fontWeight:'700'},'.cm-preview-emphasis':{fontStyle:'italic'},'.cm-preview-strike':{textDecoration:'line-through'},
-  '.cm-preview-h1':{fontSize:'1.7em',fontWeight:'650',lineHeight:'1.65',paddingTop:'8px',paddingBottom:'8px'},
-  '.cm-preview-h2':{fontSize:'1.25em',fontWeight:'600',lineHeight:'1.8',paddingTop:'6px',paddingBottom:'6px'},
-  '.cm-preview-h3':{fontSize:'1.1em',fontWeight:'600'},'.cm-preview-h4,.cm-preview-h5,.cm-preview-h6':{fontWeight:'600'},
   '.cm-preview-code-line':{fontFamily:'Consolas, monospace',backgroundColor:'#ffffff06',lineHeight:'1.65'},
   '.cm-preview-inline-code':{fontFamily:'Consolas, monospace',backgroundColor:'#ffffff0b',borderRadius:'3px',padding:'1px 3px'},
   '.cm-preview-quote':{borderLeft:'2px solid #87926b',color:'#a5af99'},
@@ -87,7 +94,7 @@ export const markdownDisplayTheme=EditorView.baseTheme({
   '.cm-preview-bullet':{color:'#b9c49e'},'.cm-preview-task':{color:'#c8ba7e',fontSize:'1.1em'},
   '.cm-preview-image':{display:'inline-block',maxWidth:'100%',boxSizing:'border-box',padding:'5px 12px',border:'1px solid #46513a',borderRadius:'4px',color:'#b9c49e'},
   '.cm-preview-image img':{display:'block',maxWidth:'100%',maxHeight:'360px',objectFit:'contain'},
-  '.cm-preview-properties':{fontSize:'.8em',color:'#9daa88',padding:'5px 12px',marginBottom:'8px',borderBottom:'1px solid #46513a',cursor:'text'},
+  '.cm-preview-properties':{whiteSpace:'pre-wrap',overflowWrap:'anywhere',fontSize:'.8em',color:'#9daa88',padding:'5px 12px',marginBottom:'8px',borderBottom:'1px solid #46513a',cursor:'text'},
   '.cm-preview-rule':{border:'0',borderTop:'1px solid #526043',margin:'14px 50px'},
   '.cm-table-widget':{overflowX:'auto'},
   '.cm-table-source-notice':{padding:'5px 50px',color:'#b9c49e',fontSize:'.85em'},
@@ -106,7 +113,16 @@ export const markdownDisplayTheme=EditorView.baseTheme({
   '.cm-preview-table td,.cm-preview-table th':{border:'1px solid #46513a',padding:'6px 12px',textAlign:'left'},
   '.cm-preview-table th':{background:'#ffffff08',fontWeight:'600'},
 });
-export const markdownDisplayExtensions:Extension=[displayModeField,previewFocus,imageContext,markdownParseState,localPreviewUpdate,markdownPreview,markdownDisplayTheme,EditorView.focusChangeEffect.of((_state,focused)=>setPreviewFocus.of(focused))];
+const frontmatterVisibilityPlugin=ViewPlugin.define(view=>{
+  let composing=false,timer:ReturnType<typeof setTimeout>|undefined;
+  const queue=typographyUpdateQueue<boolean>({composing:()=>composing||view.composing,schedule:callback=>setTimeout(callback,0),cancel:id=>clearTimeout(id as ReturnType<typeof setTimeout>),apply:visible=>{if(view.state.field(frontmatterVisibilityField)===visible)return;view.dispatch({effects:[setFrontmatterVisibility.of(visible),view.scrollSnapshot()],annotations:Transaction.addToHistory.of(false)});}});
+  queue.request(frontmatterVisible());
+  const unsubscribe=subscribeFrontmatterVisibility(()=>queue.request(frontmatterVisible()));
+  const start=()=>{composing=true;},end=()=>{composing=false;clearTimeout(timer);timer=setTimeout(()=>queue.released(),0);};
+  view.dom.addEventListener('compositionstart',start,true);view.dom.addEventListener('compositionend',end,true);
+  return {update(){queue.released();},destroy(){unsubscribe();queue.dispose();clearTimeout(timer);view.dom.removeEventListener('compositionstart',start,true);view.dom.removeEventListener('compositionend',end,true);}};
+});
+export const markdownDisplayExtensions:Extension=[displayModeField,frontmatterVisibilityField,frontmatterVisibilityPlugin,previewFocus,imageContext,markdownParseState,localPreviewUpdate,markdownPreview,markdownDisplayTheme,EditorView.focusChangeEffect.of((_state,focused)=>setPreviewFocus.of(focused))];
 export function configureImageContext(view:EditorView,context:ImageContext|null){
   if(view.state.field(imageContext,false)===undefined)view.dispatch({effects:StateEffect.appendConfig.of(imageContext)});
   const current=view.state.field(imageContext);if(current?.file!==context?.file||current?.workspace!==context?.workspace)view.dispatch({effects:setImageContext.of(context)});

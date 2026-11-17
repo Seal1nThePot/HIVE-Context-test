@@ -111,6 +111,8 @@
 .free-workbench:not(.desktop-panel-workbench) .workspace-panel.panel-docked > .panel-resize,
 .free-workbench:not(.desktop-panel-workbench) .workspace-group-docked > .panel-resize {display:none;}
 .free-workbench:not(.desktop-panel-workbench) .workspace-group-docked > .workspace-group-header {border:0;border-bottom:1px solid #3b4335;box-shadow:none;}
+/* A floating group's header already draws the line above its content. */
+.free-workbench:not(.desktop-panel-workbench) .workspace-panel.panel-floating.panel-grouped {border-top:0;}
 /* Keep the rail scrollable without drawing its scrollbar. */
 .nearby-workbench-middle > .rail-edge-wrap .nearby-panel-rail {scrollbar-width:none;}
 .nearby-workbench-middle > .rail-edge-wrap .nearby-panel-rail::-webkit-scrollbar {display:none;}

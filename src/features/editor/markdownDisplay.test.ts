@@ -23,8 +23,9 @@ describe('live Markdown display',()=>{
   });
   it('hides the current line markers again on blur',()=>{
     let state=create('**文字**');state=state.update({effects:setPreviewFocus.of(true)}).state;
-    expect(state.field(markdownPreview).size).toBe(1);
-    state=state.update({effects:setPreviewFocus.of(false)}).state;expect(state.field(markdownPreview).size).toBe(3);
+    const inlineCount=(state:EditorState)=>{let count=0;state.field(markdownPreview).between(0,state.doc.length,(_from,_to,decoration)=>{if(!decoration.spec.class?.startsWith('cm-typography-'))count++;});return count;};
+    expect(inlineCount(state)).toBe(1);
+    state=state.update({effects:setPreviewFocus.of(false)}).state;expect(inlineCount(state)).toBe(3);
   });
   it('switches to all-source mode and back without changing the text or selection',()=>{
     const initial=create('# 标题\n\n<u>文字</u>'),source=initial.update({effects:setDisplayMode.of('source')});

@@ -189,11 +189,11 @@
   max-height: calc(100dvh - 18px);
   overflow: auto;
   padding: 13px;
-  border: 1px solid #a39c5d;
+  border: 1px solid var(--hive-popup-border, var(--line, #a39c5d));
   border-radius: 9px;
-  background: #2a3423;
-  box-shadow: 0 12px 45px #0009;
-  color: #cbd7b9;
+  background: var(--hive-popup-bg, var(--panel, #2a3423));
+  box-shadow: var(--hive-popup-shadow, 0 12px 45px #0009);
+  color: var(--hive-popup-text, var(--text, #cbd7b9));
 }
 .annotation-tool-active .cm-content,.annotation-tool-active .cm-line {cursor:crosshair;}
 .inline-annotation-editor textarea {
@@ -204,15 +204,15 @@
   resize: vertical;
   margin: 0 0 11px;
   padding: 8px 10px;
-  border: 1px solid #667d48;
+  border: 1px solid var(--line, #667d48);
   border-radius: 5px;
-  background: #1b2815;
+  background: var(--bg, #1b2815);
   font-size: calc(11px * var(--text-scale, 1));
   line-height: 1.8;
-  color: #d8e0c5;
+  color: var(--text, #d8e0c5);
 }
 .inline-annotation-editor textarea::placeholder {
-  color: #71895e;
+  color: var(--muted, #71895e);
 }
 .inline-annotation-footer {
   display: flex;

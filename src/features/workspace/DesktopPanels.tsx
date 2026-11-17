@@ -19,6 +19,7 @@ declare global {
     panelDrag:(id:string,phase:'start'|'move'|'end'|'cancel',edge?:string,free?:boolean)=>boolean;
     onPanelMove:(callback:(event:{id:string;phase:'move'|'end'|'cancel';x:number;y:number;free?:boolean})=>void)=>()=>void;
     dockOverlay:(feedback:{guides:{key:string;label:string;button:Rect}[];ready:{preview:Rect;button?:Rect}|null;rail?:{edge:'left'|'right';rect:Rect}}|null)=>void;
+    dockTooltip:(value:{id:'global-toolbar';text:string;anchor:Rect;width:number;height:number;background:string;color:string;border:string;fontSize:number}|null)=>void;
   }}
 }
 type DesktopPanels={
@@ -73,7 +74,7 @@ export function DesktopPanelsProvider({children}:{children:ReactNode}){
   const returnAll=useCallback(()=>{for(const host of runtime.registry.values())runtime.close(host.id);},[runtime]);
   useLayoutEffect(()=>{document.documentElement.classList.toggle('hive-desktop',!!window.hiveDesktop?.isDesktop);return()=>document.documentElement.classList.remove('hive-desktop');},[]);
   useEffect(()=>{const start=()=>{composition.current=true;},end=()=>{composition.current=false;};document.addEventListener('compositionstart',start,true);document.addEventListener('compositionend',end,true);return()=>{document.removeEventListener('compositionstart',start,true);document.removeEventListener('compositionend',end,true);};},[]);
-  useEffect(()=>window.hiveDesktop?.onPanelCloseRequested(attach),[attach]);
+  useEffect(()=>window.hiveDesktop?.onPanelCloseRequested(id=>{const event=new CustomEvent('hive:panel-close-requested',{cancelable:true,detail:id});if(window.dispatchEvent(event))attach(id);}),[attach]);
   useEffect(()=>()=>dragCleanup.current?.(),[]);useEffect(()=>returnAll,[returnAll]);
   const hosts=runtime.registry.values().filter(host=>host.group&&host.resource.connected&&!host.resource.child.closed);
   const docs=[document,...new Set([...windows.values()].map(child=>child.document))];

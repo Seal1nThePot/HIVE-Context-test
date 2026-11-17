@@ -1,20 +1,41 @@
+# Dependencies and generated output
 node_modules/
 dist/
-.local/
-.test-tmp/
-*.tsbuildinfo
-
-# 个人写作与本地快照，不随仓库发布
-documents/
-*.zip
-
-# 本机发布、运行与压测产物
 release/
-.publish/
+release-*/
+out/
+build/
+coverage/
+*.tsbuildinfo
+*.zip
+*.tgz
+
+# Personal documents, credentials and local runtime state
+documents/
+.local/
+.hive-trash/
 .env
 .env.*
-!.env.example
 *.log
+*.pid
+
+# Local verification, archives and publishing workspaces
+.test-tmp/
+.backups/
+.publish/
+performance/
+delivery/
+evidence/
+playwright-report/
+test-results/
 __pycache__/
 *.pyc
-performance/
+
+# Documentation and handoff archives stay local
+/docs/
+/agent.md
+/AGENTS.md
+/HANDOFF.md
+/newhandoff.md
+/VALIDATION.md
+/src/**/index.md

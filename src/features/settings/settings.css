@@ -1,4 +1,11 @@
-.settings-page { position:fixed; inset:0; z-index:22000; display:flex; overflow:hidden; background:#181c18; color:#d5d7ca; font-size:calc(13px * var(--text-scale)); }
+.settings-floating { position:fixed; z-index:22000; display:flex; flex-direction:column; width:min(780px,calc(100vw - 16px)); height:min(720px,calc(100vh - 56px)); min-width:min(450px,100vw); min-height:260px; max-width:100vw; max-height:100vh; resize:both; overflow:hidden; border:1px solid var(--hive-surface-border,var(--line)); border-radius:8px; box-shadow:0 10px 35px #0008; }
+.settings-floating-minimized { height:34px!important; min-height:34px!important; resize:none; }
+.settings-floating-title { box-sizing:border-box; flex:none; height:32px; display:flex; align-items:center; justify-content:space-between; padding-left:12px; border-bottom:1px solid var(--hive-panel-inner-border); background:var(--hive-header-bg,var(--panel)); color:var(--text,#d5d7ca); cursor:move; user-select:none; }
+.settings-floating-actions { display:flex; align-items:center; height:100%; }
+.settings-floating-actions button { height:100%; padding:0 10px; border:0; color:inherit; background:transparent; cursor:pointer; }
+.settings-floating-actions button:hover { background:#ffffff18; }
+.desktop-panel-window .desktop-panel-surface > .settings-floating { resize:none; max-width:none; max-height:none; }
+.settings-page { position:relative; flex:1; min-height:0; display:flex; overflow:hidden; background:#181c18; color:#d5d7ca; font-size:calc(13px * var(--text-scale)); }
 .settings-page button,.settings-page input,.settings-page select { font:inherit; }
 .settings-sidebar { width:clamp(160px,19vw,210px); flex:none; display:flex; flex-direction:column; padding:22px 12px 16px; border-right:1px solid #30372b; background:#121612; }
 .settings-brand { display:flex; align-items:center; gap:10px; padding:0 10px 20px; letter-spacing:1px; }
@@ -15,14 +22,26 @@
 .settings-sidebar nav button svg {flex:none;}
 .settings-page .feature-toggle {display:flex;align-items:center;gap:9px;margin-top:20px;cursor:pointer;}
 .settings-page .feature-toggle input {flex:none;accent-color:#c1ae71;}
-.settings-page .setting-row{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:18px 0;margin:0;border-bottom:1px solid #394132;min-height:61px}
+.settings-page .setting-row{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:13.5px 0;margin:0;border-bottom:1px solid #394132;min-height:61px}
 .settings-page .setting-row:last-child{border-bottom:0}
 .settings-page .setting-row-info{flex:1;min-width:0}
 .settings-page .setting-row-title{color:#d4d9c8;font-size:calc(13px * var(--text-scale));line-height:1.5}
 .settings-page .setting-row-title label{margin:0}
-.settings-page .setting-row-info p{margin:5px 0 0;line-height:1.6;font-size:calc(11px * var(--text-scale));color:#8f9c81}
+.settings-page .setting-row-info p{margin:4px 0 0;line-height:1.5;font-size:calc(11px * var(--text-scale));color:#8f9c81}
 .settings-page .setting-row-control{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex:none;max-width:55%}
 .settings-page .setting-row-control input[type=range]{width:clamp(60px,12vw,160px)}
+/* Native range controls keep their value and keyboard behavior; only their paint changes. */
+.settings-page input[type=range] { appearance:none; -webkit-appearance:none; height:16px; padding:0; border:0; background:transparent; cursor:pointer; }
+.settings-page input[type=range]::-webkit-slider-runnable-track { height:4px; border-radius:999px; background:linear-gradient(to right,var(--hive-accent) 0 var(--range-progress,0%),var(--hive-input-border) var(--range-progress,0%) 100%); }
+.settings-page input[type=range]::-webkit-slider-thumb { appearance:none; -webkit-appearance:none; width:14px; height:14px; margin-top:-5px; border:2px solid var(--hive-settings-card); border-radius:50%; background:var(--hive-accent); box-shadow:0 0 0 1px var(--hive-accent); }
+.settings-page input[type=range]::-moz-range-track { height:4px; border-radius:999px; background:var(--hive-input-border); }
+.settings-page input[type=range]::-moz-range-progress { height:4px; border-radius:999px; background:var(--hive-accent); }
+.settings-page input[type=range]::-moz-range-thumb { width:10px; height:10px; border:2px solid var(--hive-settings-card); border-radius:50%; background:var(--hive-accent); box-shadow:0 0 0 1px var(--hive-accent); }
+.settings-page input[type=range]:hover:not(:disabled)::-webkit-slider-thumb { background:color-mix(in srgb,var(--hive-accent),var(--hive-settings-card) 20%); }
+.settings-page input[type=range]:hover:not(:disabled)::-moz-range-thumb { background:color-mix(in srgb,var(--hive-accent),var(--hive-settings-card) 20%); }
+.settings-page input[type=range]:focus-visible { outline:2px solid var(--hive-accent); outline-offset:3px; border-radius:3px; }
+.settings-page input[type=range]:disabled { opacity:.4; cursor:default; }
+@media (forced-colors:active) { .settings-page input[type=range] { appearance:auto; -webkit-appearance:auto; } }
 .settings-page .setting-row-control input[type=number]{width:70px;padding:6px 8px;margin:0}
 .settings-page input.setting-switch{appearance:none;position:relative;width:34px;height:20px;border-radius:12px;background:#4d5744;cursor:pointer;flex:none;margin:0}
 .settings-page input.setting-switch:before{content:'';position:absolute;width:14px;height:14px;border-radius:50%;left:3px;top:3px;background:#aeb69f;transition:transform .15s}
@@ -36,13 +55,13 @@
 .settings-nav-empty { color:#829476; font-size:calc(11px * var(--text-scale)); padding:12px; }
 .settings-sidebar nav button > span {white-space:nowrap;}
 .settings-content { flex:1; min-width:0; overflow:auto; padding:clamp(24px,5vw,64px); }
-.settings-page-heading { display:flex; gap:17px; align-items:center; margin:0 0 38px; }
+.settings-page-heading { display:flex; gap:17px; align-items:center; margin:0 0 28px; }
 .settings-title-icon { display:grid; place-items:center; width:48px; height:48px; background:#30382b; color:#d1bf87; border-radius:13px; flex:none; }
 .settings-page h1 { font-size:calc(25px * var(--text-scale)); font-weight:600; margin:0; color:#e5e3d3; }
 .settings-page-heading p { margin-top:7px; font-size:calc(11px * var(--text-scale)); color:#87947b; }
 .settings-close { margin-left:auto; align-self:flex-start; width:30px; height:30px; color:#98a28c; flex:none; }
 .settings-page h2 { margin:0; font-size:calc(14px * var(--text-scale)); font-weight:550; }
-.settings-card { padding:24px; margin-bottom:22px; background:#222820; border:1px solid #333d2e; border-radius:11px; }
+.settings-card { padding:18px; margin-bottom:16px; background:#222820; border:1px solid #333d2e; border-radius:11px; }
 .settings-card p { color:#98a38b; font-size:calc(12px * var(--text-scale)); line-height:1.8; }
 .settings-card > p { margin-top:10px; }
 .settings-page input:not([type=range]):not([type=checkbox]),.settings-page select { border:1px solid #46513b; background:#192016; padding:11px 12px; border-radius:6px; color:#d8dccd; min-width:0; }
@@ -98,7 +117,7 @@
 .writing-settings > small { display:block; max-width:600px; color:#8f9d7e; line-height:1.9; }
 .writing-settings > button { margin-top:25px; }
 .shortcut-settings > h2 { margin-bottom:18px; }
-.shortcut-settings > div { display:flex; align-items:center; justify-content:space-between; padding:16px 0; gap:20px; border-top:1px solid #364030; }
+.shortcut-settings > div { display:flex; align-items:center; justify-content:space-between; padding:12px 0; gap:20px; border-top:1px solid #364030; }
 .shortcut-settings kbd { font-size:calc(12px * var(--text-scale)); color:#c4c9b1; padding:5px 8px; border:1px solid #4c583f; border-radius:4px; white-space:nowrap; }
 .service-editor-actions { position:sticky; top:0; z-index:2; display:flex; justify-content:flex-end; gap:10px; margin:-12px 0 20px; padding:8px 0; background:#181c18; }
 .service-protocol { display:flex; align-items:center; gap:9px; padding-bottom:20px; margin-bottom:22px; border-bottom:1px solid #394330; }
@@ -126,3 +145,19 @@
 .header-actions .connection { max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 @media(max-width:900px) { .settings-content { padding:27px 22px; } .settings-sidebar { width:185px; padding-left:10px; padding-right:10px; } .settings-card { padding:18px; } .model-service-key-state { display:none; } .add-model-fields { grid-template-columns:1fr 1fr; } .add-model-fields button { grid-column:1 / -1; justify-self:start; } }
 @media(max-width:600px) { .settings-sidebar { width:125px; padding:20px 8px; } .settings-brand { padding:0 4px 24px; gap:5px; } .settings-brand small,.settings-sidebar nav button small,.settings-nav-caption { display:none; } .settings-sidebar nav { margin-top:15px; } .settings-sidebar nav button { padding:12px 8px; gap:7px; } .settings-content { padding:22px 14px; } .settings-page h1 { font-size:calc(19px * var(--text-scale)); } .settings-title-icon { display:none; } .settings-page-heading { margin-bottom:24px; } .model-runtime { align-items:stretch; flex-direction:column; } .model-runtime select { max-width:none; } .service-form-grid,.add-model-fields { grid-template-columns:1fr; } .model-service-card { padding:12px; gap:7px; } .model-service-avatar { width:28px; height:28px; } .service-protocol { flex-wrap:wrap; } .service-protocol span { margin-left:0; width:100%; } .settings-page .appearance-setting { grid-template-columns:1fr 55px 16px; } .settings-page .appearance-setting label { grid-column:1 / -1; } .service-model-row { flex-wrap:wrap; } .service-model-id { flex-basis:100%; } .settings-page .service-model-row input { flex:1; } }
+
+/* 设置页宽幅设置行 */
+.settings-sidebar nav { overflow-y:auto; min-height:0; }
+.settings-page .settings-card .ribbon-display-settings,
+.settings-page .settings-card .typography-settings { margin:0; padding:0; border:0; min-width:0; }
+.settings-page .settings-card .typography-settings legend { padding:0 0 12px; }
+@media(max-width:600px) {
+  .settings-page .setting-row { flex-wrap:wrap; gap:10px; }
+  .settings-page .setting-row-control { max-width:100%; flex-wrap:wrap; }
+}
+
+.settings-page .workspace-settings .setting-row-control { min-width:0; }
+.settings-page .workspace-settings form { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; margin:0; width:100%; }
+.settings-page .workspace-settings form input { flex:1 1 220px; min-width:0; width:auto; }
+.settings-page .workspace-folder-name { overflow-wrap:anywhere; text-align:right; }
+@media(max-width:600px) { .settings-page .workspace-settings .setting-row-control { flex:1 1 100%; } }

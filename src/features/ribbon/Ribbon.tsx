@@ -27,6 +27,16 @@ import type {Alignment,InlineFormat} from '../editor/formatting';
 export type RibbonCommand=InlineFormat|Alignment|'bullet'|'numbered'|'quote'|'task'|'codeBlock'|'link'|'rule'|'find'|'image'|'table'|'properties'|'undo'|'redo'|0|1|2|3|4;
 const commands:Partial<Record<string,RibbonCommand>>={'撤销':'undo','重做':'redo','加粗':'bold','倾斜':'italic','下划线':'underline','删除线':'strike','行内代码':'inlineCode','代码块':'codeBlock','链接':'link','分隔线':'rule','待办列表':'task','左对齐':'left','居中':'center','右对齐':'right','项目符号':'bullet','编号':'numbered','引用':'quote','查找替换':'find','查找':'find','插入图片':'image','插入表格':'table','插入笔记属性':'properties','文档属性':'properties'};
 const shortcuts:Partial<Record<string,string>>={'加粗':'Ctrl+B','倾斜':'Ctrl+I','下划线':'Ctrl+U','左对齐':'Ctrl+Shift+L','居中':'Ctrl+Shift+E','右对齐':'Ctrl+Shift+R','撤销':'Ctrl+Z','重做':'Ctrl+Y','查找替换':'Ctrl+F'};
+const descriptions: Partial<Record<string,string>> = {
+  '撤销':'撤销上一步操作。','重做':'重做上一步撤销的操作。',
+  '加粗':'将所选内容字体加粗。','倾斜':'将所选内容设为斜体。','下划线':'为所选内容添加下划线。','删除线':'为所选内容添加删除线。','行内代码':'将所选内容设为行内代码。',
+  '左对齐':'将当前段落左对齐。','居中':'将当前段落居中对齐。','右对齐':'将当前段落右对齐。',
+  '项目符号':'将当前内容设为项目符号列表。','编号':'将当前内容设为编号列表。','引用':'将当前内容设为引用。',
+  '代码块':'插入或切换代码块。','链接':'为内容添加链接。','分隔线':'插入分隔线。','待办列表':'将当前内容设为待办列表。',
+  '查找替换':'在当前文稿中查找和替换内容。','查找':'在当前文稿中查找内容。',
+  '插入图片':'插入图片。','插入表格':'插入表格。','插入笔记属性':'编辑文稿属性。','文档属性':'编辑文稿属性。',
+};
+
 
 const content = {
   文件: [
@@ -121,6 +131,21 @@ export default function Ribbon({viewControls,visible,collapsed,onVisibilityChang
   const [tab, setTab] = useState<keyof typeof content>("开始");
   const [menuOpen,setMenuOpen]=useState(false),[position,setPosition]=useState({x:0,y:0});
   const menuButton=useRef<HTMLButtonElement>(null),menu=useRef<HTMLDivElement>(null);
+  const [tooltip,setTooltip]=useState<{name:string; x:number; y:number; description:string}|null>(null);
+  function showTooltip(name:string, target:HTMLElement) {
+    const rect=target.getBoundingClientRect();
+    const width=Math.min(260,window.innerWidth-16);
+    setTooltip({name,x:Math.max(8,Math.min(rect.left,window.innerWidth-width-8)),y:rect.bottom+20,
+      description:commands[name]===undefined?'此功能尚未开放。':!editorReady?'请先打开或激活编辑区。':descriptions[name]||'执行此操作。'});
+  }
+  useEffect(()=>{setTooltip(null);},[tab,visible,collapsed,editorReady]);
+  useEffect(()=>{
+    if(!tooltip)return;
+    const dismiss=(event:KeyboardEvent)=>{if(event.key==='Escape')setTooltip(null);};
+    const close=()=>setTooltip(null);
+    document.addEventListener('keydown',dismiss);window.addEventListener('resize',close);window.addEventListener('scroll',close,true);
+    return()=>{document.removeEventListener('keydown',dismiss);window.removeEventListener('resize',close);window.removeEventListener('scroll',close,true);};
+  },[tooltip]);
   useEffect(()=>{if(!visible)setMenuOpen(false);},[visible]);
   useLayoutEffect(()=>{
     if(!menuOpen||!menuButton.current)return;
@@ -162,25 +187,39 @@ export default function Ribbon({viewControls,visible,collapsed,onVisibilityChang
                   <option value="" disabled>标题 / 正文</option><option value="0">正文</option><option value="1">标题 1</option><option value="2">标题 2</option><option value="3">标题 3</option><option value="4">标题 4</option>
                 </select>
               )}
-              {group.items.map(([name, Icon]) => (
-                <button
-                  key={name}
-                  type="button"
-                  disabled={commands[name]===undefined||!editorReady}
-                  aria-label={commands[name]===undefined?name+'（功能预留）':name}
-                  title={name+(commands[name]===undefined?' · 功能预留':shortcuts[name]?' · '+shortcuts[name]:'')}
-                  onMouseDown={event=>{if(commands[name]!==undefined)event.preventDefault();}}
-                  onClick={()=>{const command=commands[name];if(command!==undefined)onCommand(command);}}
-                >
-                  <Icon size={16} />
-                  <span>{name}</span>
-                </button>
-              ))}
+              {group.items.map(([name, Icon]) => {
+                const disabled=commands[name]===undefined||!editorReady;
+                return <div key={name} className="ribbon-tool-trigger"
+                  tabIndex={disabled?0:undefined}
+                  aria-label={disabled?name+(commands[name]===undefined?'（功能预留）':'（请先打开或激活编辑区）'):undefined}
+                  aria-disabled={disabled||undefined}
+                  aria-describedby={disabled&&tooltip?.name===name?'ribbon-tool-tooltip':undefined}
+                  onMouseEnter={event=>showTooltip(name,event.currentTarget)}
+                  onMouseLeave={()=>setTooltip(null)}
+                  onFocus={event=>showTooltip(name,event.currentTarget)}
+                  onBlur={()=>setTooltip(null)}>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    aria-label={commands[name]===undefined?name+'（功能预留）':name}
+                    aria-describedby={!disabled&&tooltip?.name===name?'ribbon-tool-tooltip':undefined}
+                    onMouseDown={event=>{if(commands[name]!==undefined)event.preventDefault();}}
+                    onClick={()=>{const command=commands[name];if(command!==undefined)onCommand(command);}}
+                  >
+                    <Icon size={16} />
+                    <span>{name}</span>
+                  </button>
+                </div>;
+              })}
             </div>
             <small>{group.name}</small>
           </div>
         ))}
       </div>
+      {tooltip&&createPortal(<div id="ribbon-tool-tooltip" className="ribbon-tool-tooltip" role="tooltip" style={{left:tooltip.x,top:tooltip.y}}>
+        <strong>{tooltip.name}{shortcuts[tooltip.name]?' ('+shortcuts[tooltip.name]+')':''}</strong>
+        <span>{tooltip.description}</span>
+      </div>,document.body)}
       {menuOpen&&createPortal(<div ref={menu} className="panel-control-menu ribbon-display-menu" role="menu" aria-label="顶部编辑栏操作" style={{left:position.x,top:position.y}} onKeyDown={event=>{
         if(event.key==='Escape'){event.preventDefault();event.stopPropagation();finish(()=>{});}
         if(event.key==='Tab'){setMenuOpen(false);menuButton.current?.focus();}

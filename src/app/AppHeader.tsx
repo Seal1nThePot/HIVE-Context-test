@@ -41,13 +41,13 @@ export function AppHeader({ workspace, sessions, editorState, editorIds, panelLa
         <div className="user-avatar" aria-label="用户头像">我</div>
         <button
           className="workspace-switcher"
-          title="写作空间设置"
-          aria-label="写作空间设置"
+          title="仓库管理"
+          aria-label="仓库管理"
           onClick={() => {
             openSettings('workspace');
           }}
         >
-          <b>我的写作空间</b>
+          <b>仓库管理</b>
           <ChevronDown size={13} />
         </button>
         <div className="quick-file-actions" aria-label="文档保存操作">
@@ -78,6 +78,7 @@ export function AppHeader({ workspace, sessions, editorState, editorIds, panelLa
             {id:"conversation",label:"对话",open:chatOpen,category:'ai',keywords:['聊天','模型']},
             {id:"annotations",label:"标注",open:workspace.isOpen("annotations"),category:'writing',keywords:['选区','批注']},
             {id:"outline",label:"大纲",open:workspace.isOpen("outline"),category:'writing',keywords:['节点','章节']},
+            {id:'properties',label:'笔记属性',open:workspace.isOpen('properties'),category:'writing',keywords:['文档属性','元数据','frontmatter']},
             {id:"toc",label:"标题目录",open:workspace.isOpen("toc"),category:'writing',keywords:['标题','导航']},
             {id:"scratch",label:"草稿",open:workspace.isOpen("scratch"),category:'writing',keywords:['草稿纸','临时']},
             {id:"basis",label:"依据",open:workspace.isOpen("basis"),category:'ai',keywords:['参考','资料','上下文']},

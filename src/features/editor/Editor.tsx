@@ -33,19 +33,15 @@ import {inlineFormatting,paragraphAlignment,type Alignment,type InlineFormat} fr
 import {configureTypewriter,typewriterExtensions} from './typewriter';
 import {usePanelActivity} from '../../shared/panelActivity';
 import {deferredEditorSleep} from './editorSleep';
+import {configureTypography,typographyExtensions} from '../typography/typographyExtension';
 
 const colors = HighlightStyle.define([
-  {
-    tag: tags.heading1,
-    color: "#f1ede2",
-    fontWeight: "650",
-  },
-  {
-    tag: tags.heading2,
-    color: "#e6dfd0",
-    fontWeight: "600",
-  },
-  { tag: tags.heading3, color: "#d7d0bd", fontWeight: "600" },
+  {tag:tags.heading1,class:'cm-markdown-h1'},
+  {tag:tags.heading2,class:'cm-markdown-h2'},
+  {tag:tags.heading3,class:'cm-markdown-h3'},
+  {tag:tags.heading4,class:'cm-markdown-h4'},
+  {tag:tags.heading5,class:'cm-markdown-h5'},
+  {tag:tags.heading6,class:'cm-markdown-h6'},
   { tag: tags.processingInstruction, color: "#716c59" },
   { tag: tags.emphasis, fontStyle: "italic", color: "#d1bb80" },
   { tag: tags.strong, fontWeight: "700", color: "#e5d8b6" },
@@ -68,6 +64,7 @@ export function makeState(
       displayModeField.init(()=>displayMode),
       floatingSearchExtensions,
       typewriterExtensions,
+      typographyExtensions,
       EditorState.allowMultipleSelections.of(true),
       EditorState.phrases.of({Find:'查找',Replace:'替换',next:'下一处',previous:'上一处',all:'全部','match case':'区分大小写',regexp:'正则表达式','by word':'全词',replace:'替换','replace all':'全部替换',close:'关闭'}),
       history(),
@@ -99,13 +96,11 @@ export function makeState(
           ".cm-scroller": {
             fontFamily:
               '"Microsoft YaHei", "PingFang SC", system-ui, sans-serif',
-            lineHeight: "2.05",
             overflow: "auto",
           },
           ".cm-content": {
             padding: "12px 0 120px",
             caretColor: "#dcc486",
-            maxWidth: "780px",
             margin: "0 auto",
             width: "100%",
           },
@@ -124,19 +119,19 @@ export function makeState(
           ".cm-searchMatch": { background: "#b99d4c3a" },
           ".cm-searchMatch-selected": { background: "#b99d4c70" },
           ".cm-textfield": {
-            background: "#181b18",
-            border: "1px solid #444b40",
-            color: "#eee",
+            background: "var(--bg, #181b18)",
+            border: "1px solid var(--hive-popup-border, var(--line, #444b40))",
+            color: "var(--hive-popup-text, var(--text, #eee))",
           },
           ".cm-button": {
-            background: "#30362e",
-            color: "#eee",
-            border: "1px solid #48513f",
+            background: "var(--panel, #30362e)",
+            color: "var(--hive-popup-text, var(--text, #eee))",
+            border: "1px solid var(--hive-popup-border, var(--line, #48513f))",
           },
           ".cm-tooltip": {
-            background: "#252a24",
-            color: "#eee",
-            border: "1px solid #48513f",
+            background: "var(--hive-popup-bg, var(--panel, #252a24))",
+            color: "var(--hive-popup-text, var(--text, #eee))",
+            border: "1px solid var(--hive-popup-border, var(--line, #48513f))",
           },
         },
         { dark: true },
@@ -218,6 +213,7 @@ export default function Editor({
     onReady(view);
     // Existing sessions keep their EditorState through Vite updates and pane remounts.
     configureMarkdownDisplay(view,displayMode);
+    configureTypography(view);
     return () => {
       onReady(null);
       editorRef.current=null;

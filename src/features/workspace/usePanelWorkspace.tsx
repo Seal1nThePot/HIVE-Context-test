@@ -144,6 +144,28 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
     iconAnchors.current.delete(id);
     update(old=>repositionAutoHidePanel(old,id,offset,edge));
   }
+  function pullAutoHideRail(edge:'left'|'right',width:number){
+    const state=latest.current,next=dockAutoHideRail(state,edge,width,boundsRef.current.width);
+    if(next===state)return;
+    const ids=Object.entries(state.autoHide||{}).filter(([,placement])=>placement.edge===edge).map(([id])=>id),selected=new Set(ids);
+    if(desktop.enabled){
+      if(desktop.isComposing()||ids.some(id=>nativeHandoffs.current.has(id)))return;
+      // Return the existing containers before removing their shelf entries. A
+      // member may share a native host with a panel on the opposite rail.
+      for(const id of ids)if(!desktop.removeMember(id))return;
+    }
+    for(const id of ids){nativeHomes.current.delete(id);pendingNativeOpen.current.delete(id);iconAnchors.current.delete(id);}
+    for(const [owner,group] of nativeGroups.current){
+      if(!group.panels.some(id=>selected.has(id)))continue;
+      const panels=group.panels.filter(id=>!selected.has(id));
+      if(panels.length>1)nativeGroups.current.set(owner,{...group,panels,active:panels.includes(group.active)?group.active:panels[0]});
+      else{
+        nativeGroups.current.delete(owner);
+        if(pendingNativeGroups.current.delete(owner))for(const id of panels)pendingNativeOpen.current.add(id);
+      }
+    }
+    update(()=>next);
+  }
   useEffect(()=>{
     const id=layout.autoHideActive;if(!id)return;
     const outside=(event:globalThis.PointerEvent)=>{
@@ -403,7 +425,7 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
       draggedLabel={refFor(dragging).current?.getAttribute('aria-label')||'面板'}
       tabs={(tabGroups.find(group=>group.panels.includes(dockFeedback?.target?.id||''))?.panels.filter(id=>id!==dragging)||[dockFeedback?.target?.id||'']).map(id=>refFor(id).current?.getAttribute('aria-label')||'目标面板')}/>,document.body)}
   </>;
-  return {panel,beginTabDrag,beginGroupDrag,groupFloat,groupDock,prepareNativeFloat,floatNativePanel,returnNativePanel,canPullRail:(edge:'left'|'right')=>canDockAutoHideRail(layout,edge),dockAutoHideRail:(edge:'left'|'right',width:number)=>update(old=>dockAutoHideRail(old,edge,width,boundsRef.current.width)),closePreservingAutoHide,open,splitEditor,openDocumentTab,isPositionLocked:(id:string)=>isPanelPositionLocked(layout,id),togglePositionLock,locked:!!layout.locked,toggleLocked:()=>{cleanup.current?.();stopDocking();update(old=>({...old,locked:!old.locked}));},close:(id:string)=>hide(id,false),minimize:(id:string)=>hide(id,true),toggle:(id:string)=>layout.open.includes(id)?hide(id,false):open(id),isOpen:(id:string)=>layout.open.includes(id),chrome,
+  return {panel,beginTabDrag,beginGroupDrag,groupFloat,groupDock,prepareNativeFloat,floatNativePanel,returnNativePanel,canPullRail:(edge:'left'|'right')=>canDockAutoHideRail(layout,edge),dockAutoHideRail:pullAutoHideRail,closePreservingAutoHide,open,splitEditor,openDocumentTab,isPositionLocked:(id:string)=>isPanelPositionLocked(layout,id),togglePositionLock,locked:!!layout.locked,toggleLocked:()=>{cleanup.current?.();stopDocking();update(old=>({...old,locked:!old.locked}));},close:(id:string)=>hide(id,false),minimize:(id:string)=>hide(id,true),toggle:(id:string)=>layout.open.includes(id)?hide(id,false):open(id),isOpen:(id:string)=>layout.open.includes(id),chrome,
     capture:()=>structuredClone(latest.current),
     restoreLayout:(saved:WorkspaceLayout)=>{
       if(latest.current.locked)throw new Error('请先解锁工作区位置，再应用其他视图。');

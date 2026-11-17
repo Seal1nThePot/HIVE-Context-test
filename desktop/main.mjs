@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import preferencesModule from './preferences.cjs';
 import windowPolicy from './windowPolicy.cjs';
 import {createPanelReadyHandler} from './panelReady.cjs';
+import {createTooltipManager} from './tooltipManager.cjs';
+import {resolveTemplateSource} from './templateSource.cjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const appName = 'HIVE markdown editor';
@@ -27,10 +29,11 @@ let appActive = true, appBlurTimer;
 let closeTimer;
 let preferenceStore, initialPreferences = {};
 let dockWindow, dockData = null, dockLoaded = false;
+const tooltip = createTooltipManager({BrowserWindow,screen,root,getToolbar:()=>panelWindows.get('global-toolbar')});
 const webPreferences = { preload, contextIsolation: true, nodeIntegration: false, sandbox: true };
 const sameOrigin = url => { try { return new URL(url).origin === origin; } catch { return false; } };
 function emitPanelMove(id, phase, free=panelDrag?.free===true) {
-  if (id === 'global-toolbar' || !mainWindow || mainWindow.isDestroyed() || exiting || !readyPanelIds.has(id)) return;
+  if (id === 'global-toolbar' || id === 'settings' || !mainWindow || mainWindow.isDestroyed() || exiting || !readyPanelIds.has(id)) return;
   const point = windowPolicy.contentPoint(screen.getCursorScreenPoint(), mainWindow.getContentBounds(), mainWindow.webContents.getZoomFactor());
   mainWindow.webContents.send('hive:panel-move', {id,phase,...point,free});
 }
@@ -54,7 +57,7 @@ function panelBounds(features, id) {
   const base = mainWindow.getBounds();
   if (id === 'global-toolbar') return {...windowPolicy.toolbarPosition(base, screen.getDisplayMatching(base).workArea),width:352,height:104};
   const editor = id === 'editor' || id.startsWith('editor:');
-  const maxWidth = editor ? 760 : 380, maxHeight = editor ? 620 : 520;
+  const maxWidth = id === 'settings' ? 900 : editor ? 760 : 380, maxHeight = id === 'settings' ? 800 : editor ? 620 : 520;
   const desired = { x: number('left', number('x', base.x + 50)), y: number('top', number('y', base.y + 50)), width: Math.min(maxWidth, Math.max(220, number('width', maxWidth))), height: Math.min(maxHeight, Math.max(140, number('height', maxHeight))) };
   const area = screen.getDisplayMatching(desired).workArea;
   desired.width = Math.min(desired.width, area.width); desired.height = Math.min(desired.height, area.height);
@@ -81,6 +84,7 @@ function secureWindow(window, primary = false, entry = '') {
       if (panelId(details.url) !== id) return;
       clearTimeout(expiry); window.webContents.removeListener('did-create-window', created);
       secureWindow(child, false, details.url); panelWindows.set(id, child);
+      if(id==='global-toolbar') for(const name of ['move','hide','minimize','closed','blur']) child.on(name,tooltip.hide);
       let moving = false;
       if (process.platform === 'win32' && id !== 'global-toolbar') {
         child.on('will-move', () => { if (panelDrag) return; moving = true; emitPanelMove(id, 'move'); });
@@ -101,7 +105,7 @@ function secureWindow(window, primary = false, entry = '') {
     window.webContents.on('did-create-window', created);
     expiry.unref();
     const toolbar = id === 'global-toolbar';
-    const windowOptions = toolbar ? { width: 352, height: 104, minWidth: 352, minHeight: 104, resizable: false, minimizable: false, transparent: true, backgroundColor: '#00000000' } : { minWidth: 220, minHeight: 140, resizable: true, thickFrame: true, backgroundColor: '#18181b' };
+    const windowOptions = toolbar ? { width: 352, height: 104, minWidth: 352, minHeight: 104, resizable: false, minimizable: false, transparent: true, backgroundColor: '#00000000' } : { minWidth: id === 'settings' ? 450 : 220, minHeight: id === 'settings' ? 260 : 140, resizable: true, thickFrame: true, backgroundColor: '#18181b' };
     return { action: 'allow', overrideBrowserWindowOptions: { ...panelBounds(features, id), ...windowOptions, frame: false, maximizable: false, show: false, webPreferences } };
   });
 }
@@ -129,9 +133,10 @@ async function completeExit() {
 function startService() {
   return new Promise((resolve, reject) => {
     const userData = app.getPath('userData');
+    const templateSource=resolveTemplateSource({projectRoot:root,executablePath:app.getPath('exe'),portableDirectory:process.env.PORTABLE_EXECUTABLE_DIR,override:process.env.HIVE_TEMPLATES_SOURCE});
     service = fork(path.join(root, 'server', 'index.mjs'), process.env.HIVE_DESKTOP_DEV === '1' && !app.isPackaged ? [] : ['--production'], {
       execPath: process.execPath, stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', HIVE_PORT: '0', HIVE_STATE_DIR: path.join(userData, 'state'), HIVE_DOCUMENTS: path.join(userData, 'documents') },
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', HIVE_PORT: '0', HIVE_STATE_DIR: path.join(userData, 'state'), HIVE_DOCUMENTS: path.join(userData, 'documents'), HIVE_TEMPLATES_DIR: path.join(userData, 'templates'), HIVE_TEMPLATES_SOURCE:templateSource||'' },
     });
     let settled = false;
     const timeout = setTimeout(() => fail(new Error('本地服务启动超时。')), 30000);
@@ -151,6 +156,7 @@ function startService() {
 }
 const isMainSender = event => !!mainWindow && event.sender === mainWindow.webContents;
 const isMainOrigin = event => isMainSender(event) && sameOrigin(event.senderFrame?.url);
+ipcMain.on('hive:dock-tooltip', (event, value) => { if (isMainOrigin(event)) tooltip.show(value); });
 function updateDockOverlay() {
   if (!dockWindow || dockWindow.isDestroyed() || !mainWindow || mainWindow.isDestroyed()) return;
   if (!dockData) { dockWindow.hide(); return; }
@@ -268,7 +274,7 @@ else {
   app.on('activate', () => showAllWindows(true, true));
   app.on('browser-window-blur', () => {
     clearTimeout(appBlurTimer);
-    appBlurTimer = setTimeout(() => { if (!BrowserWindow.getFocusedWindow()) appActive = false; }, 50);
+    appBlurTimer = setTimeout(() => { if (!BrowserWindow.getFocusedWindow()) { appActive = false; tooltip.hide(); } }, 50);
   });
   app.on('browser-window-focus', () => {
     clearTimeout(appBlurTimer);

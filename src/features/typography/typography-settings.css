@@ -1,0 +1,7 @@
+.typography-settings{margin:28px 0 0;border:0;border-top:1px solid #38422f;padding:24px 0 0;min-width:0}
+.settings-page .typography-settings legend{padding:0 8px 0 0;font-size:calc(14px * var(--text-scale));color:#d4d9c8}
+.typography-settings .setting-row-control{flex-wrap:wrap}
+.typography-settings input[type=number]{width:78px!important;min-width:60px}
+.typography-settings input[type=range]{max-width:180px;min-width:65px}
+.typography-settings select{min-width:110px}
+.typography-settings .typography-customized{color:#c9b97d}

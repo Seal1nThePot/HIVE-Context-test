@@ -4,6 +4,7 @@ import {StateField,type ChangeDesc,type EditorState,type Text,type Transaction} 
 import {inspectFormatting} from './formatting';
 import {markdownTree} from './markdownParse';
 import {scanMath,mergeSourceSpans,outsideMath,type SourceSpan} from './mathSyntax';
+import {paragraphTypographyStyles} from '../typography/paragraphTypography';
 
 type Span={from:number;to:number};
 type Node=SyntaxNode;
@@ -72,6 +73,7 @@ export function previewPlan(state:EditorState):PreviewPlan{
   const hideLine=(pos:number,reveal?:Span)=>{const line=doc.lineAt(pos);hide(line.from,Math.min(doc.length,line.to+1),reveal||{from:line.from,to:line.to},{block:true});};
   function walk(node:Node){
     const parts=children(node),span={from:node.from,to:node.to};
+    if(node.name==='Paragraph')styles.push(...paragraphTypographyStyles(node,doc));
     if(hasMath&&['FencedCode','CodeBlock','InlineCode','Table','Image','HTMLBlock','HTMLTag','Autolink','LinkReference','URL','LinkTitle'].includes(node.name))mathExcluded.push(span);
     if(hasMath&&node.name==='Link')for(const part of parts)if(part.name==='URL'||part.name==='LinkTitle')mathExcluded.push({from:part.from,to:part.to});
     const heading=/^(?:ATX|Setext)Heading([1-6])$/.exec(node.name);
@@ -156,6 +158,7 @@ export function previewPlan(state:EditorState):PreviewPlan{
   }
   if(metadata)mathExcluded.push({from:metadata.from,to:metadata.to});
   const math=hasMath?scanMath(text,mathExcluded):{math:[],literal:[]},protectedSpans=mergeSourceSpans([...math.math,...math.literal]);
+  const blockMathLines=mergeSourceSpans([...math.math.filter(item=>item.block),...math.literal].map(item=>({from:doc.lineAt(item.from).from,to:doc.lineAt(Math.max(item.from,item.to-1)).to+1})));
   const mathReplacements:PreviewReplacement[]=math.math.map(item=>({from:item.from,to:item.to,reveal:{from:item.from,to:item.to},block:item.block,kind:'math',text:item.status}));
   const plan={
     replacements:[...replacements.filter(item=>{
@@ -163,7 +166,7 @@ export function previewPlan(state:EditorState):PreviewPlan{
       if(!protectedSpans.length)return true;
       const pieces=outsideMath(item,protectedSpans);return pieces.length===1&&pieces[0].from===item.from&&pieces[0].to===item.to;
     }),...mathReplacements],
-    styles:styles.filter(item=>!metadata||item.from>=metadata.to).flatMap(item=>item.line?[item]:outsideMath(item,protectedSpans)),
+    styles:styles.filter(item=>(!metadata||item.from>=metadata.to)&&(!item.className?.startsWith('cm-typography-')||outsideMath({from:item.from,to:item.from+1},blockMathLines).length>0)).flatMap(item=>item.line?[item]:outsideMath(item,protectedSpans)),
   };cache.set(doc,plan);return plan;
 }
 

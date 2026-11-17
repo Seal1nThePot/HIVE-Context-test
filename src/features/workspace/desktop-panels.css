@@ -3,6 +3,9 @@
 .desktop-panel-window .desktop-panel-shell { height:100dvh; min-height:0; }
 .desktop-panel-window .desktop-panel-workbench { flex:1; width:100%; height:100%; min-width:0; min-height:0; }
 .desktop-panel-window .desktop-panel-surface > .workspace-panel { position:fixed!important; inset:0!important; width:100vw!important; height:100vh!important; min-width:0!important; min-height:0!important; display:flex!important; z-index:1!important; border-radius:0!important; box-shadow:none!important; }
+/* The child panel owns the native window's single frame, including grouped hosts. */
+.desktop-panel-window .desktop-panel-shell { border:0; }
+.desktop-panel-window:not(.desktop-toolbar-window) .desktop-panel-surface > .workspace-panel { border:1px solid var(--hive-surface-border)!important; }
 .desktop-panel-window .desktop-panel-surface > .workspace-panel > .panel-drag-header { display:flex!important; cursor:default!important; }
 .desktop-panel-window .desktop-panel-surface[data-native-active="false"] > .workspace-panel { display:none!important; }
 .desktop-panel-window .desktop-panel-surface[data-native-active] > .workspace-panel > .panel-drag-header > b,
