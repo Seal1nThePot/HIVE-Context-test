@@ -1,10 +1,11 @@
 import ThemeSettings from '../theme/ThemeSettings';
 import SettingRow from './SettingRow';
-import WorkspaceSettings from "../files/WorkspaceSettings";
 import {StatusBarSettings,type StatusPreferences} from "../editor/EditorStatusBar";
 import { useEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { DesktopPanel, useDesktopPanels } from '../workspace/DesktopPanels';
-import { ArrowLeft, ArrowDown, ArrowUp, Bot, Check, ChevronRight, Keyboard, LayoutPanelTop, Minus, Palette, PencilLine, Plus, Search, Server, SlidersHorizontal, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ArrowDown, ArrowUp, Bot, Check, ChevronRight, Info, Keyboard, LayoutPanelTop, Minus, Palette, PencilLine, Plus, Search, Server, SlidersHorizontal, Trash2, X } from 'lucide-react';
+import AboutSettings from './AboutSettings';
+import {aboutSearchKeywords} from './aboutInfo';
 import AppearanceSettings from './AppearanceSettings';
 import AnnotationSettings from './AnnotationSettings';
 import type {usePanelIconDragPreferences} from './usePanelIconDragPreferences';
@@ -13,22 +14,25 @@ import { useAppearance } from './useAppearance';
 import { activeModelLabel, modelOptions, modelChoice, parseModelChoice, type Config, type ModelService } from './modelConfig';
 import './settings.css';
 
-export type SettingsSection='appearance'|'appearance-reserved'|'features'|'writing'|'models'|'shortcuts'|'workspace';
-type Props={panelIconDragPreferences:ReturnType<typeof usePanelIconDragPreferences>;annotationPreferences:ReturnType<typeof useAnnotationPreferences>;statusPreferences:StatusPreferences;onSwitchWorkspace:(root:string)=>Promise<void>;config:Config;initialSection:SettingsSection;restoreKey:number;appearance:ReturnType<typeof useAppearance>;busy:boolean;
+export type SettingsSection='appearance'|'appearance-reserved'|'features'|'writing'|'models'|'shortcuts'|'about';
+type Props={panelIconDragPreferences:ReturnType<typeof usePanelIconDragPreferences>;annotationPreferences:ReturnType<typeof useAnnotationPreferences>;statusPreferences:StatusPreferences;config:Config;initialSection:SettingsSection;restoreKey:number;appearance:ReturnType<typeof useAppearance>;busy:boolean;
   onRequest:(route:string,body:unknown)=>Promise<void>;onReload:()=>Promise<void>;onClose:()=>void};
 type ServiceDraft=Omit<ModelService,'id'|'hasKey'>&{id?:string;key:string;clearKey:boolean};
-const sections=[{id:'workspace' as const,label:'仓库管理',description:'仓库目录与自动保存',Icon:Server},{id:'appearance' as const,label:'界面',description:'顶部编辑栏、文字、正文排版与底部栏',Icon:LayoutPanelTop},
+const sections=[{id:'appearance' as const,label:'界面',description:'顶部编辑栏、文字、正文排版与底部栏',Icon:LayoutPanelTop},
   {id:'appearance-reserved' as const,label:'外观',description:'外观设置',Icon:Palette},
   {id:'features' as const,label:'功能',description:'悬浮工具与面板',Icon:SlidersHorizontal},
   {id:'writing' as const,label:'写作',description:'续写与写作节奏',Icon:PencilLine},
   {id:'models' as const,label:'模型',description:'AI 服务与模型管理',Icon:Bot},
-  {id:'shortcuts' as const,label:'快捷键',description:'编辑与面板操作',Icon:Keyboard}];
+  {id:'shortcuts' as const,label:'快捷键',description:'编辑与面板操作',Icon:Keyboard},
+  {id:'about' as const,label:'关于',description:'版本、构建、离线帮助与诊断信息',keywords:aboutSearchKeywords,Icon:Info}];
+
+const sectionMatches=(item:typeof sections[number],search:string)=>(item.label+item.description+('keywords' in item?item.keywords:'')).toLowerCase().includes(search.trim().toLowerCase());
 
 export default function SettingsPage(props:Props){
   return <DesktopPanel id="settings" title="设置" open><SettingsContent {...props}/></DesktopPanel>;
 }
 
-function SettingsContent({panelIconDragPreferences,annotationPreferences,statusPreferences,onSwitchWorkspace,config,initialSection,restoreKey,appearance,busy,onRequest,onReload,onClose}:Props){
+function SettingsContent({panelIconDragPreferences,annotationPreferences,statusPreferences,config,initialSection,restoreKey,appearance,busy,onRequest,onReload,onClose}:Props){
   const [section,setSection]=useState(initialSection),[search,setSearch]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const [draft,setDraft]=useState<ServiceDraft|null>(null),[modelId,setModelId]=useState(''),[modelName,setModelName]=useState(''),[filter,setFilter]=useState(''),[removeId,setRemoveId]=useState<string|null>(null),[discard,setDiscard]=useState(false);
   const [limit,setLimit]=useState(String(config.continuationLimit));
@@ -106,14 +110,15 @@ function SettingsContent({panelIconDragPreferences,annotationPreferences,statusP
     <aside className="settings-sidebar">
       <div className="settings-brand"><span>H</span><b>HIVE</b><small>设置</small></div>
       <label className="settings-search"><Search size={15}/><input aria-label="搜索设置" placeholder="搜索设置…" value={search} disabled={editing} onChange={event=>setSearch(event.target.value)}/></label>
-      <nav aria-label="设置分类">{sections.filter(item=>(item.label+item.description).toLowerCase().includes(search.trim().toLowerCase())).map(({id,label,description,Icon})=><button key={id} type="button" className={section===id?'active':''} title={description} aria-current={section===id?'page':undefined} disabled={editing} onClick={()=>navigate(id)}><Icon size={16}/><span>{label}</span></button>)}</nav>
-      {search.trim()&&!sections.some(item=>(item.label+item.description).toLowerCase().includes(search.trim().toLowerCase()))&&<p className="settings-nav-empty">没有匹配的设置分类</p>}
+      <nav aria-label="设置分类">{sections.filter(item=>sectionMatches(item,search)).map(({id,label,description,Icon})=><button key={id} type="button" className={section===id?'active':''} title={description} aria-current={section===id?'page':undefined} disabled={editing} onClick={()=>navigate(id)}><Icon size={16}/><span>{label}</span></button>)}</nav>
+      {search.trim()&&!sections.some(item=>sectionMatches(item,search))&&<p className="settings-nav-empty">没有匹配的设置分类</p>}
       <button ref={closeButton} type="button" className="settings-return" onClick={()=>{if(draft)setDiscard(true);else onClose();}} disabled={busy}><ArrowLeft size={16}/>返回写作</button>
     </aside>
     <main className="settings-content">
       <header className="settings-page-heading"><div className="settings-title-icon"><sectionInfo.Icon size={22}/></div><div><h1>{draft?(draft.id?'编辑 AI 服务':'添加 AI 服务'):sectionInfo.label==='模型'?'模型配置':sectionInfo.label}</h1><p>{draft?'设置连接方式，并手动管理这个服务下的模型。':sectionInfo.description}</p></div></header>
       {error&&<div className="settings-feedback error" role="alert"><span>{error}</span>{(error.includes('其他窗口')||error.includes('重新载入'))&&<button type="button" disabled={busy} onClick={async()=>{try{await onReload();setError('');setNotice('已重新载入配置。');}catch(error){setError((error as Error).message);}}}>重新载入配置</button>}</div>}
       {notice&&<p className="settings-feedback" role="status"><Check size={14}/>{notice}</p>}
+      {section==='about'&&<AboutSettings/>}
       {section==='appearance'&&<>
         <section className="settings-card"><AppearanceSettings {...appearance} group="ribbon"/></section>
         <section className="settings-card"><AppearanceSettings {...appearance} group="text"/></section>
@@ -124,7 +129,6 @@ function SettingsContent({panelIconDragPreferences,annotationPreferences,statusP
       {section==='features'&&<><section className="settings-card feature-settings"><h2>悬浮工具</h2><SettingRow title="显示底部悬浮工具栏" description="显示标注工具、写作模式和 AI 开关。关闭后仍可通过右上角面板按钮或 Ctrl+J 打开 AI。"><input className="setting-switch" aria-label="显示底部悬浮工具栏" type="checkbox" checked={appearance.appearance.floatingToolbarVisible!==false} onChange={event=>appearance.setAppearance(old=>({...old,floatingToolbarVisible:event.target.checked}))}/></SettingRow></section>
       <section className="settings-card feature-settings"><h2>面板位置</h2><SettingRow title="锁定与解锁手势" description="在面板标题栏操作。锁定后仍可打开、关闭和收纳；标签组共享位置。"><select aria-label="面板锁定手势" value={appearance.appearance.panelLockGesture||'doubleClick'} onChange={event=>appearance.setAppearance(old=>({...old,panelLockGesture:event.target.value==='longPress'?'longPress':'doubleClick'}))}><option value="doubleClick">双击标题栏</option><option value="longPress">长按标题栏（0.6 秒）</option></select></SettingRow><SettingRow title="图标拖动标识" description="长按侧栏图标拖动时，选择跟随指针的标识样式。"><select aria-label="图标拖动标识" value={panelIconDragPreferences.preferences.holdStyle} onChange={event=>panelIconDragPreferences.setPreferences(old=>({...old,holdStyle:event.target.value==='bar'?'bar':'circle'}))}><option value="circle">圆形</option><option value="bar">长条</option></select></SettingRow><SettingRow title="图标长按时间" description="设置 0.05–3 秒；短按仍然展开或收起面板。"><PanelIconDelay label="图标长按时间" value={panelIconDragPreferences.preferences.holdDelayMs} onChange={holdDelayMs=>panelIconDragPreferences.setPreferences(old=>({...old,holdDelayMs}))}/></SettingRow><SettingRow title="最短触发时间" description="设置 0.05–3 秒；实际触发时间取长按时间与最短触发时间中较大的值。"><PanelIconDelay label="最短触发时间" value={panelIconDragPreferences.preferences.minimumTriggerMs} onChange={minimumTriggerMs=>panelIconDragPreferences.setPreferences(old=>({...old,minimumTriggerMs}))}/></SettingRow>{panelIconDragPreferences.saveError&&<p role="status">{panelIconDragPreferences.saveError}</p>}</section>{appearance.saveError&&<p role="status">{appearance.saveError}</p>}</>}
       {section==='features'&&<AnnotationSettings {...annotationPreferences}/>}
-      {section==='workspace'&&<WorkspaceSettings onSwitch={onSwitchWorkspace}/>}
       {section==='writing'&&<form className="settings-card writing-settings" onSubmit={async event=>{event.preventDefault();await run('/config',{revision:config.revision,continuationLimit:Number(limit)},'写作设置已保存。');}}><h2>续写长度</h2><p>每次续写生成一个完整段落，先审阅，再决定是否采纳。</p><SettingRow title={<label htmlFor="writing-limit">续写最大字数</label>} description="允许 1–10000 个可见字符，默认 100。"><div className="settings-inline-field"><input id="writing-limit" type="number" min={1} max={10000} step={1} required value={limit} onChange={event=>setLimit(event.target.value)}/><span>字</span></div></SettingRow><small>含标点，不计空白与 Markdown 标记；超限或多段输出会阻止应用。</small><button type="submit" className="settings-primary" disabled={busy}>{busy?'保存中…':'保存写作设置'}</button></form>}
       {section==='shortcuts'&&<section className="settings-card shortcut-settings"><h2>常用操作</h2>{[
         ['锁定 / 解锁面板位置',appearance.appearance.panelLockGesture==='longPress'?'长按标题栏 0.6 秒':'双击标题栏'],

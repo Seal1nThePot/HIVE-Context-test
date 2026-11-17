@@ -1,14 +1,16 @@
 import {EditorState,StateEffect,StateField,Transaction,type Extension} from '@codemirror/state';
 import {Decoration,EditorView,ViewPlugin,WidgetType,type DecorationSet} from '@codemirror/view';
-import {previewPlan,visibleReplacements,localPreviewUpdate,type PreviewReplacement} from './markdownPresentation';
+import {previewPlan,visibleReplacements,imageSelectionSignature,localPreviewUpdate,type PreviewReplacement} from './markdownPresentation';
 import {localImageUrl,type ImageContext} from './insertions';
-import {TableWidget,type TableMark} from './tableWidget';
+import {TableWidget,tableSizeHistory,type TableMark} from './tableWidget';
 import {annotationHighlights,setAnnotationMarks} from '../annotations/annotationDecorations';
 import {markdownParseState} from './markdownParse';
 import {tableSegments} from './tableViewport';
 import {MathWidget} from './mathWidget';
 import {frontmatterVisible,subscribeFrontmatterVisibility} from './frontmatterVisibility';
 import {typographyUpdateQueue} from '../typography/typographyUpdateQueue';
+import {isolateHistory} from '@codemirror/commands';
+import {codeBlockViewport} from './codeBlockViewport';
 
 export type DisplayMode='live'|'source';
 export const setDisplayMode=StateEffect.define<DisplayMode>(),setPreviewFocus=StateEffect.define<boolean>();
@@ -27,12 +29,23 @@ class PreviewWidget extends WidgetType{
     const edit=(element:HTMLElement,from=item.from)=>element.addEventListener('mousedown',event=>{event.preventDefault();event.stopPropagation();view.dispatch({selection:{anchor:from},userEvent:'select.pointer'});view.focus();});
     if(item.kind==='properties'){const block=document.createElement('div');block.className='cm-preview-properties';block.textContent=this.propertyText||'';block.title='点击编辑属性源码';edit(block);return block;}
     if(item.kind==='rule'){const hr=document.createElement('hr');hr.className='cm-preview-rule';edit(hr);return hr;}
+    if(item.kind==='task'){
+      const button=document.createElement('button');button.type='button';button.className='cm-preview-task';
+      const checked=item.text==='☑';button.textContent=checked?'☑':'☐';button.setAttribute('role','checkbox');button.setAttribute('aria-checked',String(checked));button.setAttribute('aria-label',checked?'取消完成待办':'完成待办');button.disabled=view.state.readOnly;
+      button.addEventListener('mousedown',event=>{event.preventDefault();event.stopPropagation();});
+      button.addEventListener('click',event=>{
+        event.preventDefault();event.stopPropagation();if(view.state.readOnly)return;
+        const marker=view.state.sliceDoc(item.from,item.to);if(!/^\[[ xX]\]$/.test(marker))return;
+        view.dispatch({changes:{from:item.from+1,to:item.from+2,insert:marker[1]===' '?'x':' '},effects:view.scrollSnapshot(),annotations:isolateHistory.of('full'),userEvent:'input.task'});
+      });
+      return button;
+    }
     const span=document.createElement('span');span.className='cm-preview-'+item.kind;
     span.textContent=item.kind==='image'?'▧ '+item.text:item.text||'';
     if(item.kind==='image'){
-      span.title='图片：'+item.text+' · 点击编辑 Markdown';edit(span);
+      span.title='图片：'+item.text+' · 点击编辑 Markdown';edit(span,item.from+1);
       const url=localImageUrl(item.src||'',this.context);
-      if(url){const img=document.createElement('img');img.alt=item.text||'图片';img.loading='lazy';img.decoding='async';img.src=url;
+      if(url){const img=document.createElement('img');img.alt=item.text||'图片';img.decoding='async';img.src=url;
         img.addEventListener('load',()=>view.requestMeasure());img.addEventListener('error',()=>{img.remove();span.textContent='▧ '+item.text;span.title='无法读取本地图片：'+item.text;view.requestMeasure();});span.textContent='';span.append(img);
       }
     }
@@ -44,7 +57,7 @@ export const markdownPreview=StateField.define<DecorationSet>({
   create:build,
   update(value,tr){
     if(tr.docChanged||tr.effects.some(effect=>effect.is(setDisplayMode)||effect.is(setPreviewFocus)||effect.is(setImageContext)||effect.is(setAnnotationMarks)||effect.is(setFrontmatterVisibility)))return build(tr.state);
-    if(tr.selection&&tr.state.field(previewFocus,false)&&activeLines(tr.startState)!==activeLines(tr.state))return build(tr.state);
+    if(tr.selection&&tr.state.field(previewFocus,false)&&(activeLines(tr.startState)!==activeLines(tr.state)||imageSelectionSignature(tr.startState)!==imageSelectionSignature(tr.state)))return build(tr.state);
     return value;
   },
   provide:field=>EditorView.decorations.from(field),
@@ -87,31 +100,31 @@ function build(state:EditorState){
 export const markdownDisplayTheme=EditorView.baseTheme({
   '.cm-format-underline':{textDecoration:'underline',textUnderlineOffset:'3px'},
   '.cm-preview-strong':{fontWeight:'700'},'.cm-preview-emphasis':{fontStyle:'italic'},'.cm-preview-strike':{textDecoration:'line-through'},
-  '.cm-preview-code-line':{fontFamily:'Consolas, monospace',backgroundColor:'#ffffff06',lineHeight:'1.65'},
-  '.cm-preview-inline-code':{fontFamily:'Consolas, monospace',backgroundColor:'#ffffff0b',borderRadius:'3px',padding:'1px 3px'},
-  '.cm-preview-quote':{borderLeft:'2px solid #87926b',color:'#a5af99'},
-  '.cm-preview-link':{color:'#d3bd80',textDecoration:'underline',textUnderlineOffset:'3px'},
-  '.cm-preview-bullet':{color:'#b9c49e'},'.cm-preview-task':{color:'#c8ba7e',fontSize:'1.1em'},
-  '.cm-preview-image':{display:'inline-block',maxWidth:'100%',boxSizing:'border-box',padding:'5px 12px',border:'1px solid #46513a',borderRadius:'4px',color:'#b9c49e'},
+  '.cm-preview-code-line':{fontFamily:'Consolas, monospace',backgroundColor:'color-mix(in srgb, var(--hive-document-text) 3%, transparent)',lineHeight:'1.65'},
+  '.cm-preview-inline-code':{fontFamily:'Consolas, monospace',backgroundColor:'color-mix(in srgb, var(--hive-document-text) 5%, transparent)',borderRadius:'3px',padding:'1px 3px'},
+  '.cm-preview-quote':{backgroundImage:'linear-gradient(var(--hive-surface-border), var(--hive-surface-border))',backgroundSize:'2px 100%',backgroundRepeat:'no-repeat',backgroundPosition:'max(0px, calc(clamp(12px, 6.4%, 50px) - 10px)) 0',color:'var(--hive-document-text, var(--text))'},
+  '.cm-preview-link':{color:'var(--hive-document-text, var(--text))',textDecoration:'underline',textUnderlineOffset:'3px'},
+  '.cm-preview-bullet':{color:'var(--hive-document-text, var(--text))'},'.cm-preview-task':{color:'var(--hive-accent)',fontSize:'1.1em',fontFamily:'inherit',border:'0',padding:'0',background:'transparent',cursor:'pointer',lineHeight:'inherit'},'.cm-preview-task:disabled':{cursor:'default'},
+  '.cm-preview-image':{display:'inline-block',maxWidth:'100%',boxSizing:'border-box',padding:'5px 12px',border:'1px solid var(--hive-surface-border)',borderRadius:'4px',color:'var(--hive-document-text, var(--text))'},
   '.cm-preview-image img':{display:'block',maxWidth:'100%',maxHeight:'360px',objectFit:'contain'},
-  '.cm-preview-properties':{whiteSpace:'pre-wrap',overflowWrap:'anywhere',fontSize:'.8em',color:'#9daa88',padding:'5px 12px',marginBottom:'8px',borderBottom:'1px solid #46513a',cursor:'text'},
-  '.cm-preview-rule':{border:'0',borderTop:'1px solid #526043',margin:'14px 50px'},
+  '.cm-preview-properties':{whiteSpace:'pre-wrap',overflowWrap:'anywhere',fontSize:'.8em',color:'var(--hive-document-text, var(--text))',padding:'5px 12px',marginBottom:'8px',borderBottom:'1px solid var(--hive-surface-border)',cursor:'text'},
+  '.cm-preview-rule':{border:'0',borderTop:'1px solid var(--hive-surface-border)',margin:'14px 50px'},
   '.cm-table-widget':{overflowX:'auto'},
-  '.cm-table-source-notice':{padding:'5px 50px',color:'#b9c49e',fontSize:'.85em'},
+  '.cm-table-source-notice':{padding:'5px 50px',color:'var(--hive-document-text, var(--text))',fontSize:'.85em'},
   '.cm-table-widget[data-table-segment] .cm-preview-table':{marginTop:'0',marginBottom:'0'},
-  '.cm-table-marked':{backgroundColor:'#c9ae4030'},
-  '.cm-table-select-top':{borderTop:'2px solid #e5cf72 !important'},
-  '.cm-table-select-bottom':{borderBottom:'2px solid #e5cf72 !important'},
-  '.cm-table-select-left':{borderLeft:'2px solid #e5cf72 !important'},
-  '.cm-table-select-right':{borderRight:'2px solid #e5cf72 !important'},
-  '.cm-table-widget button':{border:'0',background:'transparent',color:'#a5af99',cursor:'pointer'},
+  '.cm-table-marked':{backgroundColor:'color-mix(in srgb, var(--hive-accent) 19%, transparent)'},
+  '.cm-table-select-top':{borderTop:'2px solid var(--hive-accent) !important'},
+  '.cm-table-select-bottom':{borderBottom:'2px solid var(--hive-accent) !important'},
+  '.cm-table-select-left':{borderLeft:'2px solid var(--hive-accent) !important'},
+  '.cm-table-select-right':{borderRight:'2px solid var(--hive-accent) !important'},
+  '.cm-table-widget button':{border:'0',background:'transparent',color:'var(--hive-document-text, var(--text))',cursor:'pointer'},
   '.cm-table-widget textarea':{display:'block',boxSizing:'border-box',width:'100%',minWidth:'40px',minHeight:'24px',height:'100%',resize:'none',border:'0',outline:'0',background:'transparent',color:'inherit',font:'inherit',overflow:'hidden'},
   '.cm-table-widget th,.cm-table-widget td':{position:'relative'},
   '.cm-table-resize-col':{position:'absolute',right:'-4px',top:'0',height:'100%',width:'8px',cursor:'col-resize',zIndex:'2'},
   '.cm-table-resize-row':{position:'absolute',bottom:'-4px',left:'0',width:'100%',height:'8px',cursor:'row-resize',zIndex:'2'},
   '.cm-preview-table':{borderCollapse:'collapse',margin:'12px 50px',maxWidth:'calc(100% - 100px)',fontSize:'.95em'},
-  '.cm-preview-table td,.cm-preview-table th':{border:'1px solid #46513a',padding:'6px 12px',textAlign:'left'},
-  '.cm-preview-table th':{background:'#ffffff08',fontWeight:'600'},
+  '.cm-preview-table td,.cm-preview-table th':{border:'1px solid var(--hive-surface-border)',padding:'6px 12px',textAlign:'left'},
+  '.cm-preview-table th':{background:'color-mix(in srgb, var(--hive-document-text) 4%, transparent)',fontWeight:'600'},
 });
 const frontmatterVisibilityPlugin=ViewPlugin.define(view=>{
   let composing=false,timer:ReturnType<typeof setTimeout>|undefined;
@@ -122,7 +135,7 @@ const frontmatterVisibilityPlugin=ViewPlugin.define(view=>{
   view.dom.addEventListener('compositionstart',start,true);view.dom.addEventListener('compositionend',end,true);
   return {update(){queue.released();},destroy(){unsubscribe();queue.dispose();clearTimeout(timer);view.dom.removeEventListener('compositionstart',start,true);view.dom.removeEventListener('compositionend',end,true);}};
 });
-export const markdownDisplayExtensions:Extension=[displayModeField,frontmatterVisibilityField,frontmatterVisibilityPlugin,previewFocus,imageContext,markdownParseState,localPreviewUpdate,markdownPreview,markdownDisplayTheme,EditorView.focusChangeEffect.of((_state,focused)=>setPreviewFocus.of(focused))];
+export const markdownDisplayExtensions:Extension=[displayModeField,frontmatterVisibilityField,frontmatterVisibilityPlugin,previewFocus,imageContext,markdownParseState,localPreviewUpdate,markdownPreview,markdownDisplayTheme,codeBlockViewport,tableSizeHistory,EditorView.focusChangeEffect.of((_state,focused)=>setPreviewFocus.of(focused))];
 export function configureImageContext(view:EditorView,context:ImageContext|null){
   if(view.state.field(imageContext,false)===undefined)view.dispatch({effects:StateEffect.appendConfig.of(imageContext)});
   const current=view.state.field(imageContext);if(current?.file!==context?.file||current?.workspace!==context?.workspace)view.dispatch({effects:setImageContext.of(context)});

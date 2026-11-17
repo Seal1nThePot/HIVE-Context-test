@@ -3,7 +3,7 @@
 .rail-edge-handle {position:absolute;top:0;bottom:0;width:8px;z-index:2;cursor:col-resize;touch-action:none;}
 .rail-edge-handle.edge-left {right:-4px;}.rail-edge-handle.edge-right {left:-4px;}
 .rail-edge-handle[aria-disabled=true] {cursor:not-allowed;}
-.rail-edge-handle:hover {background:#c5bf6b55;}
-.rail-pull-preview {position:fixed;box-sizing:border-box;z-index:11000;border:2px dashed #adac71;background:#85965230;pointer-events:none;display:flex;align-items:center;justify-content:center;color:#e6e1b2;font-size:12px;}
-.rail-pull-preview.ready {border-style:solid;background:#85965250;}
-.rail-pull-preview span {background:#263020e8;border-radius:4px;padding:5px 8px;}
+.rail-edge-handle:hover {background:var(--hive-dock-rail-active-background);}
+.rail-pull-preview {position:fixed;box-sizing:border-box;z-index:11000;border:2px dashed var(--hive-dock-preview-border);background:var(--hive-dock-pull-background);pointer-events:none;display:flex;align-items:center;justify-content:center;color:var(--hive-dock-hint-text);font-size:12px;}
+.rail-pull-preview.ready {border-style:solid;background:var(--hive-dock-pull-ready-background);}
+.rail-pull-preview span {background:var(--hive-dock-hint-background);border-radius:4px;padding:5px 8px;}

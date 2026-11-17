@@ -59,7 +59,7 @@ export function bindThemeTemplate(identity:TemplateIdentity,revision:string|null
 export function restoreTemplateBase(){
   const current=getThemeSnapshot();if(!current.templateBinding)throw new Error('模板尚未读取完成，请稍后重试。');
   const base=current.preferences.base,reference=templateBaseDefaults(current.templateBinding,base);
-  setTheme(old=>({...old,colors:reference.colors,colorProfiles:{...old.colorProfiles,[base]:reference.colors},surfaceColors:{...old.surfaceColors,[base]:reference.surfaceColors[base]},writingDock:reference.writingDock,writingDockProfiles:{...old.writingDockProfiles,[base]:reference.writingDock}}));
+  setTheme(old=>({...old,colors:reference.colors,colorProfiles:{...old.colorProfiles,[base]:reference.colors},surfaceColors:{...old.surfaceColors,[base]:reference.surfaceColors[base]},writingDock:reference.writingDock,writingDockProfiles:{...old.writingDockProfiles,[base]:reference.writingDock},editorProfiles:Object.fromEntries(Object.entries({...old.editorProfiles,[base]:reference.editorProfiles[base]}).filter(([,value])=>value!==undefined)),dockingProfiles:Object.fromEntries(Object.entries({...old.dockingProfiles,[base]:reference.dockingProfiles[base]}).filter(([,value])=>value!==undefined))}));
   return flushThemePreferences();
 }
 export function applyOliveGrayHierarchyUpdate(){

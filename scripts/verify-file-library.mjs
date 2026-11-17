@@ -1,0 +1,139 @@
+import assert from 'node:assert/strict';
+import {promises as fs} from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {createRequire} from 'node:module';
+import {fork,spawn} from 'node:child_process';
+
+const project=fileURLToPath(new URL('../',import.meta.url));
+const output=path.resolve(project,process.env.HIVE_FILE_LIBRARY_OUTPUT||'delivery/file-library-20261118');
+const artifactPrefix=process.env.HIVE_FILE_LIBRARY_EXECUTABLE?'packaged-':'';
+const require=createRequire(import.meta.url);
+async function worker(base,temporary){
+  const {app,BrowserWindow}=require('electron');
+  app.setPath('userData',path.join(temporary,'electron-profile'));app.disableHardwareAcceleration();await app.whenReady();
+  const window=new BrowserWindow({show:false,focusable:false,skipTaskbar:true,width:1440,height:1000,webPreferences:{offscreen:true,contextIsolation:true,nodeIntegration:false,backgroundThrottling:false}});
+  const errors=[];window.webContents.on('console-message',event=>{if(event.level==='error'||event.level===3)errors.push(event.message);});
+  try{
+    await window.loadURL(base);
+    const result=await window.webContents.executeJavaScript(`(async()=>{
+      const checks=[];
+      const check=(label,value)=>{checks.push({label,passed:!!value});if(!value)throw new Error(label);};
+      const wait=async(test,label)=>{for(let count=0;count<200;count++){if(test())return;await new Promise(resolve=>setTimeout(resolve,30));}throw new Error('Timeout: '+label);};
+      const get=selector=>document.querySelector(selector);
+      const buttons=(root=document)=>[...root.querySelectorAll('button')];
+      const button=(text,root=document)=>buttons(root).find(node=>node.textContent===text||node.querySelector(':scope > span')?.textContent===text);
+      const clickText=(text,root=document)=>{const node=button(text,root);if(!node)throw new Error('Missing button '+text);node.click();};
+      const setValue=(selector,value)=>{const node=get(selector);Object.getOwnPropertyDescriptor(node.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype,'value').set.call(node,value);node.dispatchEvent(new Event(node.tagName==='SELECT'?'change':'input',{bubbles:true}));};
+      const row=path=>[...document.querySelectorAll('.explorer-row')].find(node=>node.dataset.path===path);
+      const selected=()=>[...document.querySelectorAll('.explorer-row[aria-selected="true"]')].map(node=>node.dataset.path);
+      const clickRow=(path,options={})=>{const node=row(path);if(!node)throw new Error('Missing row '+path);node.dispatchEvent(new MouseEvent('click',{bubbles:true,...options}));};
+      const pause=()=>new Promise(resolve=>setTimeout(resolve,80));
+      const contextAction=async(label,path)=>{(path?row(path):get('.explorer-tree')).dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:110,clientY:340}));await wait(()=>get('[role="menu"][aria-label="文件操作"]'),'context menu');await pause();clickText(label,get('[role="menu"]'));await pause();};
+      const moreAction=async(label)=>{get('button[aria-label="文档更多操作"]').click();await wait(()=>get('[role="menu"][aria-label="文档更多操作"]'),'more menu');clickText(label,get('[role="menu"]'));await pause();};
+      await wait(()=>row('章节'),'file tree');await pause();
+      check('no persistent batch toolbar or bottom image entry',!get('.explorer-selection')&&!get('.file-explorer .image-library')&&!get('.explorer-heading small'));
+      check('initial tree shows only root entries',!row('章节/一.md')&&!row('章节/子目录'));
+      clickRow('章节');await wait(()=>row('章节/一.md'),'expand root folder');
+      check('nested folders remain collapsed',row('章节/子目录').getAttribute('aria-expanded')==='false'&&!row('章节/子目录/深处.md'));
+      clickRow('章节');await wait(()=>!row('章节/一.md'),'collapse root folder');
+      get('[aria-label="文件排序"]').click();await wait(()=>get('[role="menu"][aria-label="文件排序"]'),'sort menu');
+      check('sort has exactly four choices',get('[role="menu"]').querySelectorAll('button').length===4);
+      const sortMenu=get('[role="menu"]'),nameButton=buttons(sortMenu).find(node=>node.textContent.includes('文件名'));nameButton.focus();nameButton.click();await pause();
+      check('first name click selects A to Z and keeps menu open',get('[role="menu"]')===sortMenu&&sortMenu.textContent.includes('A → Z'));
+      check('sort toggle preserves the button and keyboard focus',buttons(sortMenu).includes(nameButton)&&document.activeElement===nameButton);
+      nameButton.click();await pause();check('second name click selects Z to A in the same menu',get('[role="menu"]')===sortMenu&&sortMenu.textContent.includes('Z → A'));
+      for(const field of ['编辑时间','创建时间']){const choice=buttons(sortMenu).find(node=>node.textContent.includes(field));choice.click();await pause();check(field+' first click keeps menu open',get('[role="menu"]')===sortMenu&&choice.textContent.includes('新 → 旧'));choice.click();await pause();check(field+' second click keeps menu open',get('[role="menu"]')===sortMenu&&choice.textContent.includes('旧 → 新'));}
+      buttons(sortMenu).find(node=>node.textContent.includes('自定义')).click();await pause();check('custom sort also keeps menu open',get('[role="menu"]')===sortMenu&&sortMenu.textContent.includes('✓ 自定义'));
+      nameButton.click();await pause();sortMenu.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await pause();check('Escape explicitly closes the sort menu',!get('[role="menu"]'));
+      get('[aria-label="文件排序"]').click();await pause();get('.explorer-search').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));await pause();check('outside pointer closes the sort menu',!get('[role="menu"]'));
+      clickRow('alpha.md',{ctrlKey:true});clickRow('gamma.md',{shiftKey:true});await pause();
+      check('shift selects every visible row in range',JSON.stringify(selected())===JSON.stringify(['alpha.md','beta.md','delta.md','epsilon.md','gamma.md']));
+      check('selection count shares the existing heading',get('.explorer-heading small')?.textContent==='已选 5 项');
+      await contextAction('清除选择','alpha.md');check('clear selection removes all selected rows and its count',selected().length===0&&!get('.explorer-heading small'));
+      await contextAction('全选可见结果');check('select all excludes collapsed descendants',selected().length===document.querySelectorAll('.explorer-row').length&&!selected().includes('章节/一.md'));
+      setValue('[aria-label="筛选文件"]','alpha');await pause();check('filter discards hidden selections',selected().includes('alpha.md')&&!selected().includes('epsilon.md')&&selected().every(name=>name==='alpha.md'||name==='目标'));
+      await contextAction('清除选择','alpha.md');setValue('[aria-label="筛选文件"]','');await pause();
+      clickRow('alpha.md',{ctrlKey:true});clickRow('beta.md',{ctrlKey:true});await pause();
+      await contextAction('移动到…','alpha.md');await wait(()=>get('dialog[aria-label="批量移动"]'),'batch move dialog');
+      check('right click preserves every selected move target',get('dialog[aria-label="批量移动"]').textContent.includes('alpha.md')&&get('dialog[aria-label="批量移动"]').textContent.includes('beta.md'));
+      setValue('dialog[aria-label="批量移动"] select','目标');clickText('移动',get('dialog[aria-label="批量移动"]'));
+      await wait(()=>get('dialog[aria-label="批量移动"] [role="status"]'),'mixed move results');
+      const moveResult=get('dialog[aria-label="批量移动"] [role="status"]').textContent;
+      check('move reports collision failure and independent success',moveResult.includes('alpha.md：失败')&&moveResult.includes('beta.md：成功'));
+      clickText('关闭',get('dialog[aria-label="批量移动"]'));await pause();
+      check('failed source remains while successful source moved',!!row('alpha.md')&&!row('beta.md'));
+      clickText('关闭结果');clickRow('delta.md',{ctrlKey:true});clickRow('gamma.md',{ctrlKey:true});await pause();
+      await contextAction('删除到回收站','delta.md');await wait(()=>get('dialog[aria-label="批量删除"]'),'batch delete dialog');
+      const removed=await fetch('/api/explorer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'trash',path:'gamma.md'})});check('external deletion fixture succeeds',removed.ok);
+      clickText('移到回收站',get('dialog[aria-label="批量删除"]'));await wait(()=>get('dialog[aria-label="批量删除"] [role="status"]'),'mixed deletion results');
+      const deleteResult=get('dialog[aria-label="批量删除"] [role="status"]').textContent;
+      check('delete preserves each success and failure',deleteResult.includes('delta.md：成功')&&deleteResult.includes('gamma.md：失败'));
+      clickText('关闭',get('dialog[aria-label="批量删除"]'));await pause();clickText('关闭结果');
+      const footer=get('.sidebar-trash-footer'),trash=footer.querySelector('button'),footerRect=footer.getBoundingClientRect(),trashRect=trash.getBoundingClientRect();
+      check('trash entry is aligned at document panel lower left',trashRect.left-footerRect.left<20&&trashRect.width<footerRect.width*.8&&footerRect.bottom<=innerHeight);
+      await moreAction('图片详情…');await wait(()=>get('.image-library-list button'),'image list');get('.image-library-list button').click();await wait(()=>get('.image-library-details ul'),'image reference details');
+      check('image details include name and repository path',get('.image-library-details').textContent.includes('示例 图.png')&&get('.image-library-details').textContent.includes('导入的图片/示例 图.png'));
+      check('image references resolve nested document and encoded path',get('.image-library-details ul').textContent.includes('章节/一.md（第 1 行）'));
+      check('image markdown is encoded relative to current root',get('.image-library-details code').textContent.includes('%E5%AF%BC%E5%85%A5%E7%9A%84%E5%9B%BE%E7%89%87/'));
+      const library=get('.image-library');check('image details open as a contained dialog outside the file list',library.open&&!get('.file-explorer .image-library')&&library.scrollWidth<=library.clientWidth+1&&library.getBoundingClientRect().height<=innerHeight*.83);
+      get('[aria-label="关闭图片详情"]').click();await pause();check('closing image details restores the more button focus',!get('.image-library')&&document.activeElement===get('button[aria-label="文档更多操作"]'));
+      const info=await(await fetch('/api/workspace')).json();
+      const tree=await(await fetch('/api/tree')).json(),paths=tree.entries.flatMap(function walk(entry){return entry.type==='file'?[entry.path]:(entry.children||[]).flatMap(walk);});
+      for(const owner of ['@editor',...paths])localStorage.setItem('hive.ai.references.v1:'+encodeURIComponent(info.id)+':'+encodeURIComponent(owner),JSON.stringify({version:1,sources:Array.from({length:31},(_,i)=>({path:'existing-'+i+'.md',type:'file'}))}));
+      return {checks,moveResult,deleteResult};
+    })()`);
+    await fs.writeFile(path.join(output,artifactPrefix+'file-panel.png'),(await window.webContents.capturePage()).toPNG());
+    await window.webContents.executeJavaScript(`(async()=>{const row=path=>[...document.querySelectorAll('.explorer-row')].find(node=>node.dataset.path===path);for(const name of ['alpha.md','epsilon.md'])row(name).dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));await new Promise(resolve=>setTimeout(resolve,80));row('alpha.md').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:125,clientY:390}));await new Promise(resolve=>setTimeout(resolve,80));})()`);
+    await fs.writeFile(path.join(output,artifactPrefix+'selection-menu.png'),(await window.webContents.capturePage()).toPNG());
+    await window.webContents.executeJavaScript(`(async()=>{document.querySelector('[role="menu"]').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await new Promise(resolve=>setTimeout(resolve,50));document.querySelector('button[aria-label="文档更多操作"]').click();await new Promise(resolve=>setTimeout(resolve,50));[...document.querySelectorAll('[role="menu"] button')].find(node=>node.textContent==='图片详情…').click();for(let i=0;i<150&&!document.querySelector('.image-library-list button');i++)await new Promise(resolve=>setTimeout(resolve,25));document.querySelector('.image-library-list button').click();for(let i=0;i<150&&!document.querySelector('.image-library-details ul');i++)await new Promise(resolve=>setTimeout(resolve,25));})()`);
+    await fs.writeFile(path.join(output,artifactPrefix+'image-details.png'),(await window.webContents.capturePage()).toPNG());
+    const loaded=new Promise(resolve=>window.webContents.once('did-finish-load',resolve));window.reload();await loaded;
+    const basis=await window.webContents.executeJavaScript(`(async()=>{
+      const wait=async(test)=>{for(let i=0;i<200;i++){if(test())return;await new Promise(resolve=>setTimeout(resolve,30));}throw new Error('Basis timeout');};
+      const row=path=>[...document.querySelectorAll('.explorer-row')].find(node=>node.dataset.path===path);
+      const addBasis=async()=>{row('alpha.md').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:110,clientY:340}));await wait(()=>document.querySelector('[role="menu"]'));[...document.querySelectorAll('[role="menu"] button')].find(node=>node.textContent==='添加到依据').click();};
+      await wait(()=>row('alpha.md'));for(const name of ['alpha.md','epsilon.md'])row(name).dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));await new Promise(resolve=>setTimeout(resolve,80));
+      await addBasis();
+      await wait(()=>document.querySelector('.explorer-batch-result'));
+      const text=document.querySelector('.explorer-batch-result').textContent,hasBasis=!!document.querySelector('[data-panel-id="basis"]');
+      [...document.querySelectorAll('.explorer-batch-result button')].find(node=>node.textContent==='关闭结果').click();await new Promise(resolve=>setTimeout(resolve,40));
+      const originalFetch=window.fetch;let release,waiting=false;
+      window.fetch=(input,init)=>{if(String(input)==='/api/tree'&&!waiting){waiting=true;return new Promise(resolve=>{release=()=>resolve(originalFetch(input,init));});}return originalFetch(input,init);};
+      await addBasis();await wait(()=>waiting);
+      const prompt=document.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(prompt,'等待期间输入新消息');prompt.dispatchEvent(new Event('input',{bubbles:true}));release();
+      await wait(()=>document.querySelector('.explorer-batch-result'));window.fetch=originalFetch;
+      return {text,hasBasis,raceText:document.querySelector('.explorer-batch-result').textContent};
+    })()`);
+    assert.ok(basis.text.includes('alpha.md：成功')&&basis.text.includes('epsilon.md：失败')&&basis.text.includes('32'),basis.text);assert.ok(basis.hasBasis);
+    result.checks.push({label:'reference batch reports exact capacity partial failure',passed:true});
+    assert.ok(!basis.raceText.includes('成功')&&basis.raceText.includes('依据目标正文或会话已变化'),basis.raceText);
+    result.checks.push({label:'reference commit cancels when receiver prompt changes during tree read',passed:true});
+    assert.deepEqual(errors,[]);
+    await fs.writeFile(path.join(output,artifactPrefix+'ui-validation.json'),JSON.stringify({passed:true,method:'Hidden nonfocusable Electron, built app with isolated real backend and synthetic files; no desktop input.',checkedAt:new Date().toISOString(),...result,basis,consoleErrors:errors},null,2));
+    console.log(JSON.stringify({passed:true,checks:result.checks.length}));window.destroy();app.exit(0);
+  }catch(error){console.error(error.stack);await fs.writeFile(path.join(output,artifactPrefix+'failure.png'),(await window.webContents.capturePage()).toPNG());window.destroy();app.exit(1);}
+}
+if(process.argv.includes('--file-library-worker'))void worker('http://127.0.0.1:'+process.argv.at(-2),process.argv.at(-1)).catch(error=>{console.error(error.stack);require('electron').app.exit(1);});
+else{
+  await fs.mkdir(output,{recursive:true});const temporary=await fs.mkdtemp(path.join(output,'.file-library-check-'));let server;
+  try{
+    const root=path.join(temporary,'测试仓库');await fs.mkdir(path.join(root,'章节','子目录'),{recursive:true});await fs.mkdir(path.join(root,'目标'));await fs.mkdir(path.join(root,'导入的图片'));
+    for(const name of ['alpha','beta','delta','epsilon','gamma'])await fs.writeFile(path.join(root,name+'.md'),'# '+name+'\n');
+    await fs.writeFile(path.join(root,'目标','alpha.md'),'existing collision');await fs.writeFile(path.join(root,'章节','子目录','深处.md'),'deep');await fs.writeFile(path.join(root,'章节','一.md'),'![示例](../导入的图片/示例%20图.png)');
+    await fs.writeFile(path.join(root,'导入的图片','示例 图.png'),Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW6sAAAAASUVORK5CYII=','base64'));
+    const executable=process.env.HIVE_FILE_LIBRARY_EXECUTABLE;
+    server=fork(process.env.HIVE_FILE_LIBRARY_SERVER||path.join(project,'server/index.mjs'),['--production'],{execPath:executable||process.execPath,cwd:project,silent:true,windowsHide:true,env:{...process.env,...(executable?{ELECTRON_RUN_AS_NODE:'1'}:{}),HIVE_PORT:'0',HIVE_DOCUMENTS:root,HIVE_STATE_DIR:path.join(temporary,'state'),HIVE_API_KEY:''}});
+    let serverLog='';server.stdout.on('data',data=>serverLog+=data);server.stderr.on('data',data=>serverLog+=data);
+    const port=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Server timeout')),10000);server.once('error',error=>{clearTimeout(timer);reject(error);});server.once('exit',code=>{clearTimeout(timer);reject(new Error('Server exited '+code+'\n'+serverLog));});server.on('message',message=>{if(message?.type==='hive-ready'){clearTimeout(timer);resolve(message.port);}});});
+    const environment={...process.env};delete environment.ELECTRON_RUN_AS_NODE;
+    const child=spawn((await import('electron')).default,[fileURLToPath(import.meta.url),'--file-library-worker',String(port),temporary],{cwd:project,windowsHide:true,env:environment,stdio:['ignore','pipe','pipe']});
+    let log='';child.stdout.on('data',data=>log+=data);child.stderr.on('data',data=>log+=data);
+    const code=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{child.kill();reject(new Error('UI validation timeout'));},90000);child.once('error',reject);child.once('exit',code=>{clearTimeout(timer);resolve(code);});});
+    await fs.writeFile(path.join(output,artifactPrefix+'ui.log'),log);await fs.writeFile(path.join(output,artifactPrefix+'ui-server.log'),serverLog);console.log(log);assert.equal(code,0,'UI validation failed');
+    assert.equal(await fs.readFile(path.join(root,'alpha.md'),'utf8'),'# alpha\n');assert.equal(await fs.readFile(path.join(root,'目标','alpha.md'),'utf8'),'existing collision');assert.equal(await fs.readFile(path.join(root,'目标','beta.md'),'utf8'),'# beta\n');
+  }finally{
+    if(server&&server.exitCode===null)await new Promise(resolve=>{server.once('exit',resolve);server.kill();});
+    const resolved=path.resolve(temporary);assert.equal(path.dirname(resolved),path.resolve(output));assert.ok(path.basename(resolved).startsWith('.file-library-check-'));await fs.rm(resolved,{recursive:true,force:true,maxRetries:10,retryDelay:100});
+  }
+}

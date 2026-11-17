@@ -1,0 +1,28 @@
+.editor-host .split-main { height: 100%; min-width: 0; }
+.editor-host .split-source { display: none; }
+.editor-host.split-view { display: flex; }
+.editor-host.split-view .split-source,
+.editor-host.split-view .split-main { display: block; flex: 1 1 0; min-width: 0; height: 100%; overflow: hidden; }
+.editor-host.split-view .split-source { border-right: 1px solid var(--line); }
+.editor-host.split-view .cm-line { padding-left: 20px; padding-right: 20px; }
+/* Only the split views add visual space; document contents are unchanged. */
+.editor-host.split-view .cm-line[style*="--split-alignment-padding"]::after {
+  content: "";
+  display: block;
+  height: var(--split-alignment-padding, 0px);
+  pointer-events: none;
+}
+
+/* The source pane follows the rendered pane's soft breaks; excess width scrolls horizontally. */
+.editor-host.split-view .split-source .cm-line { white-space: pre !important; overflow-wrap: normal !important; word-break: normal !important; }
+
+.editor-host.split-view .cm-line[style*="--split-alignment-before"]::before {
+  content: ""; display: block; height: var(--split-alignment-before, 0px); pointer-events: none;
+}
+.editor-host.split-view .split-source .cm-content { white-space: pre !important; overflow-wrap: normal !important; word-break: normal !important; }
+.editor-host.split-view .cm-scroller { scrollbar-gutter: stable; }
+.editor-host.split-view .split-source .cm-scroller { overflow-x: scroll; }
+.editor-host.split-view .split-main .cm-preview-table :is(th, td) { vertical-align: top; }
+.editor-host.split-view .split-main .cm-preview-table tr[style*="--split-table-extra"] > :is(th, td) {
+  padding-bottom: calc(6px + var(--split-table-extra, 0px));
+}

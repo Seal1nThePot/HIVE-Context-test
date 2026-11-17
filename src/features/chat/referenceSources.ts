@@ -11,6 +11,18 @@ export function normalizeReferenceSources(value:unknown):ReferenceSource[]{
   }return result;
 }
 export function readReferenceSources(raw:string|null):ReferenceSource[]{try{const value=JSON.parse(raw||'null');return value?.version===1?normalizeReferenceSources(value.sources):[];}catch{return [];}}
+export type ReferenceAddResult={path:string;ok:boolean;error?:string;warning?:string};
+export function appendReferenceSources(existing:ReferenceSource[],candidates:ReferenceSource[]):{sources:ReferenceSource[];results:ReferenceAddResult[]}{
+  const sources=normalizeReferenceSources(existing),results:ReferenceAddResult[]=[];
+  for(const candidate of candidates){
+    const source=normalizeReferenceSources([candidate])[0];
+    if(!source){results.push({path:candidate?.path||'',ok:false,error:'依据路径无效。'});continue;}
+    if(sources.some(item=>item.path.toLocaleLowerCase()===source.path.toLocaleLowerCase())){results.push({path:source.path,ok:true,warning:'已在依据列表中。'});continue;}
+    if(sources.length>=32){results.push({path:source.path,ok:false,error:'依据最多容纳 32 项，请先移除不再使用的资料。'});continue;}
+    sources.push(source);results.push({path:source.path,ok:true});
+  }
+  return {sources,results};
+}
 export function remapReferenceSources(sources:ReferenceSource[],from:string,to:string){return normalizeReferenceSources(sources.map(source=>({...source,path:source.path===from||source.path.startsWith(from+'/')?to+source.path.slice(from.length):source.path})));}
 export function referenceOverrides(sources:ReferenceSource[],buffers:{path:string;text:string}[],currentFile:string,budget=60000){
   const available=new Map(buffers.map(buffer=>[buffer.path,buffer])),seen=new Set<string>(),result:{path:string;text:string;characters:number}[]=[];let remaining=budget;
@@ -23,14 +35,17 @@ export function referenceOverrides(sources:ReferenceSource[],buffers:{path:strin
 export function useReferenceSources(workspaceId:string,owner:string){
   const prefix='hive.ai.references.v1:'+encodeURIComponent(workspaceId)+':',key=prefix+encodeURIComponent(owner),cache=useRef(new Map<string,ReferenceSource[]>()),[,redraw]=useState(0),[saveError,setSaveError]=useState('');
   function get(target:string){if(!cache.current.has(target)){let sources:ReferenceSource[]=[];try{sources=readReferenceSources(localStorage.getItem(target));}catch{/* Current-page operation remains available. */}cache.current.set(target,sources);}return cache.current.get(target)!;}
-  function put(target:string,sources:ReferenceSource[]){const value=normalizeReferenceSources(sources);cache.current.set(target,value);try{localStorage.setItem(target,JSON.stringify({version:1,sources:value}));setSaveError('');}catch{setSaveError('依据已更新，但当前浏览器无法保存资料列表。');}}
+  function put(target:string,sources:ReferenceSource[]){const value=normalizeReferenceSources(sources);cache.current.set(target,value);try{localStorage.setItem(target,JSON.stringify({version:1,sources:value}));setSaveError('');return true;}catch{setSaveError('依据已更新，但当前浏览器无法保存资料列表。');return false;}}
   function remap(from:string,to:string){
     const keys=new Set([...cache.current.keys()].filter(value=>value.startsWith(prefix)));
     try{for(let i=0;i<localStorage.length;i++){const value=localStorage.key(i);if(value?.startsWith(prefix))keys.add(value);}}catch{}
     for(const target of keys){let oldOwner:string;try{oldOwner=decodeURIComponent(target.slice(prefix.length));}catch{continue;}const nextOwner=oldOwner===from||oldOwner.startsWith(from+'/')?to+oldOwner.slice(from.length):oldOwner;const nextKey=prefix+encodeURIComponent(nextOwner);put(nextKey,remapReferenceSources(get(target),from,to));if(nextKey!==target){cache.current.delete(target);try{localStorage.removeItem(target);}catch{}}}
     redraw(value=>value+1);
   }
-  return {sources:get(key),setSources:(sources:ReferenceSource[])=>{put(key,sources);redraw(value=>value+1);},remap,saveError};
+  return {sources:get(key),setSources:(sources:ReferenceSource[])=>{put(key,sources);redraw(value=>value+1);},addSources:(candidates:ReferenceSource[])=>{
+    const next=appendReferenceSources(get(key),candidates),saved=put(key,next.sources);redraw(value=>value+1);
+    return next.results.map(result=>!saved&&result.ok?{...result,warning:[result.warning,'已加入本次列表，但无法持久保存。'].filter(Boolean).join(' ')}:result);
+  },remap,saveError};
 }
 
 /** Earlier sources are placed first and retained first when the server applies its budget. */

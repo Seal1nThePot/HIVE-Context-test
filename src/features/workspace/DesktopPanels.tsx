@@ -8,18 +8,23 @@ import {NativeHostRuntime,type NativePanelHandle,type NativeFloatOptions,type Li
 import {latestGestureFrame,gestureFrameClock} from './gestureFrame';
 import './desktop-panels.css';
 import {PanelActivityContext,panelIsVisible} from '../../shared/panelActivity';
+import type {DockingColors} from '../theme/dockingAppearance';
+import type {AboutInfo} from '../../shared/buildInfo';
 
 declare global {
   interface Window {hiveDesktop?:{
     readonly isDesktop:boolean;readonly platform:string;
+    chooseRepositoryDirectory:()=>Promise<string|null>;
+    getAboutInfo:()=>Promise<AboutInfo>;openAppDataDirectory:()=>Promise<void>;
     onCloseRequested:(callback:()=>void)=>()=>void;finishClose:(allow:boolean)=>void;
     onServiceError:(callback:()=>void)=>()=>void;onPanelCloseRequested:(callback:(id:string)=>void)=>()=>void;
     closePanel:(id:string)=>void;windowCommand:(command:'minimize'|'maximize'|'close'|'focus'|'hide',panelId?:string)=>void;
     panelReady:(id:string,placement?:Rect,inactive?:boolean)=>boolean;
+    panelRect:(id:string)=>Rect|null;
     panelDrag:(id:string,phase:'start'|'move'|'end'|'cancel',edge?:string,free?:boolean)=>boolean;
     onPanelMove:(callback:(event:{id:string;phase:'move'|'end'|'cancel';x:number;y:number;free?:boolean})=>void)=>()=>void;
-    dockOverlay:(feedback:{guides:{key:string;label:string;button:Rect}[];ready:{preview:Rect;button?:Rect}|null;rail?:{edge:'left'|'right';rect:Rect}}|null)=>void;
-    dockTooltip:(value:{id:'global-toolbar';text:string;anchor:Rect;width:number;height:number;background:string;color:string;border:string;fontSize:number}|null)=>void;
+    dockOverlay:(feedback:{guides:{key:string;label:string;button:Rect}[];ready:{preview:Rect;button?:Rect}|null;rail?:{edge:'left'|'right';rect:Rect};colors?:DockingColors}|null)=>void;
+    dockTooltip:(value:{id:'global-toolbar';text:string;anchor:Rect;width:number;height:number;background:string;color:string;border:string;shadow?:string;fontSize:number}|null)=>void;
   }}
 }
 type DesktopPanels={
@@ -28,6 +33,7 @@ type DesktopPanels={
   members:(id:string)=>string[]|undefined;refresh:(id:string)=>void;
   beginDrag:(id:string,event:ReactPointerEvent<HTMLElement>,edge?:string)=>void;
   register:(id:string,handle:NativePanelHandle)=>()=>void;removeMember:(id:string,force?:boolean)=>boolean;
+  returnMembers:(ids:readonly string[])=>boolean;
   detach:(id:string,options?:NativeFloatOptions)=>void;detachGroup:(id:string,members:string[],select:(id:string)=>void,options?:NativeFloatOptions)=>void;
   extract:(id:string)=>{restore:()=>boolean}|null;attach:(id:string)=>boolean;isComposing:()=>boolean;
   focus:(id:string)=>void;returnAll:()=>void;report:(message:string)=>void;toggleVisibility:(id:string)=>void;
@@ -71,14 +77,15 @@ export function DesktopPanelsProvider({children}:{children:ReactNode}){
   const removeMember=useCallback((id:string,force=false)=>runtime.removeMember(id,force),[runtime]);
   const refresh=useCallback((id:string)=>runtime.refresh(id),[runtime]);
   const attach=useCallback((id:string)=>runtime.close(id),[runtime]);
-  const returnAll=useCallback(()=>{for(const host of runtime.registry.values())runtime.close(host.id);},[runtime]);
+  const returnMembers=useCallback((ids:readonly string[])=>runtime.returnMembers(ids),[runtime]);
+  const returnAll=useCallback(()=>runtime.returnMembers(runtime.registry.values().flatMap(host=>host.members)),[runtime]);
   useLayoutEffect(()=>{document.documentElement.classList.toggle('hive-desktop',!!window.hiveDesktop?.isDesktop);return()=>document.documentElement.classList.remove('hive-desktop');},[]);
   useEffect(()=>{const start=()=>{composition.current=true;},end=()=>{composition.current=false;};document.addEventListener('compositionstart',start,true);document.addEventListener('compositionend',end,true);return()=>{document.removeEventListener('compositionstart',start,true);document.removeEventListener('compositionend',end,true);};},[]);
   useEffect(()=>window.hiveDesktop?.onPanelCloseRequested(id=>{const event=new CustomEvent('hive:panel-close-requested',{cancelable:true,detail:id});if(window.dispatchEvent(event))attach(id);}),[attach]);
-  useEffect(()=>()=>dragCleanup.current?.(),[]);useEffect(()=>returnAll,[returnAll]);
+  useEffect(()=>()=>dragCleanup.current?.(),[]);useEffect(()=>()=>{returnAll();},[returnAll]);
   const hosts=runtime.registry.values().filter(host=>host.group&&host.resource.connected&&!host.resource.child.closed);
   const docs=[document,...new Set([...windows.values()].map(child=>child.document))];
-  return <Context.Provider value={{enabled:!!window.hiveDesktop?.isDesktop,windows,hiddenWindows,beginDrag,register,removeMember,refresh,attach,returnAll,report,
+  return <Context.Provider value={{enabled:!!window.hiveDesktop?.isDesktop,windows,hiddenWindows,beginDrag,register,removeMember,returnMembers,refresh,attach,returnAll,report,
     owner:id=>runtime.registry.owner(id),panelForHost:id=>runtime.registry.get(id)?.active||id,members:id=>runtime.registry.get(id)?.members,
     rect:id=>runtime.rect(id),lastRect:id=>runtime.lastRects.get(id)||null,
     detach:(id,options)=>runtime.open(id,options),detachGroup:(id,members,select,options)=>runtime.open(id,options,members,select),extract:id=>runtime.extract(id),

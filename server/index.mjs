@@ -9,6 +9,8 @@ import {importStore} from './imports.mjs';
 import {resolveReferences} from './references.mjs';
 import {reasoningOptions} from './generation-options.mjs';
 import {templateStore} from './templates.mjs';
+import {desktopShell} from './desktop-shell.mjs';
+import {fileProbe} from './file-probe.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const project = path.resolve(here, "..");
@@ -18,10 +20,11 @@ const root = path.resolve(
 const local = path.resolve(
   process.env.HIVE_STATE_DIR || path.join(project, ".local"),
 );
-let port = Number(process.env.HIVE_PORT ?? 4317);
+let port = Number(process.env.HIVE_PORT ?? 4324);
 await fs.mkdir(root, { recursive: true });
 const modelSettings = await modelConfigStore(local, {envKey:process.env.HIVE_API_KEY || ""});
-const spaces = await workspaceStore(local, root);
+const desktopFiles=process.env.HIVE_DESKTOP_SHELL==='1'&&process.send?desktopShell(process):null;
+const spaces = await workspaceStore(local, root, {revealFile:desktopFiles?.revealFile});
 const templates = await templateStore(process.env.HIVE_TEMPLATES_DIR || path.join(local,'templates'),path.join(project,'templates'),{sourceDirectory:process.env.HIVE_TEMPLATES_SOURCE || (!project.includes('.asar')?path.join(project,'templates'):undefined)});
 const scratchPath = "自由草稿.md";
 const app = express();
@@ -47,6 +50,7 @@ app.post('/api/templates/:id/open',async(req,res)=>res.json(await templates.open
 app.get('/api/workspace', (_req,res)=>res.json(spaces.read()));
 const workspaceRoutes = new Set(['writing-outline','annotations','scratch','outline','tree','file','folder','rename','workspace','explorer','images','references','import']);
 const mutationQueues=new Map();
+let probeOwner, activeProbe;
 app.use('/api', (req,res,next)=>{
   if(!workspaceRoutes.has(req.path.split('/')[1])) return next();
   try {
@@ -61,21 +65,28 @@ app.use('/api', (req,res,next)=>{
   }catch(error){next(error);}
 });
 app.post('/api/workspace', async(req,res)=>res.json(await spaces.update(req.body)));
+app.post('/api/workspace/repositories', async(req,res)=>res.json(await spaces.manage(req.body)));
 app.post('/api/references/resolve',async(req,res)=>res.json(await resolveReferences(req.workspace,req.body)));
 app.post('/api/workspace/sync', async(req,res)=>{
   const paths=req.body.paths;
   if(!Array.isArray(paths)||paths.length>100||paths.some(value=>typeof value!=='string')) return res.status(400).json({error:'同步文件列表无效。'});
   const unique=[...new Set(paths)], files=new Array(unique.length);
   const baselines=req.body.baselines;
+  if(probeOwner!==req.workspace){
+    activeProbe?.clear();probeOwner=req.workspace;activeProbe=fileProbe(req.workspace.files);
+  }
+  const probe=activeProbe;
+  probe.retain(unique);
   let next=0;
   await Promise.all(Array.from({length:Math.min(4,unique.length)},async()=>{
     while(next<unique.length){
       const index=next++,file=unique[index];
       const knownHash=baselines && typeof baselines==='object' && Object.hasOwn(baselines,file) ? baselines[file] : undefined;
-      try{files[index]=await req.workspace.files.read(file,knownHash);}catch(error){files[index]={path:file,error:error.code==='ENOENT'?'文件已在磁盘删除或移动。':error.message};}
+      try{files[index]=await probe.read(file,knownHash);}catch(error){files[index]={path:file,error:error.code==='ENOENT'?'文件已在磁盘删除或移动。':error.message};}
     }
   }));
-  res.json({workspace:spaces.read(),entries:await req.workspace.files.list(),files});
+  const snapshot=await req.workspace.files.snapshot({knownVersion:req.body.treeVersion});
+  res.json({workspace:spaces.read(),...snapshot,files});
 });
 app.get("/api/writing-outline", async (req, res) => {
   await req.workspace.files.read(req.query.file);
@@ -149,9 +160,10 @@ app.get("/api/health", (_req, res) =>
     ready: true,
   }),
 );
-app.get("/api/tree", async (req, res) =>
-  res.json({ root:req.workspace.root, entries: await req.workspace.files.list() }),
-);
+app.get('/api/tree',async(req,res)=>{
+  const snapshot=await req.workspace.files.snapshot({force:req.query.refresh==='1'});
+  res.json({root:req.workspace.root,...snapshot});
+});
 app.get('/api/explorer/trash',async(req,res)=>res.json(await req.workspace.explorer.listTrash()));
 app.post('/api/explorer/trash/preview',async(req,res)=>res.json(await req.workspace.explorer.previewTrash(req.body.days)));
 app.post('/api/explorer/trash/purge',async(req,res)=>res.json(await req.workspace.explorer.purgeTrash(req.body.token)));
@@ -161,6 +173,7 @@ app.post('/api/import',express.raw({type:'application/octet-stream',limit:MAX_IM
   res.json(await importStore(req.workspace).store(req.query.name,req.body));
 });
 app.get('/api/import',async(req,res)=>res.json(await importStore(req.workspace).list()));
+app.get('/api/import/references',async(req,res)=>res.json(await importStore(req.workspace).references(req.query.path)));
 app.get('/api/import/image',async(req,res)=>{
   const image=await importStore(req.workspace).read(req.query.path);
   res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Security-Policy',"default-src 'none'; sandbox");
@@ -347,7 +360,12 @@ const server = app.listen(port, "127.0.0.1", () => {
   console.log(`HIVE ready: http://127.0.0.1:${port}\nDocuments: ${spaces.read().root}`);
   if (process.send) process.send({ type: 'hive-ready', port });
 });
-function shutdown() { templates.close();server.close(() => process.exit(0)); server.closeAllConnections(); }
+let stopping=false;
+function shutdown() {
+  if(stopping)return;stopping=true;
+  const httpClosed=new Promise(resolve=>server.close(resolve));server.closeAllConnections();
+  void Promise.all([httpClosed,templates.close(),spaces.close()]).then(()=>process.exit(0));
+}
 if (process.send) {
   process.on('message', message => { if (message?.type === 'hive-shutdown') shutdown(); });
   process.on('disconnect', shutdown);

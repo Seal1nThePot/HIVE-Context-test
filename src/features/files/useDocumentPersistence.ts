@@ -10,8 +10,10 @@ import { diskSyncDecision } from './fileSync';
 import {documentMatchesText} from '../editor/documentText';
 import {beginFileActivity} from './fileOperations';
 import type {Transaction} from '@codemirror/state';
+import {documentSyncBaselines,pollAfterCompletion,workspaceTreeSync} from './workspaceSync';
 type PersistenceOptions = {
     api: ApiClient;
+    workspace?:Pick<WorkspaceInfo,'id'|'root'>;
     sessions: RefObject<Map<string, EditorSession>>;
     activeSession: RefObject<string>;
     disk: RefObject<DiskFile | null>;
@@ -29,12 +31,24 @@ type PersistenceOptions = {
     appAlive?:RefObject<boolean>;
     onStoredChange?:(id:string,transaction:Transaction)=>void;
 };
-export function useDocumentPersistence({ api, sessions, activeSession, disk, switching, structuring, fileBusy, tick, autoSave, setDirty, setFileBusy, setEntries, setError, inform, redraw,appAlive,onStoredChange }: PersistenceOptions) {
+export function useDocumentPersistence({ api, workspace, sessions, activeSession, disk, switching, structuring, fileBusy, tick, autoSave, setDirty, setFileBusy, setEntries, setError, inform, redraw,appAlive,onStoredChange }: PersistenceOptions) {
     const savingPaths = useRef(new Set<string>()), syncRunning = useRef(false);
+    const treeSync=workspaceTreeSync(setEntries,workspace),lifecycle=useRef(0);
     const [fileConflicts, setFileConflicts] = useState<Record<string, string>>({});
     const conflicts = useRef<Record<string, string>>({});
-    function setConflict(path: string, message: string) { if (conflicts.current[path] === message)
+    const readFailures=useRef(new Map<string,{message:string;owner:number}>());
+    function setConflict(path: string, message: string) { readFailures.current.delete(path); if (conflicts.current[path] === message)
         return; conflicts.current = { ...conflicts.current, [path]: message }; setFileConflicts(conflicts.current); }
+    function setReadFailure(path:string,message:string) {
+        const previous=readFailures.current.get(path),owner=treeSync.owner();
+        // A failed read must not hide a save failure or an unresolved content conflict.
+        if(conflicts.current[path]&&(!previous||previous.owner!==owner||previous.message!==conflicts.current[path]))return;
+        setConflict(path,message);readFailures.current.set(path,{message,owner});
+    }
+    function clearReadFailure(path:string) {
+        const failure=readFailures.current.get(path);
+        if(failure?.owner===treeSync.owner()&&conflicts.current[path]===failure.message)setConflict(path,'');
+    }
     async function saveSession(id: string, quiet = false): Promise<boolean> {
         const session = sessions.current.get(id), source = session?.disk, state = session?.view?.state || session?.state;
         if (!session || !state)
@@ -123,16 +137,17 @@ export function useDocumentPersistence({ api, sessions, activeSession, disk, swi
     }
     const syncLatest = useRef(async () => { });
     syncLatest.current = async () => {
-        if (syncRunning.current || switching.current || fileBusy || structuring.current)
+        const ticket=treeSync.beginSync();
+        if (!ticket || syncRunning.current || switching.current || fileBusy || structuring.current || appAlive?.current===false)
             return;
         syncRunning.current = true;
+        const owner=sessions.current,generation=lifecycle.current;
+        const valid=()=>lifecycle.current===generation&&sessions.current===owner&&appAlive?.current!==false&&!switching.current&&!structuring.current&&treeSync.current(ticket);
         try {
-            const paths = [...new Set([...sessions.current.values()].flatMap(session => session.disk ? [session.disk.path] : []))];
-            const baselines = new Map([...sessions.current.values()].filter(session => session.disk).map(session => [session.disk!.path, session.disk!.hash]));
-            const knownBaselines = Object.fromEntries([...baselines].filter(([path, hash]) =>
-                [...sessions.current.values()].every(session => session.disk?.path !== path || session.disk.hash === hash)));
+            const {paths,baselines,knownBaselines}=documentSyncBaselines(owner.values());
             const data = await api<{
-                entries: Entry[];
+                entries?: Entry[];
+                treeVersion: string;
                 workspace: WorkspaceInfo;
                 files: (DiskFile | {
                     path: string;
@@ -142,9 +157,10 @@ export function useDocumentPersistence({ api, sessions, activeSession, disk, swi
                     hash: string;
                     unchanged: true;
                 })[];
-            }>('/workspace/sync', { paths, baselines: knownBaselines });
-            if(appAlive?.current===false)return;
-            setEntries(previous => JSON.stringify(previous) === JSON.stringify(data.entries) ? previous : data.entries);
+            }>('/workspace/sync', { paths, baselines: knownBaselines,...(ticket.treeVersion===undefined?{}:{treeVersion:ticket.treeVersion}) });
+            if(!valid()||!treeSync.current(ticket,data.workspace))return;
+            treeSync.accept(ticket,data.treeVersion);
+            if(data.entries!==undefined)setEntries(data.entries);
             for (const remote of data.files) {
                 if (savingPaths.current.has(remote.path))
                     continue;
@@ -153,14 +169,18 @@ export function useDocumentPersistence({ api, sessions, activeSession, disk, swi
                     continue;
                 if ('error' in remote) {
                     if (matching.length)
-                        setConflict(remote.path, remote.error + ' 本地内容仍保留，可另存副本。');
+                        setReadFailure(remote.path, remote.error + ' 本地内容仍保留，可另存副本。');
                     continue;
                 }
-                if ('unchanged' in remote)
+                if ('unchanged' in remote) {
+                    clearReadFailure(remote.path);
                     continue;
+                }
                 const decision = diskSyncDecision(matching.map(session => ({ baseline: session.disk!, text: (session.view?.state || session.state)?.doc || '' })), remote);
-                if (decision === 'unchanged')
+                if (decision === 'unchanged') {
+                    clearReadFailure(remote.path);
                     continue;
+                }
                 if (decision === 'conflict') {
                     setConflict(remote.path, '磁盘和本地都有修改，已暂停自动保存。请核对后重新读取，或另存本地副本。');
                     continue;
@@ -169,13 +189,17 @@ export function useDocumentPersistence({ api, sessions, activeSession, disk, swi
             }
         }
         catch (error) {
-            if(appAlive?.current!==false)setError((error as Error).message);
+            if(valid())setError((error as Error).message);
         }
         finally {
             syncRunning.current = false;
         }
     };
-    useEffect(() => { const timer = setInterval(() => void syncLatest.current(), 2000); return () => clearInterval(timer); }, []);
+    useEffect(() => {
+        lifecycle.current++;
+        const stop=pollAfterCompletion(()=>syncLatest.current(),2000);
+        return ()=>{lifecycle.current++;stop();};
+    }, []);
     useEffect(() => {
         if (!autoSave || switching.current || structuring.current)
             return;
@@ -185,6 +209,6 @@ export function useDocumentPersistence({ api, sessions, activeSession, disk, swi
                     void saveSession(session.id, true);
         }, 900);
         return () => clearTimeout(timer);
-    }, [tick, autoSave]);
+    }, [tick, autoSave,fileConflicts]);
     return { savingPaths, fileConflicts, saveSession, applyDiskFile };
 }

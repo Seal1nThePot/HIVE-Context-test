@@ -4,17 +4,18 @@ const iconPaths={left:['m12 19-7-7 7-7','M19 12H5'],right:['M5 12h14','m12 5 7 7
 let current = null;
 function draw() {
   const root = document.getElementById('root'); if (!root) return;
-  root.replaceChildren(); if (!current) return;
+  root.replaceChildren();document.documentElement.style.cssText='';if (!current) return;
+  for(const [key,color] of Object.entries(current.colors||{}))if(/^[a-zA-Z]{1,40}$/.test(key)&&/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i.test(color))document.documentElement.style.setProperty('--hive-dock-'+key.replace(/[A-Z]/g,value=>'-'+value.toLowerCase()),color);
   function box(rect, name) {
     const element = document.createElement('div'); element.className = name;
     for (const [key, value] of Object.entries({left:rect.x,top:rect.y,width:rect.width,height:rect.height})) element.style[key] = `${value}px`;
     root.appendChild(element); return element;
   }
-  if (current.ready?.preview) box(current.ready.preview, 'preview');
-  if (current.rail) box(current.rail.rect, 'rail');
+  if (current.ready?.preview) box(current.ready.preview, 'dock-placement-preview');
+  if (current.rail) box(current.rail.rect, 'dock-native-rail-preview');
   for (const guide of current.guides) {
     const edge=guide.key.split(':').at(-1),center=edge==='center',scope=guide.key.startsWith('workspace:')?'outer-guide':'inner-guide';
-    const element=box(guide.button,`guide ${scope}${center?' stack-guide':''}`), arrow=document.createElementNS('http://www.w3.org/2000/svg','svg');
+    const element=box(guide.button,`dock-guide ${scope}${center?' stack-guide':''}`), arrow=document.createElementNS('http://www.w3.org/2000/svg','svg');
     element.dataset.dockEdge=edge;
     element.setAttribute('role', 'img'); element.setAttribute('aria-label', guide.label);
     if (current.ready?.button && ['x','y','width','height'].every(key => current.ready.button[key] === guide.button[key])) element.classList.add('ready');

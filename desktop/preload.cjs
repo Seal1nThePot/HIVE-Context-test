@@ -31,8 +31,12 @@ if (initialPreferences !== null) {
 contextBridge.exposeInMainWorld('hiveDesktop', Object.freeze({
   isDesktop: true,
   platform: process.platform,
+  chooseRepositoryDirectory: () => ipcRenderer.invoke('hive:repository-directory'),
+  getAboutInfo: () => ipcRenderer.invoke('hive:about-info'),
+  openAppDataDirectory: () => ipcRenderer.invoke('hive:open-app-data-directory'),
   windowCommand: (command, panelId) => { if (['minimize','maximize','close','focus','hide'].includes(command) && (panelId === undefined || typeof panelId === 'string')) ipcRenderer.send('hive:window-command', command, panelId); },
   panelReady: (id, placement, inactive) => { if (typeof id === 'string') return ipcRenderer.sendSync('hive:panel-ready', id, placement, inactive === true); return false; },
+  panelRect: id => typeof id === 'string' ? ipcRenderer.sendSync('hive:panel-rect', id) : null,
   panelDrag: (id, phase, edge, free) => { if (typeof id === 'string' && ['start','move','end','cancel'].includes(phase) && (edge === undefined || ['n','s','e','w','ne','nw','se','sw'].includes(edge))) { if (phase === 'start') return ipcRenderer.sendSync('hive:panel-drag', id, phase, edge, free === true); ipcRenderer.send('hive:panel-drag', id, phase, edge, free === true); } return false; },
   dockOverlay: feedback => { if (feedback === null || (feedback && typeof feedback === 'object')) ipcRenderer.send('hive:dock-overlay', feedback); },
   dockTooltip: value => { if (value === null || (value && typeof value === 'object')) ipcRenderer.send('hive:dock-tooltip', value); },

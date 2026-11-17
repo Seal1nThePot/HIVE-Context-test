@@ -68,3 +68,110 @@ it('migrates legacy scratch only for the original workspace',async()=>{
   await legacy.update({root:other,revision:0});
   await expect(fs.access(path.join(other,'自由草稿.md'))).rejects.toThrow();
 });
+it('migrates the legacy single workspace into the repository list without changing its preferences',async()=>{
+  await fs.writeFile(path.join(local,'workspace.json'),JSON.stringify({root:other,autoSave:false,revision:7}));
+  const restarted=await workspaceStore(local,root),info=restarted.read();
+  expect(info).toMatchObject({root:await fs.realpath(other),autoSave:false,revision:7});
+  expect(info.repositories).toEqual([{id:info.id,root:info.root}]);
+});
+it('adds many repositories without switching or allocating document state, and deduplicates canonical paths',async()=>{
+  const initial=spaces.read();
+  for(let index=0;index<24;index++) {
+    const folder=path.join(temp,'project-'+index);await fs.mkdir(folder);
+    await spaces.manage({action:'add',root:folder,revision:spaces.read().revision});
+    expect(await fs.readdir(folder)).toEqual([]);
+  }
+  await spaces.manage({action:'add',root:path.join(temp,'project-0','.'),revision:spaces.read().revision});
+  expect(spaces.read()).toMatchObject({id:initial.id,root:initial.root,autoSave:initial.autoSave});
+  expect(spaces.read().repositories).toHaveLength(25);
+  expect(await fs.readdir(local)).not.toContain('workspaces');
+  expect((await workspaceStore(local,root)).read()).toEqual(spaces.read());
+});
+it('persists custom repository order and remembers previously opened folders',async()=>{
+  const first=spaces.read();
+  await spaces.update({root:other,autoSave:false,revision:0});
+  const second=spaces.read(),order=[second.id,first.id];
+  await spaces.manage({action:'reorder',order,revision:1});
+  expect(spaces.read().repositories.map(item=>item.id)).toEqual(order);
+  expect(spaces.read()).toMatchObject({id:second.id,autoSave:false});
+  const restarted=await workspaceStore(local,root);
+  expect(restarted.read()).toEqual(spaces.read());
+  await restarted.update({root,revision:2});
+  expect(restarted.read().repositories.map(item=>item.id)).toEqual(order);
+});
+it('removes only a repository listing and preserves its files and metadata for reopening',async()=>{
+  await spaces.update({root:other,revision:0});const second=spaces.read();
+  await spaces.capture().files.save({path:'kept.md',text:'keep me',baseline:null});
+  await spaces.capture().outlines.save('kept.md','heading','keep outline');
+  await spaces.update({root,revision:1});
+  await spaces.manage({action:'remove',id:second.id,revision:2});
+  expect(spaces.read().repositories).toHaveLength(1);
+  expect(await fs.readFile(path.join(other,'kept.md'),'utf8')).toBe('keep me');
+  const restarted=await workspaceStore(local,root);
+  await restarted.update({root:other,revision:3});
+  expect(await restarted.capture().outlines.read('kept.md')).toEqual({heading:'keep outline'});
+  expect(restarted.read().repositories).toHaveLength(2);
+});
+it('rejects removing the current repository, invalid ordering and invalid additions without changing the registry',async()=>{
+  const initial=spaces.read();
+  for(const action of [{action:'remove',id:initial.id},{action:'reorder',order:[]},{action:'reorder',order:['unknown']},{action:'add',root:path.join(temp,'missing')},{action:'add',root:'relative'},{action:'unknown'}]) {
+    await expect(spaces.manage({...action,revision:0})).rejects.toThrow();
+    expect(spaces.read()).toEqual(initial);
+  }
+  await spaces.manage({action:'add',root:other,revision:0});const next=spaces.read();
+  await expect(spaces.manage({action:'reorder',order:[initial.id,initial.id],revision:1})).rejects.toThrow();
+  expect(spaces.read()).toEqual(next);
+});
+it('keeps unavailable inactive repositories in the list while a failed open preserves the current one',async()=>{
+  await spaces.manage({action:'add',root:other,revision:0});
+  await fs.rmdir(other);
+  const restarted=await workspaceStore(local,root),before=restarted.read();
+  expect(before.repositories).toHaveLength(2);
+  await expect(restarted.update({root:other,revision:1})).rejects.toThrow('无法访问');
+  expect(restarted.read()).toEqual(before);
+});
+it('serializes repository edits with workspace switching and rejects stale revisions',async()=>{
+  const initial=spaces.read();
+  const results=await Promise.allSettled([spaces.manage({action:'add',root:other,revision:0}),spaces.update({root:other,revision:0})]);
+  expect(results.map(item=>item.status)).toEqual(['fulfilled','rejected']);
+  expect(spaces.read()).toMatchObject({id:initial.id,revision:1});
+  expect(spaces.read().repositories).toHaveLength(2);
+});
+it('persists a display name without renaming the folder or changing document and metadata identity',async()=>{
+  const before=spaces.read();
+  await spaces.capture().files.save({path:'保留.md',text:'original manuscript',baseline:null});
+  await spaces.capture().outlines.save('保留.md','heading','original outline');
+  await spaces.manage({action:'rename',id:before.id,name:'  我的长篇小说  ',revision:0});
+  expect(spaces.read()).toMatchObject({id:before.id,root:before.root,repositories:[{id:before.id,root:before.root,name:'我的长篇小说'}]});
+  const restarted=await workspaceStore(local,root);expect(restarted.read()).toEqual(spaces.read());
+  expect(await fs.readFile(path.join(root,'保留.md'),'utf8')).toBe('original manuscript');
+  expect(await restarted.capture().outlines.read('保留.md')).toEqual({heading:'original outline'});
+  expect(await fs.readdir(temp)).not.toContain('我的长篇小说');
+});
+it('keeps inactive repository names through switching, duplicate additions and reordering',async()=>{
+  await spaces.manage({action:'add',root:other,revision:0});const [first,second]=spaces.read().repositories;
+  await spaces.manage({action:'rename',id:second.id,name:'参考资料',revision:1});
+  await spaces.manage({action:'add',root:other,revision:2});
+  await spaces.manage({action:'reorder',order:[second.id,first.id],revision:3});
+  await spaces.update({root:other,revision:4});
+  expect(spaces.read().repositories[0]).toEqual({...second,name:'参考资料'});
+  expect((await workspaceStore(local,root)).read()).toEqual(spaces.read());
+});
+it('clears only the display name when the user submits a blank alias',async()=>{
+  const original=spaces.read();
+  await spaces.manage({action:'rename',id:original.id,name:'备注',revision:0});
+  await spaces.manage({action:'rename',id:original.id,name:'   ',revision:1});
+  expect(spaces.read().repositories).toEqual(original.repositories);
+  expect((await workspaceStore(local,root)).read().repositories).toEqual(original.repositories);
+});
+it('rejects invalid or stale name edits without changing the repository registry',async()=>{
+  const original=spaces.read();
+  for(const name of [null,10,'x'.repeat(81),'line\nbreak','hidden\0character']) {
+    await expect(spaces.manage({action:'rename',id:original.id,name,revision:0})).rejects.toThrow('备注名称');
+    expect(spaces.read()).toEqual(original);
+  }
+  await expect(spaces.manage({action:'rename',id:'missing',name:'备注',revision:0})).rejects.toThrow('不在列表');
+  await spaces.manage({action:'rename',id:original.id,name:'first',revision:0});
+  await expect(spaces.manage({action:'rename',id:original.id,name:'stale',revision:0})).rejects.toThrow('设置已变化');
+  expect(spaces.read().repositories[0].name).toBe('first');
+});

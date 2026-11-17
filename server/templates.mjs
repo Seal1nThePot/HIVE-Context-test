@@ -2,6 +2,8 @@ import {promises as fs,watch} from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {spawn} from 'node:child_process';
+import dockingColorFields from '../desktop/docking-colors.json' with {type:'json'};
+import editorColorFields from '../desktop/editor-colors.json' with {type:'json'};
 
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 const bases=['black','gray','white','custom'];
@@ -60,6 +62,22 @@ export function validateTemplateColors(value,allowDefault=true){
     for(const base of bases)if(value.colorProfiles[base]!==undefined)result.colorProfiles[base]=palette(value.colorProfiles[base]);
   }
   if(allowDefault&&value.defaultScheme!==undefined)result.defaultScheme=validateTemplateColors(value.defaultScheme,false);
+  if(value.dockingProfiles!==undefined){
+    if(!object(value.dockingProfiles))throw fail('停靠引导颜色档案无效。');result.dockingProfiles={};
+    for(const base of bases){
+      const raw=value.dockingProfiles[base];if(raw===undefined)continue;if(!object(raw))throw fail('停靠引导颜色档案无效。');
+      const profile={};for(const [key,field] of Object.entries(dockingColorFields))if(raw[key]!==undefined){if(!color(raw[key],field.alpha))throw fail('停靠引导颜色无效。');profile[key]=raw[key].toLowerCase();}
+      if(Object.keys(profile).length)result.dockingProfiles[base]=profile;
+    }
+  }
+  if(value.editorProfiles!==undefined){
+    if(!object(value.editorProfiles))throw fail('文本编辑页面颜色档案无效。');result.editorProfiles={};
+    for(const base of bases){
+      const raw=value.editorProfiles[base];if(raw===undefined)continue;if(!object(raw))throw fail('文本编辑页面颜色档案无效。');
+      const profile={};for(const [key,field] of Object.entries(editorColorFields))if(raw[key]!==undefined){if(!color(raw[key],field.alpha))throw fail('文本编辑页面颜色无效。');profile[key]=raw[key].toLowerCase();}
+      if(Object.keys(profile).length)result.editorProfiles[base]=profile;
+    }
+  }
   return result;
 }
 function manifest(value,id){
@@ -72,7 +90,7 @@ export async function templateStore(directory,bundledDirectory,options={}){
   await fs.mkdir(directory,{recursive:true});
   const rootStat=await fs.lstat(directory);if(!rootStat.isDirectory()||rootStat.isSymbolicLink())throw fail('模板根目录不可用。');
   const queues=new Map();
-  let sourceWarnings=[],closed=false,watcher,sourceTimer,sourcePoll,syncing;
+  let sourceWarnings=[],closed=false,watcher,sourceTimer,sourcePoll,syncing,closing;
   const source=options.sourceDirectory?path.resolve(options.sourceDirectory):null;
   const builtinIds=new Set(),sourceRecords=new Map();
   let sourceState={version:1,source,templates:{}};
@@ -161,7 +179,7 @@ export async function templateStore(directory,bundledDirectory,options={}){
   }
   await syncSource();
   if(source&&source!==directory){
-    const schedule=()=>{clearTimeout(sourceTimer);sourceTimer=setTimeout(()=>{void syncSource();},200);sourceTimer.unref();};
+    const schedule=()=>{if(closed)return;clearTimeout(sourceTimer);sourceTimer=setTimeout(()=>{void syncSource();},200);sourceTimer.unref();};
     try{watcher=watch(source,{recursive:true},schedule);watcher.on('error',schedule);watcher.unref();}catch{/* Polling also covers a source directory created later. */}
     sourcePoll=setInterval(()=>{void syncSource();},1500);sourcePoll.unref();
   }
@@ -223,6 +241,11 @@ export async function templateStore(directory,bundledDirectory,options={}){
     await new Promise((resolve,reject)=>{const child=(options.launch||spawn)('explorer.exe',[target],{shell:false,windowsHide:true,detached:true,stdio:'ignore'});child.once('error',reject);child.once('spawn',()=>{child.unref();resolve();});});
     return {ok:true,directory:target};
   }
-  function close(){closed=true;clearTimeout(sourceTimer);clearInterval(sourcePoll);watcher?.close();}
+  function close(){
+    if(closing)return closing;
+    closed=true;clearTimeout(sourceTimer);clearInterval(sourcePoll);watcher?.close();
+    closing=(async()=>{if(syncing)await Promise.allSettled([syncing]);await Promise.allSettled([...queues.values()]);})();
+    return closing;
+  }
   return {list,read,save,open,syncSource,close};
 }

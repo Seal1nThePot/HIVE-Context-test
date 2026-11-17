@@ -34,11 +34,18 @@ export function explorerStore({root,files,state},launch=spawn,opts={}) {
       const source=path.join(trash,input.id);await plain(source);
       await relocate('@trash/'+input.id,record.path,source,destination);await fs.unlink(manifest);return {path:record.path,type:record.type};
     }
-    const {resolved:source,type}=await target(input.path);await plain(source);
+    const {resolved:source,type}=await target(input.path);
     if(action==='reveal'){
       if(process.platform!=='win32')throw fail('当前系统不支持 Windows 资源管理器。');
-      await new Promise((resolve,reject)=>{const child=launch('explorer.exe',['/select,',source],{shell:false,windowsHide:true,detached:true,stdio:'ignore'});child.once('error',reject);child.once('spawn',()=>{child.unref();resolve();});});return {ok:true};
+      if(opts.revealFile)await opts.revealFile(source);
+      else{
+        // Standalone server fallback opens the containing directory without shell syntax.
+        const directory=type==='folder'?source:path.dirname(source);
+        await new Promise((resolve,reject)=>{const child=launch('explorer.exe',[directory],{shell:false,windowsHide:false,detached:true,stdio:'ignore'});child.once('error',reject);child.once('spawn',()=>{child.unref();resolve();});});
+      }
+      return {ok:true};
     }
+    await plain(source);
     if(action==='trash'){
       if(input.path==='自由草稿.md')throw fail('自由草稿由草稿面板管理，不能在这里删除。');
       await trashRoot();const id=randomUUID(),manifest=path.join(trash,id+'.json'),record={id,path:input.path,type,deletedAt:new Date().toISOString()};

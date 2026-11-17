@@ -46,14 +46,14 @@ export function templateBaseDefaults(binding:TemplateBinding,requested:BaseColor
   const colorProfiles=Object.fromEntries(binding.bases.map(name=>[name,{...defaults.colorProfiles[name]}]));
   const surfaceColors=Object.fromEntries(binding.bases.map(name=>[name,{...defaults.surfaceColors[name]}]));
   const writingDockProfiles=Object.fromEntries(binding.bases.map(name=>[name,structuredClone(defaults.writingDockProfiles[name])]));
-  return normalizeTheme({...defaults,base,colorProfiles,surfaceColors,writingDockProfiles,colors:colorProfiles[base],writingDock:writingDockProfiles[base]});
+  return normalizeTheme({...defaults,base,editorProfiles:Object.fromEntries(binding.bases.filter(name=>defaults.editorProfiles[name]).map(name=>[name,defaults.editorProfiles[name]])),dockingProfiles:Object.fromEntries(binding.bases.filter(name=>defaults.dockingProfiles[name]).map(name=>[name,defaults.dockingProfiles[name]])),colorProfiles,surfaceColors,writingDockProfiles,colors:colorProfiles[base],writingDock:writingDockProfiles[base]});
 }
 export function normalizeWithinTemplate(value:ThemePreferences,binding:TemplateBinding):ThemePreferences{
   const base=allowedTemplateBase(binding,value.base),reference=templateBaseDefaults(binding,base);
   const colors=Object.fromEntries(binding.bases.map(name=>[name,safeOverlay(reference.colorProfiles[name],value.colorProfiles[name])]));
   const surfaces=Object.fromEntries(binding.bases.map(name=>[name,safeOverlay(reference.surfaceColors[name],value.surfaceColors[name])]));
   const docks=Object.fromEntries(binding.bases.map(name=>[name,safeOverlay(reference.writingDockProfiles[name],value.writingDockProfiles[name])]));
-  return normalizeTheme({...value,base,colorProfiles:colors,surfaceColors:surfaces,writingDockProfiles:docks,colors:colors[base],writingDock:docks[base]});
+  return normalizeTheme({...value,base,editorProfiles:Object.fromEntries(binding.bases.filter(name=>value.editorProfiles?.[name]).map(name=>[name,value.editorProfiles[name]])),dockingProfiles:Object.fromEntries(binding.bases.filter(name=>value.dockingProfiles?.[name]).map(name=>[name,value.dockingProfiles[name]])),colorProfiles:colors,surfaceColors:surfaces,writingDockProfiles:docks,colors:colors[base],writingDock:docks[base]});
 }
 export function userProfileFor(binding:TemplateBinding,preferences:ThemePreferences,defaultScheme:ThemePreferences):TemplateUserProfile{
   const current=normalizeWithinTemplate(preferences,binding),saved=normalizeWithinTemplate(defaultScheme,binding);
@@ -61,5 +61,9 @@ export function userProfileFor(binding:TemplateBinding,preferences:ThemePreferen
 }
 export function applyUserProfile(binding:TemplateBinding,profile?:TemplateUserProfile){
   const current=templateBaseDefaults(binding,profile?.base??binding.defaults.base),saved=templateBaseDefaults(binding,profile?.defaultBase??current.base);
-  return {preferences:normalizeWithinTemplate(mergeThemePatch(current,profile?.changes??{}) as ThemePreferences,binding),defaultScheme:normalizeWithinTemplate(mergeThemePatch(saved,profile?.defaultChanges??{}) as ThemePreferences,binding)};
+  let defaultScheme=mergeThemePatch(saved,profile?.defaultChanges??{}) as ThemePreferences;
+  // A saved full default is a snapshot: an empty override map means "derive
+  // from those saved surfaces", rather than inheriting later template overrides.
+  if(profile?.defaultChanges.version===1){const savedTheme=normalizeTheme(profile.defaultChanges);defaultScheme={...defaultScheme,dockingProfiles:savedTheme.dockingProfiles,editorProfiles:savedTheme.editorProfiles};}
+  return {preferences:normalizeWithinTemplate(mergeThemePatch(current,profile?.changes??{}) as ThemePreferences,binding),defaultScheme:normalizeWithinTemplate(defaultScheme,binding)};
 }

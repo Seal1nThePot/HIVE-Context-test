@@ -1,11 +1,11 @@
 .document-panel-controls {display:flex;align-items:center;gap:1px;flex:none;margin-left:auto;}
 .document-panel-controls .panel-controls {margin-left:0;}
 .display-mode-control {display:flex;align-items:center;flex:none;}
-.display-mode-button.typewriter-active {color:#e0c580;background:#b8a25b1f;}
+.display-mode-button.typewriter-active {color:var(--text);background:var(--hive-panel-bg);}
 .display-mode-menu {width:calc(220px * var(--ui-scale,1));min-width:200px;max-width:calc(100vw - 12px);padding:5px;border-radius:4px;}
 .display-mode-menu > button {gap:7px;min-height:30px;}
 .display-mode-check {width:13px;display:inline-flex;flex:none;}
-.display-mode-menu > p {margin:3px 8px 7px 26px;color:var(--muted,#919d80);font-size:calc(10px * var(--text-scale,1));line-height:1.6;}
+.display-mode-menu > p {margin:3px 8px 7px 26px;color:var(--muted);font-size:calc(10px * var(--text-scale,1));line-height:1.6;}
 
 .display-mode-menu {max-height:calc(100vh - 12px);overflow-y:auto;}
-.display-mode-menu > .display-mode-section {margin:5px 8px;color:var(--hive-popup-text,var(--text,#b7c1aa));}
+.display-mode-menu > .display-mode-section {margin:5px 8px;color:var(--hive-popup-text,var(--text));}

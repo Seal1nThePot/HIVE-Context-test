@@ -14,7 +14,7 @@ export class NativeHostRegistry<T> {
   select(id:string,member:string){const host=this.get(id);if(!host?.members.includes(member))return false;host.active=member;return true;}
   remove(id:string){const host=this.get(id);if(!host)return;this.hosts.delete(host.id);host.members.forEach(member=>this.owners.delete(member));return host;}
   extract(member:string){
-    const host=this.get(member);if(!host||host.members.length<2)return;
+    const host=this.get(member);if(!host||!host.members.includes(member)||host.members.length<2)return;
     const index=host.members.indexOf(member),active=host.active,order=[...host.members];
     this.owners.delete(member);host.members=host.members.filter(id=>id!==member);if(host.active===member)host.active=host.members[Math.min(index,host.members.length-1)];
     return {host,index,active,restore:()=>{
@@ -23,5 +23,5 @@ export class NativeHostRegistry<T> {
       if(host.members.includes(active))host.active=active;this.owners.set(member,host.id);return true;
     }};
   }
-  removeMember(member:string){const host=this.get(member);if(!host)return;if(host.members.length===1)return this.remove(host.id);this.extract(member);return host;}
+  removeMember(member:string){const host=this.get(member);if(!host||!host.members.includes(member))return;if(host.members.length===1)return this.remove(host.id);this.extract(member);return host;}
 }

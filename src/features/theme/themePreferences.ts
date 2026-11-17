@@ -1,3 +1,5 @@
+import {normalizeDockingProfiles,type DockingProfiles} from './dockingAppearance';
+import {normalizeEditorProfiles,type EditorProfiles} from './editorAppearance';
 import {defaultWritingDock,normalizeWritingDock,type WritingDockAppearance} from '../chat/writingDockAppearance';
 import {normalizeSurfaceProfiles,resolveSurfaceColors,type SurfaceProfiles} from './surfaceAppearance';
 import {oliveGrayColors,oliveGrayWritingDock,oliveWhiteColors,oliveWhiteWritingDock} from './oliveGoldBuiltins';
@@ -14,8 +16,8 @@ export type BaseColor='black'|'white'|'gray'|'custom';
 export type ColorProfiles=Partial<Record<BaseColor,Palette>>;
 export type ThemeCorePreferences={version:1;base:BaseColor;customBase:string;palette:PaletteId;colors:Palette;colorProfiles:ColorProfiles;surfaceContrastMode:'auto'|'manual';surfaceContrast:number;surfaceColors:SurfaceProfiles};
 export type WritingDockProfiles=Partial<Record<BaseColor,WritingDockAppearance>>;
-export type ThemePreferences=ThemeCorePreferences&{writingDock:WritingDockAppearance;writingDockProfiles:WritingDockProfiles};
-export const defaultTheme:ThemePreferences={version:1,base:'black',customBase:'#202820',palette:'hive',colors:{...palettes.hive.colors},colorProfiles:{},surfaceContrastMode:'auto',surfaceContrast:100,surfaceColors:{},writingDock:defaultWritingDock,writingDockProfiles:{}};
+export type ThemePreferences=ThemeCorePreferences&{writingDock:WritingDockAppearance;writingDockProfiles:WritingDockProfiles;dockingProfiles:DockingProfiles;editorProfiles:EditorProfiles};
+export const defaultTheme:ThemePreferences={version:1,base:'black',customBase:'#202820',palette:'hive',colors:{...palettes.hive.colors},colorProfiles:{},surfaceContrastMode:'auto',surfaceContrast:100,surfaceColors:{},writingDock:defaultWritingDock,writingDockProfiles:{},dockingProfiles:{},editorProfiles:{}};
 export function isHex(value:unknown):value is string{return typeof value==='string'&&/^#[0-9a-f]{6}$/i.test(value);}
 export function defaultColorsForBase(base:BaseColor):Palette{return {...(base==='gray'?oliveGrayColors:base==='white'?oliveWhiteColors:palettes.hive.colors)};}
 function normalizePalette(value:unknown,base:BaseColor):Palette{
@@ -37,7 +39,7 @@ function savedDefaultColorProfiles(value:unknown):ColorProfiles{
 }
 export function normalizeTheme(value:unknown):ThemePreferences {
   const v=value&&typeof value==='object'?value as Record<string,unknown>:{};
-  if(v.version!==1)return {...defaultTheme,colors:{...defaultTheme.colors},colorProfiles:{},surfaceColors:{},writingDock:normalizeWritingDock(null),writingDockProfiles:{}};
+  if(v.version!==1)return {...defaultTheme,colors:{...defaultTheme.colors},colorProfiles:{},surfaceColors:{},writingDock:normalizeWritingDock(null),writingDockProfiles:{},dockingProfiles:{},editorProfiles:{}};
   const base=(['black','white','gray','custom'] as unknown[]).includes(v.base)?v.base as BaseColor:'black';
   const palette=typeof v.palette==='string'&&Object.hasOwn(palettes,v.palette)?v.palette as PaletteId:'hive';
   // Retired presets must not reappear under the remaining preset's name.
@@ -68,7 +70,7 @@ export function normalizeTheme(value:unknown):ThemePreferences {
     const destination=misplacedDark?'black':base;
     profiles[destination]=normalizeWritingDock(v.writingDock,destination==='black'?color=>color:color=>mapLegacyColor(color,core));
   }
-  return {...core,writingDockProfiles:profiles,writingDock:profiles[base]??defaultDockForTheme(core)};
+  return {...core,dockingProfiles:normalizeDockingProfiles(v.dockingProfiles),editorProfiles:normalizeEditorProfiles(v.editorProfiles),writingDockProfiles:profiles,writingDock:profiles[base]??defaultDockForTheme(core)};
 }
 export function defaultDockForTheme(theme:ThemeCorePreferences):WritingDockAppearance{
   if(theme.base==='black')return normalizeWritingDock(defaultWritingDock);
@@ -91,9 +93,9 @@ export function updateThemeColors(theme:ThemePreferences,patch:Partial<Palette>)
 }
 /** Restore one base only; other base-specific customizations remain available. */
 export function resetThemeBase(theme:ThemePreferences):ThemePreferences{
-  const surfaceColors={...theme.surfaceColors},writingDockProfiles={...theme.writingDockProfiles};
-  delete surfaceColors[theme.base];delete writingDockProfiles[theme.base];
-  return normalizeTheme({...theme,colors:defaultColorsForBase(theme.base),colorProfiles:{...theme.colorProfiles,[theme.base]:defaultColorsForBase(theme.base)},surfaceColors,writingDock:undefined,writingDockProfiles});
+  const surfaceColors={...theme.surfaceColors},writingDockProfiles={...theme.writingDockProfiles},dockingProfiles={...theme.dockingProfiles},editorProfiles={...theme.editorProfiles};
+  delete surfaceColors[theme.base];delete writingDockProfiles[theme.base];delete dockingProfiles[theme.base];delete editorProfiles[theme.base];
+  return normalizeTheme({...theme,colors:defaultColorsForBase(theme.base),colorProfiles:{...theme.colorProfiles,[theme.base]:defaultColorsForBase(theme.base)},surfaceColors,writingDock:undefined,writingDockProfiles,dockingProfiles,editorProfiles});
 }
 export function readTheme(value:string|null):ThemePreferences{try{return normalizeTheme(JSON.parse(value||'null'));}catch{return normalizeTheme(null);}}
 export function readDefaultTheme(value:string|null):ThemePreferences{try{return normalizeTheme(JSON.parse(value||'null')?.defaultScheme);}catch{return normalizeTheme(null);}}

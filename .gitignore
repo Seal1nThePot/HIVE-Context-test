@@ -10,8 +10,9 @@ coverage/
 *.zip
 *.tgz
 
-# Personal documents, credentials and local runtime state
+# Personal documents, credentials and runtime state
 documents/
+.runtime/
 .local/
 .hive-trash/
 .env
@@ -31,8 +32,10 @@ test-results/
 __pycache__/
 *.pyc
 
-# Documentation and handoff archives stay local
-/docs/
+# Publish only documentation imported by the application
+/docs/*
+!/docs/help.md
+!/docs/CHANGELOG.md
 /agent.md
 /AGENTS.md
 /HANDOFF.md

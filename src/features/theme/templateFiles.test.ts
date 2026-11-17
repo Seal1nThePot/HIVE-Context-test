@@ -1,5 +1,5 @@
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
-import {defaultTheme,themeStorageKey,updateThemeColors} from './themePreferences';
+import {defaultTheme,switchThemeBase,themeStorageKey,updateThemeColors} from './themePreferences';
 import olive from '../../../templates/olive-gold/colors.json';
 import blue from '../../../templates/mediterranean-blue/colors.json';
 const revision='a'.repeat(64),nextRevision='b'.repeat(64);
@@ -11,6 +11,28 @@ beforeEach(()=>{vi.resetModules();vi.useFakeTimers();data=new Map();blueDefaults
 afterEach(()=>{vi.clearAllTimers();vi.useRealTimers();vi.unstubAllGlobals();});
 const writes=()=>request.mock.calls.filter(([,init])=>init?.method==='POST');
 describe('template baseline and personal preference isolation',()=>{
+  it('keeps editor highlights per template/base through personal defaults, restore and restart',async()=>{
+    let files=await import('./templateFiles'),store=await import('./themeStore');await files.initializeThemeFiles();await files.loadTemplateFile('mediterranean-blue');
+    store.setTheme(old=>({...old,editorProfiles:{black:{selectionBackground:'#12345688',selectionText:'#abcdef'},white:{selectionBackground:'#65432177'}}}));store.saveDefaultTheme();
+    store.setTheme(old=>({...old,editorProfiles:{...old.editorProfiles,black:{selectionBackground:'#11223366'}}}));await files.loadTemplateFile('olive-gold');expect(store.getThemeSnapshot().preferences.editorProfiles.black).toBeUndefined();await files.loadTemplateFile('mediterranean-blue');expect(store.getThemeSnapshot().preferences.editorProfiles.black?.selectionBackground).toBe('#11223366');
+    store.restoreTemplateBase();expect(store.getThemeSnapshot().preferences.editorProfiles.black).toBeUndefined();expect(store.getThemeSnapshot().preferences.editorProfiles.white?.selectionBackground).toBe('#65432177');
+    store.restoreDefaultTheme();store.flushThemePreferences();vi.resetModules();store=await import('./themeStore');expect(store.getThemeSnapshot().preferences.editorProfiles.black).toEqual({selectionBackground:'#12345688',selectionText:'#abcdef'});expect(writes()).toHaveLength(0);
+  });
+  it('persists manual text per template and base through defaults, restore and restart without POST',async()=>{
+    let files=await import('./templateFiles'),store=await import('./themeStore');await files.initializeThemeFiles();await files.loadTemplateFile('mediterranean-blue');
+    const edited={uiText:'#123456',mutedText:'#654321',documentText:'#102938',ribbonTitleText:'#abcdef',ribbonContentText:'#fedcba'};
+    store.setTheme(old=>({...old,surfaceColors:{...old.surfaceColors,black:{...old.surfaceColors.black,...edited}}}));store.saveDefaultTheme();
+    store.setTheme(old=>switchThemeBase(old,'white'));expect(store.getThemeSnapshot().preferences.surfaceColors.white?.uiText).toBe(blue.surfaceColors.white.uiText);store.setTheme(old=>switchThemeBase(old,'black'));
+    await files.loadTemplateFile('olive-gold');expect(store.getThemeSnapshot().preferences.surfaceColors.black?.uiText).not.toBe(edited.uiText);await files.loadTemplateFile('mediterranean-blue');expect(store.getThemeSnapshot().preferences.surfaceColors.black).toMatchObject(edited);
+    store.restoreTemplateBase();expect(store.getThemeSnapshot().preferences.surfaceColors.black?.uiText).toBe(blue.surfaceColors.black.uiText);store.restoreDefaultTheme();store.flushThemePreferences();vi.resetModules();store=await import('./themeStore');expect(store.getThemeSnapshot().preferences.surfaceColors.black).toMatchObject(edited);expect(writes()).toHaveLength(0);
+  });
+  it('keeps docking colors per template, restores only the active base and survives restart without POST',async()=>{
+    let files=await import('./templateFiles'),store=await import('./themeStore');await files.initializeThemeFiles();await files.loadTemplateFile('mediterranean-blue');
+    store.setTheme(old=>({...old,dockingProfiles:{black:{guideBackground:'#12345688',guideIcon:'#aabbcc'},white:{railActiveBackground:'#abcdef55'}}}));store.saveDefaultTheme();
+    await files.loadTemplateFile('olive-gold');expect(store.getThemeSnapshot().preferences.dockingProfiles.black?.guideIcon).not.toBe('#aabbcc');await files.loadTemplateFile('mediterranean-blue');expect(store.getThemeSnapshot().preferences.dockingProfiles.black?.guideIcon).toBe('#aabbcc');
+    store.restoreTemplateBase();expect(store.getThemeSnapshot().preferences.dockingProfiles.black).toBeUndefined();expect(store.getThemeSnapshot().preferences.dockingProfiles.white?.railActiveBackground).toBe('#abcdef55');
+    store.restoreDefaultTheme();expect(store.getThemeSnapshot().preferences.dockingProfiles.black?.guideBackground).toBe('#12345688');store.flushThemePreferences();vi.resetModules();store=await import('./themeStore');expect(store.getThemeSnapshot().preferences.dockingProfiles.black?.guideIcon).toBe('#aabbcc');expect(writes()).toHaveLength(0);
+  });
   it('migrates old black edits as personal overrides without writing a template',async()=>{
     const {writingDockProfiles:_dock,colorProfiles:_colors,...legacy}=defaultTheme;data.set(themeStorageKey,JSON.stringify({...legacy,colors:{...legacy.colors,accent:'#bfb178'},writingDock:{...legacy.writingDock,aiButton:{...legacy.writingDock.aiButton,icon:'#27301f'}}}));
     const files=await import('./templateFiles'),store=await import('./themeStore');await files.initializeThemeFiles();expect(store.getThemeSnapshot().preferences.colors.accent).toBe('#bfb178');expect(store.getThemeSnapshot().preferences.writingDock.aiButton.icon).toBe('#27301f');expect(writes()).toHaveLength(0);

@@ -1,6 +1,6 @@
 .input-basis-content {flex:1;min-width:0;min-height:0;overflow:auto;padding:16px;}
 .input-basis-content .context-summary {font-size:calc(10px * var(--text-scale,1));overflow-wrap:anywhere;}
-.input-basis-content .basis-note {margin:14px 0;color:#95a587;font-size:calc(11px * var(--text-scale,1));line-height:1.8;}
+.input-basis-content .basis-note {margin:14px 0;color:var(--hive-input-text);font-size:calc(11px * var(--text-scale,1));line-height:1.8;}
 .input-basis-content .context-content {max-height:none;overflow:visible;}
 .input-basis-content .context-content summary {display:flex;align-items:center;gap:8px;font-size:calc(11px * var(--text-scale,1));padding:9px 10px;}
 .input-basis-content .context-content summary small {margin-left:auto;flex:none;float:none;}

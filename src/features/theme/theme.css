@@ -12,7 +12,7 @@ html .document-pane .cm-content,html .scratch-workspace .cm-content,html .cm-edi
 html .cm-editor { color:var(--hive-document-text) !important; }
 html .cm-content,html .cm-line { caret-color:var(--hive-document-text) !important; }
 html.hive-theme-light .cm-gutters { background:var(--panel) !important; color:var(--muted) !important; border-color:var(--line) !important; }
-html.hive-theme-light .cm-selectionBackground,html.hive-theme-light .cm-content ::selection { background:var(--gold-bg) !important; }
+html.hive-theme-light .cm-selectionBackground,html.hive-theme-light .cm-content ::selection { background:var(--hive-selection-bg) !important; }
 html.hive-theme-light .cm-preview-link { color:var(--hive-link) !important; }
 
 .cm-editor .cm-preview-link, .settings-page a, .app-shell a { color:var(--hive-link) !important; }
@@ -32,7 +32,7 @@ html .sidebar-title, html .chat-header, html .document-tabs, html .independent-p
 html .workspace-tabs, html .panel-status-footer { background:var(--hive-header-bg) !important; border-color:var(--hive-panel-inner-border) !important; }
 html .workspace-group-header { border-color:var(--hive-surface-border); border-bottom-color:var(--hive-panel-inner-border) !important; }
 html .workspace-group-header .workspace-tabs > button { border-right-color:var(--hive-panel-inner-border) !important; }
-html .document-tabs .document-tab, html .workspace-tabs > button[aria-selected=true] { background:var(--hive-raised-bg) !important; color:var(--text) !important; }
+html .document-tabs .document-tab, html .workspace-tabs > button[aria-selected=true] { background:var(--hive-raised-bg) !important; color:var(--hive-raised-text) !important; }
 .theme-auto-contrast { display:inline-flex !important; align-items:center; gap:6px; white-space:nowrap; }
 
 /* Each surface is independently editable within the selected base-color scheme. */
@@ -65,7 +65,7 @@ html .nearby-panel-rail.edge-left button:not(:hover):not(:focus-visible):not(.ac
 html .nearby-panel-rail.edge-right button:not(:hover):not(:focus-visible):not(.active) { color:var(--hive-right-rail-icon); }
 html .panel-control-menu,html .panel-action-rail,html .display-mode-menu,html .panel-manager,html .model-picker,html .ribbon-tool-tooltip,html .explorer-menu,html .editor-context-menu { background:var(--hive-popup-bg) !important; border-color:var(--hive-popup-border) !important; color:var(--hive-popup-text); }
 html .panel-action-rail > button { color:var(--hive-popup-text); }
-html .panel-action-rail > button:hover,html .panel-action-rail > button:focus-visible { background:var(--hive-selection-bg); }
+html .panel-action-rail > button:hover,html .panel-action-rail > button:focus-visible { background:var(--hive-selection-bg); color:var(--hive-selection-text); }
 html .panel-action-rail > button:last-child { border-color:var(--hive-popup-border); }
 html .workspace-panel input:not([type=checkbox]):not([type=range]),html .workspace-panel select,html .workspace-panel .composer { background:var(--hive-input-bg); border-color:var(--hive-input-border); color:var(--text); }
 html .workspace-panel .composer textarea { color:var(--text); }
@@ -87,7 +87,7 @@ html .settings-secondary:hover:not(:disabled) { background:var(--hive-selection-
 html .settings-page { color:var(--hive-settings-text); }
 html .settings-sidebar { color:var(--hive-settings-sidebar-text); }
 html .settings-card { color:var(--hive-settings-card-text); }
-html .settings-page p,html .settings-page label,html .settings-page .setting-row-title,html .settings-page h1,html .settings-sidebar nav button,html .settings-brand small,html .settings-card p { color:inherit; }
+html .settings-page label,html .settings-page .setting-row-title,html .settings-page h1,html .settings-sidebar nav button { color:inherit; }
 html .settings-page input:not([type=color]):not([type=range]),html .settings-page select { color:var(--hive-input-text); }
 html .settings-sidebar nav button.active { color:var(--hive-selection-text); }
 html .settings-primary { color:var(--hive-on-accent); }
@@ -96,9 +96,7 @@ html .sidebar-title,html .chat-header,html .document-tabs,html .independent-pane
 html .sidebar [role=treeitem][aria-selected=true] { color:var(--hive-selection-text); }
 html .workspace-panel input:not([type=checkbox]):not([type=range]),html .workspace-panel select,html .workspace-panel .composer,html .workspace-panel .composer textarea { color:var(--hive-input-text); }
 html .workspace-panel input::placeholder,html .workspace-panel textarea::placeholder { color:var(--hive-input-text); opacity:1; }
-html .cm-editor .cm-preview-link { color:var(--hive-document-text)!important; text-decoration:underline; }
-html .settings-page a,html .app-shell a { color:inherit!important; text-decoration:underline; }
-html .annotation-warning,html .properties-warning,html .settings-feedback.error,html .error-toast,html .file-picker-error,html .properties-error,html .insert-error,html .view-dialog-error { color:inherit!important; }
+html .cm-editor .cm-preview-link,html .settings-page a,html .app-shell a { text-decoration:underline; }
 
 .theme-detail-section { margin-top:20px; padding-top:18px; border-top:1px solid var(--hive-settings-border); }
 .theme-detail-section h2 { margin-bottom:14px; }

@@ -3,6 +3,11 @@ import {NativeHostRegistry} from './nativeHostRegistry';
 import {EditorState} from '@codemirror/state';
 import {history,undoDepth} from '@codemirror/commands';
 describe('native host identities and tab transfer',()=>{
+  it('rejects host identity aliases when extracting or removing a member',()=>{
+    const registry=new NativeHostRegistry<object>();registry.create('native-group:g',['a','b'],'a',{},true);
+    expect(registry.extract('native-group:g')).toBeUndefined();expect(registry.removeMember('native-group:g')).toBeUndefined();
+    expect(registry.get('a')?.members).toEqual(['a','b']);expect(registry.values()).toHaveLength(1);
+  });
   it.each(['editor:a','editor:b'])('extracts %s without closing or renaming the source host',member=>{
     const registry=new NativeHostRegistry<object>(),sourceWindow={};
     registry.create('native-group:source',['editor:a','editor:b'],'editor:a',sourceWindow,true);

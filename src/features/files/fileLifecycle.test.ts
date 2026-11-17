@@ -10,6 +10,7 @@ import {makeState} from '../editor/Editor';
 import {applyStoredDocumentChange} from '../editor/storedDocumentChanges';
 import type {EditorSession} from '../editor/editorSessionTypes';
 import type {DiskFile} from '../../shared/fileTypes';
+import {workspaceTreeSync} from './workspaceSync';
 
 function deferred<T=any>(){let resolve!:(value:T)=>void,reject!:(reason:Error)=>void;const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
 const data=(path:string,text='original',hash='hash-'+path):DiskFile=>({path,text,hash,eol:'LF',bom:false});
@@ -24,7 +25,8 @@ function setup(){
   for(const name of ['setDirty','setNewNoteBusy','setEntries','setRoot','setFilter','setRenameRequest','setCollapsed','setTrashRevision','setInlineRequest','setOutline','setSelection','setMessages','setLastRequest','setPrompt','setStream','setWritingNodeId'])opts[name]=noop;
   const activate=(id:string)=>{opts.activeSession.current=id;const session=opts.sessions.current.get(id);opts.disk.current=session?.disk;opts.editorState.current=session?.state;opts.view.current=session?.view;file=session?.disk?.path||'';};
   opts.workspace={isOpen:(id:string)=>open.has(id),open:(id:string)=>{open.add(id);activate(id);},openDocumentTab:(id:string)=>{open.add(id);activate(id);},close:(id:string)=>open.delete(id),openIds:['editor']};
-  let handler:(url:string,body?:unknown)=>Promise<any>=async(url)=>url==='/tree'?{root:'synthetic',entries:[]}:data(decodeURIComponent(url.split('=')[1]||'unknown'));
+  opts.finalizeTrashedSessions=(sessions:EditorSession[],safe:(session:EditorSession)=>boolean)=>{let kept=0;for(const session of sessions){const ok=safe(session);session.disk=null;if(ok){session.state=null;session.dirty=false;session.landing=true;if(session.id!=='editor')open.delete(session.id);}else{session.dirty=true;kept++;}}return kept;};
+  let handler:(url:string,body?:unknown)=>Promise<any>=async(url)=>url.startsWith('/tree')?{root:'synthetic',entries:[]}:data(decodeURIComponent(url.split('=')[1]||'unknown'));
   opts.api=vi.fn((url:string,body?:unknown)=>handler(url,body));
   let persistence!:ReturnType<typeof useDocumentPersistence>;
   function Persistence(){persistence=useDocumentPersistence({...opts,fileBusy:false,tick:0,autoSave:false,onStoredChange:(id,transaction)=>opts.onStoredChange?.(id,transaction)});return null;}
@@ -36,6 +38,139 @@ function setup(){
   function edit(session:EditorSession,text=' UNSAVED'){session.state=session.state!.update({changes:{from:session.state!.doc.length,insert:text},userEvent:'input.type'}).state;session.dirty=true;session.contentVersion=(session.contentVersion||0)+1;}
   return {opts,actions,add,edit,activate,open,busy,errors,persistence,callbacks,setHandler:(value:typeof handler)=>{handler=value;},file:()=>file,confirm:()=>confirm,setDialog:(value:any)=>{dialog=value;opts.dialog=value;opts.dialogRef.current=value;},dialog:()=>dialog};
 }
+
+describe('forced tree refresh lifecycle',()=>{
+  it('forces a scan, retains its cursor, and supports repeated refreshes without a render',async()=>{
+    const t=setup();t.opts.setEntries=vi.fn();t.opts.setRoot=vi.fn();
+    const entries=[{path:'one.md',name:'one.md',type:'file'}];
+    t.setHandler(async()=>({root:'synthetic',entries,treeVersion:'forced'}));
+    const actions=t.actions();await actions.refresh();await actions.refresh();
+    expect(t.opts.api.mock.calls.map((call:any[])=>call[0])).toEqual(['/tree?refresh=1','/tree?refresh=1']);
+    expect(t.opts.setEntries).toHaveBeenCalledTimes(2);
+    expect(workspaceTreeSync(t.opts.setEntries,t.opts.fileWorkspace.info).beginSync()?.treeVersion).toBe('forced');
+  });
+  it('drops a refresh from an earlier repository and rejects stale callbacks after a round trip',async()=>{
+    const t=setup(),pending=deferred();t.opts.setEntries=vi.fn();t.opts.setRoot=vi.fn();t.setHandler(()=>pending.promise);
+    const oldInfo=t.opts.fileWorkspace.info,oldActions=t.actions(),refresh=oldActions.refresh();
+    t.opts.fileWorkspace.info={id:'another',root:'other'};t.actions();
+    pending.resolve({root:'synthetic',entries:[],treeVersion:'old'});await refresh;
+    expect(t.opts.setEntries).not.toHaveBeenCalled();expect(t.opts.setRoot).not.toHaveBeenCalled();
+    t.opts.fileWorkspace.info=oldInfo;t.actions();await oldActions.refresh();
+    expect(t.opts.api).toHaveBeenCalledTimes(1);
+  });
+  it('releases a failed refresh so regular polling can continue',async()=>{
+    const t=setup();t.setHandler(async()=>{throw new Error('offline');});
+    await expect(t.actions().refresh()).rejects.toThrow('offline');
+    expect(workspaceTreeSync(t.opts.setEntries,t.opts.fileWorkspace.info).beginSync()).toEqual({epoch:expect.any(Number),treeVersion:undefined});
+  });
+});
+
+describe('repository switching preserves save guards',()=>{
+  it('flushes pending work and saves dirty sessions before opening another repository',async()=>{
+    const t=setup(),session=t.add('editor','draft.md');t.edit(session);const events:string[]=[];
+    t.opts.fileWorkspace.flush=async()=>{events.push('flush');};
+    t.opts.saveSession=async(id:string,required:boolean)=>{expect(id).toBe('editor');expect(required).toBe(true);events.push('save');return true;};
+    t.opts.fileWorkspace.update=async(patch:unknown)=>{expect(patch).toEqual({root:'other'});events.push('switch');};
+    await t.actions().switchWorkspace('other');expect(events).toEqual(['flush','save','switch']);expect(t.opts.switching.current).toBe(false);
+  });
+  it('does not switch after a save failure or while AI content still needs attention',async()=>{
+    for(const reason of ['save','generation','proposal','prompt']) {
+      const t=setup(),session=t.add('editor','draft.md');t.edit(session);t.opts.fileWorkspace.update=vi.fn();
+      if(reason==='save')t.opts.saveSession=async()=>false;
+      if(reason==='generation')t.opts.running.current=true;
+      if(reason==='proposal')t.opts.proposal.current={id:'pending'};
+      if(reason==='prompt')t.opts.prompt='unsent';
+      await expect(t.actions().switchWorkspace('other')).rejects.toThrow();
+      expect(t.opts.fileWorkspace.update).not.toHaveBeenCalled();expect(session.dirty).toBe(true);expect(t.opts.switching.current).toBe(false);
+    }
+  });
+});
+
+describe('shared file preflight and mutation outcomes',()=>{
+  it('preflights every selected path before mutation, saving an overlapping descendant once',async()=>{
+    const t=setup(),one=t.add('editor','notes/one.md'),two=t.add('other','two.md');t.edit(one);t.edit(two);
+    const events:string[]=[];t.opts.fileWorkspace.flush=async()=>{events.push('flush');};
+    t.opts.saveSession=async(id:string)=>{events.push(id);t.opts.sessions.current.get(id).dirty=false;return true;};
+    await t.actions().preflightFileActions([{action:'move',path:'notes'},{action:'move',path:'notes/one.md'},{action:'move',path:'two.md'}]);
+    expect(events).toEqual(['flush','editor','other']);expect(t.opts.api).not.toHaveBeenCalled();expect(t.opts.structuring.current).toBe(false);
+  });
+  it('blocks a whole batch for any protected member and still checks each later single action',async()=>{
+    const t=setup();t.add('editor','one.md');t.add('other','two.md');t.opts.sessions.current.get('other').context={proposal:{id:'pending'},prompt:''};
+    await expect(t.actions().preflightFileActions([{action:'trash',path:'one.md'},{action:'trash',path:'two.md'}])).rejects.toThrow('待审建议');
+    expect(t.opts.api).not.toHaveBeenCalled();
+    t.opts.sessions.current.get('other').context.proposal=null;
+    await t.actions().preflightFileActions([{action:'trash',path:'one.md'}]);
+    t.opts.proposal.current={id:'new pending'};
+    await expect(t.actions().manageFile({action:'trash',path:'one.md'})).rejects.toThrow('待审建议');
+    expect(t.opts.api).not.toHaveBeenCalled();expect(t.opts.structuring.current).toBe(false);
+  });
+  it('rechecks workspace, AI, context and text after a flush without issuing a mutation',async()=>{
+    for(const change of ['workspace','unmount','generation','proposal','prompt','text','session','switching','saving']){
+      const t=setup(),session=t.add('editor','one.md'),flush=deferred();t.opts.fileWorkspace.flush=()=>flush.promise;
+      const pending=t.actions().manageFile({action:'move',path:'one.md',parent:'destination'});
+      if(change==='workspace')t.opts.fileWorkspace.info={id:'another',root:'other'};
+      else if(change==='unmount')t.opts.appAlive.current=false;
+      else if(change==='generation')t.opts.running.current=true;
+      else if(change==='proposal')t.opts.proposal.current={id:'new'};
+      else if(change==='prompt')t.opts.promptRef.current.value='new message';
+      else if(change==='text')t.edit(session);
+      else if(change==='session')t.add('editor','one.md','replacement');
+      else if(change==='switching')t.opts.switching.current=true;
+      else t.opts.savingPaths.current.add('one.md');
+      flush.resolve(undefined);await expect(pending).rejects.toThrow();expect(t.opts.api).not.toHaveBeenCalled();
+      expect(session.disk?.path).toBe('one.md');expect(t.opts.structuring.current).toBe(false);
+    }
+  });
+  it('rechecks after saves and preserves new text or pending AI before any structural operation',async()=>{
+    for(const change of ['text','proposal','workspace']){
+      const t=setup(),session=t.add('editor','one.md'),save=deferred<boolean>();t.edit(session);
+      t.opts.saveSession=async()=>save.promise;
+      const pending=t.actions().manageFile({action:'trash',path:'one.md'});await tick();
+      if(change==='text')t.edit(session,' later');
+      else if(change==='proposal')t.opts.proposal.current={id:'pending'};
+      else t.opts.fileWorkspace.info.id='new workspace';
+      session.dirty=false;save.resolve(true);await expect(pending).rejects.toThrow();
+      expect(t.opts.api).not.toHaveBeenCalled();expect(session.disk?.path).toBe('one.md');
+    }
+  });
+  it('supports basis checks without explorer mutation and preserves an existing proposal and history',async()=>{
+    const t=setup(),session=t.add('editor','one.md');t.edit(session);const state=session.state,proposal={id:'pending'};
+    t.opts.proposal.current=proposal;t.opts.saveSession=async()=>{session.dirty=false;return true;};
+    await t.actions().preflightFileActions([{action:'basis',path:'one.md'}]);
+    await expect(t.actions().manageFile({action:'basis',path:'one.md'})).resolves.toEqual({path:'one.md',type:'file'});
+    expect(t.opts.api).not.toHaveBeenCalled();expect(session.state).toBe(state);expect(t.opts.proposal.current).toBe(proposal);expect(undoDepth(state!)).toBeGreaterThan(0);
+  });
+  it('reports a successful mutation with a refresh warning and preserves remapped sessions and references',async()=>{
+    const t=setup(),session=t.add('editor','one.md');t.activate('editor');
+    t.opts.references.remap=vi.fn();t.opts.inform=vi.fn();
+    t.setHandler(async(url,body:any)=>{if(url==='/explorer')return {path:'new/one.md',type:'file'};throw new Error('tree unavailable');});
+    const result=await t.actions().manageFile({action:'move',path:'one.md',parent:'new'},{quiet:true});
+    expect(result.path).toBe('new/one.md');expect(result.warning).toContain('操作已完成');
+    expect(session.disk?.path).toBe('new/one.md');expect(t.file()).toBe('new/one.md');
+    expect(t.opts.references.remap).toHaveBeenCalledWith('one.md','new/one.md');expect(t.opts.inform).not.toHaveBeenCalled();
+  });
+  it('suppresses single-item trash notices in batch mode and clears the deleted session',async()=>{
+    const t=setup(),session=t.add('editor','one.md');t.opts.inform=vi.fn();
+    t.setHandler(async(url)=>url.startsWith('/tree')?{root:'synthetic',entries:[]}:{path:'one.md',type:'file'});
+    await t.actions().manageFile({action:'trash',path:'one.md'},{quiet:true});
+    expect(session.disk).toBeNull();expect(session.state).toBeNull();expect(session.dirty).toBe(false);expect(session.landing).toBe(true);expect(t.opts.inform).not.toHaveBeenCalled();
+  });
+  it('preserves text edited while the trash request is in flight as an independent draft',async()=>{
+    const t=setup(),session=t.add('editor','one.md'),pending=deferred();t.opts.inform=vi.fn();
+    t.setHandler(url=>url==='/explorer'?pending.promise:Promise.resolve({root:'synthetic',entries:[]}));
+    const action=t.actions().manageFile({action:'trash',path:'one.md'},{quiet:true});await tick();await tick();
+    t.edit(session,' later');pending.resolve({path:'one.md',type:'file'});await action;
+    expect(session.disk).toBeNull();expect(session.state!.doc.toString()).toBe('original later');expect(session.dirty).toBe(true);expect(t.opts.inform).toHaveBeenCalledWith(expect.stringContaining('未命名稿'));
+  });
+  it('retains an unrelated current session proposal and AI undo while another file moves',async()=>{
+    const t=setup(),current=t.add('editor','current.md'),other=t.add('other','one.md');
+    const proposal={id:'pending'},undo=[{file:'current.md',before:'text'}];t.opts.proposal.current=proposal;t.opts.undo.current=undo;
+    t.setHandler(async(url)=>url.startsWith('/tree')?{root:'synthetic',entries:[]}:{path:'moved.md',type:'file'});
+    await t.actions().manageFile({action:'move',path:'one.md',parent:''});
+    expect(other.disk?.path).toBe('moved.md');expect(current.disk?.path).toBe('current.md');
+    expect(t.opts.proposal.current).toBe(proposal);expect(t.opts.undo.current).toBe(undo);
+  });
+});
 
 describe('file read authority and local history',()=>{
   it('keeps the newest open and its loading lease when an older response or error arrives',async()=>{

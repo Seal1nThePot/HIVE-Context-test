@@ -1,6 +1,13 @@
 import {describe,expect,it} from 'vitest';
-import {fitReferenceMessages,normalizeReferenceSources,readReferenceSources,remapReferenceSources,referenceOverrides,withReferenceMessages,type ResolvedReferences} from './referenceSources';
+import {appendReferenceSources,fitReferenceMessages,normalizeReferenceSources,readReferenceSources,remapReferenceSources,referenceOverrides,withReferenceMessages,type ResolvedReferences} from './referenceSources';
 describe('reference lists and prompt projection',()=>{
+  it('reports every addition at the capacity boundary without silently dropping later files',()=>{
+    const existing=Array.from({length:31},(_,i)=>({path:`source-${i}.md`,type:'file' as const}));
+    const result=appendReferenceSources(existing,[{path:'SOURCE-0.md',type:'file'},{path:'new.md',type:'file'},{path:'overflow.md',type:'file'},{path:'../outside.md',type:'file'}]);
+    expect(result.sources).toHaveLength(32);expect(existing).toHaveLength(31);
+    expect(result.results).toEqual([{path:'SOURCE-0.md',ok:true,warning:'已在依据列表中。'},{path:'new.md',ok:true},{path:'overflow.md',ok:false,error:expect.stringContaining('32')},{path:'../outside.md',ok:false,error:expect.stringContaining('无效')}]);
+    expect(result.sources.at(-1)?.path).toBe('new.md');
+  });
   it('allocates unsaved buffers by reference priority, with sentinels that prevent stale disk fallback',()=>{
     const result=referenceOverrides([{path:'high.md',type:'file'},{path:'low.md',type:'file'},{path:'last.md',type:'file'}],[{path:'low.md',text:'L'.repeat(50)},{path:'last.md',text:'last'},{path:'high.md',text:'priority'}],'current.md',10);
     expect(result).toEqual([{path:'high.md',text:'priority',characters:8},{path:'low.md',text:'LL',characters:50},{path:'last.md',text:'',characters:4}]);

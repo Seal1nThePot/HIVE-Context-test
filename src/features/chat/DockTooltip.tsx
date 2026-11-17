@@ -24,7 +24,7 @@ export function DockTooltip({children}:{children:ReactNode}){
     const native=doc!==document&&!!window.hiveDesktop?.isDesktop;
     if(native){
       const style=view.getComputedStyle(node);
-      window.hiveDesktop?.dockTooltip({id:'global-toolbar',text:active.text,anchor:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},width,height,background:style.backgroundColor,color:style.color,border:style.borderTopColor,fontSize:parseFloat(style.fontSize)});
+      window.hiveDesktop?.dockTooltip({id:'global-toolbar',text:active.text,anchor:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},width,height,background:style.backgroundColor,color:style.color,border:style.borderTopColor,shadow:view.getComputedStyle(doc.documentElement).getPropertyValue('--hive-shadow-color').trim()||'#00000066',fontSize:parseFloat(style.fontSize)});
     }else{
       const left=Math.max(0,Math.min(view.innerWidth-width,rect.left+rect.width/2-width/2));
       const top=rect.top-height-12>=0?rect.top-height-12:Math.min(view.innerHeight-height,rect.bottom+12);

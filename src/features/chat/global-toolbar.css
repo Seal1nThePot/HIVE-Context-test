@@ -1,5 +1,5 @@
 .global-toolbar {position:fixed;z-index:15000;left:50%;bottom:40px;transform:translateX(-50%);display:flex;align-items:flex-end;gap:4px;}
 .global-toolbar .writing-dock.floating-mode-dock {position:static;transform:none;inset:auto;min-height:0;padding:0;overflow:visible;}
-.global-toolbar-move {display:grid;place-items:center;width:22px;height:22px;flex:none;padding:0;border:1px solid #667044;border-radius:5px;background:#27301ff2;color:#b9c49a;cursor:move;touch-action:none;}
+.global-toolbar-move {display:grid;place-items:center;width:22px;height:22px;flex:none;padding:0;border:1px solid var(--hive-surface-border);border-radius:5px;background:var(--hive-panel-bg);color:var(--text);cursor:move;touch-action:none;}
 .desktop-toolbar-window .global-toolbar.global-toolbar-native {position:fixed;inset:auto;left:50%;top:50%;width:max-content;height:auto;padding:0;transform:translate(-50%,-50%);align-items:flex-end;}
 .global-toolbar-native .global-toolbar-move {align-self:flex-end;}

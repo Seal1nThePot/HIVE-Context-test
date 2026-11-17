@@ -73,13 +73,24 @@ describe('paragraph alignment stored in Markdown',()=>{
     expect(visibleCount(value.doc.toString())).toBe(visibleCount('# 标题\n\n第一行\n第二行\n\n后文'));
     expect(headings(value).map(item=>item.title)).toEqual(['标题']);
   });
-  it('changes existing alignment without nesting, then restores the original Markdown',()=>{
+  it('changes existing alignment without nesting and retains an explicit left choice',()=>{
     const original='前文\n\n需要对齐\n\n后文';let value=state(original,5,7);
     value=value.update(paragraphAlignment(value,'center')).state;
     value=value.update(paragraphAlignment(value,'right')).state;
     expect(value.doc.toString().match(/<div /g)).toHaveLength(1);expect(inspectFormatting(value).blocks[0].alignment).toBe('right');
-    value=value.update(paragraphAlignment(value,'left')).state;expect(value.doc.toString()).toBe(original);
+    value=value.update(paragraphAlignment(value,'left')).state;
+    expect(value.doc.toString()).toBe('前文\n\n<div style="text-align: left;">\n\n需要对齐\n\n</div>\n\n后文');
     expect(value.sliceDoc(value.selection.main.from,value.selection.main.to)).toBe('要对');
+    expect(inspectFormatting(value).blocks[0].alignment).toBe('left');
+    const unchanged=value.doc;value=value.update(paragraphAlignment(value,'left')).state;expect(value.doc).toBe(unchanged);
+  });
+  it('explicitly left-aligns ordinary and multiple selected paragraphs with undo and redo',()=>{
+    const original='第一段\n\n第二段\n\n后文';let value=state(original,0,7);
+    value=value.update(paragraphAlignment(value,'left')).state;
+    expect(value.doc.toString()).toBe('<div style="text-align: left;">\n\n第一段\n\n第二段\n\n</div>\n\n后文');
+    const target={get state(){return value;},dispatch(tr:ReturnType<EditorState['update']>){value=tr.state;}};
+    expect(undo(target)).toBe(true);expect(value.doc.toString()).toBe(original);
+    expect(redo(target)).toBe(true);expect(inspectFormatting(value).blocks[0].alignment).toBe('left');
   });
   it('keeps a cursor at the end of the paragraph inside the formatted content',()=>{
     let value=state('一句话',3);value=value.update(paragraphAlignment(value,'center')).state;

@@ -103,14 +103,13 @@ export function paragraphAlignment(state:EditorState,alignment:Alignment):Transa
   let changes:NonNullable<TransactionSpec['changes']>,selection:TransactionSpec['selection'];
   if(current){
     if(current.alignment===alignment)return {};
-    // Left alignment is the Markdown default. Remove only our wrapper, preserving its contents.
-    changes=alignment==='left'?[{from:current.from,to:current.contentFrom,insert:''},{from:current.contentTo,to:current.to,insert:''}]:{from:current.from,to:current.openTo,insert:`<div style="text-align: ${alignment};">`};
+    // An explicit left choice needs a wrapper too: ordinary live prose is justified.
+    changes={from:current.from,to:current.openTo,insert:`<div style="text-align: ${alignment};">`};
   }else{
     const span=paragraphBounds(state);
     if(excluded.some(code=>span.from<code.to&&span.to>code.from)||/^ {4}|^\t/m.test(state.sliceDoc(span.from,span.to)))throw new Error('请在代码区域之外设置段落对齐。');
     if(blocks.some(block=>span.from<block.to&&span.to>block.from)||/<\/?div\b/i.test(state.sliceDoc(span.from,span.to)))throw new Error('选区跨越了已有排版区域，请分别调整各区域。');
     if(htmlBlocks.some(block=>span.from<block.to&&span.to>block.from))throw new Error('请在已有 HTML 排版区域之外调整段落。');
-    if(alignment==='left')return {};
     const before=span.from>0&&!/^\s*$/.test(state.doc.lineAt(span.from-1).text)?'\n':'';
     const after=span.to<state.doc.length&&!/^\s*$/.test(state.doc.lineAt(span.to+1).text)?'\n':'';
     const prefix=`${before}<div style="text-align: ${alignment};">\n\n`;

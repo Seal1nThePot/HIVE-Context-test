@@ -33,6 +33,11 @@ describe('external import HTTP',()=>{
   expect((await post('large.md',Buffer.alloc(2000001))).status).toBe(400);
   expect((await fetch(base+'/api/import/image?path='+encodeURIComponent('导入的图片/../badname.md'),{headers:{'X-Hive-Workspace':workspace.id}})).status).toBe(400);
  });
+ it('returns saved document references through the workspace-scoped API',async()=>{
+  await fs.writeFile(path.join(temp,'docs','引用.md'),'![图](导入的图片/%E5%9B%BE.png)');
+  const response=await fetch(base+'/api/import/references?path='+encodeURIComponent('导入的图片/图.png'),{headers:{'X-Hive-Workspace':workspace.id}});
+  expect(response.ok).toBe(true);expect((await response.json()).matches).toContainEqual({path:'引用.md',lines:[1]});
+ });
  it('rejects a stale workspace and refuses a linked image destination',async()=>{
   const other=path.join(temp,'other');await fs.mkdir(other);const switchResponse=await fetch(base+'/api/workspace',{method:'POST',headers:{'Content-Type':'application/json','X-Hive-Workspace':workspace.id},body:JSON.stringify({root:other,revision:workspace.revision})});expect(switchResponse.ok).toBe(true);
   const next=await switchResponse.json();expect((await post('stale.md',Buffer.from('old'))).status).toBe(409);expect(await fs.readdir(other)).toEqual([]);

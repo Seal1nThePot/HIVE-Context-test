@@ -33,7 +33,7 @@ describe('青苔鎏金 black surfaces',()=>{
     expect(themeTokens(saved).surfaces).toMatchObject({ribbon:'#123456',ribbonTitleBackground:'#010203',ribbonTitleText:'#112233',ribbonContentText:'#223344',leftRailBackground:'#334455',leftRailIcon:'#445566',rightRailBackground:'#556677',rightRailIcon:'#667788'});
     expect(themeTokens({...saved,base:'white'}).surfaces.ribbonTitleBackground).toBe('#abcdef');
     const values:Record<string,string>={};const root={style:{getPropertyValue:(name:string)=>values[name],setProperty:(name:string,value:string)=>{values[name]=value;}},classList:{toggle:()=>{}}} as unknown as HTMLElement;
-    applyThemeTokens(root,saved);expect(values['--hive-ribbon-title-bg']).toBe('#010203');expect(values['--hive-ribbon-content-text']).toBe('#ffffff');expect(values['--hive-left-rail-icon']).toBe('#445566');expect(values['--hive-right-rail-bg']).toBe('#556677');
+    applyThemeTokens(root,saved);expect(values['--hive-ribbon-title-bg']).toBe('#010203');expect(values['--hive-ribbon-content-text']).toBe('#223344');expect(values['--hive-left-rail-icon']).toBe('#445566');expect(values['--hive-right-rail-bg']).toBe('#556677');
   });
   it('inherits existing panel border for old themes and persists independent inner colors per base',()=>{
     const old=normalizeTheme({...defaultTheme,surfaceColors:{black:{panelBorder:'#123456'},white:{panelBorder:'#abcdef'}}});

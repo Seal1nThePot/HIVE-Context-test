@@ -16,8 +16,8 @@ export function decodedOffsets(raw:string){const offsets=[0];let pos=0;while(pos
 
 export function clipboardChange(state:EditorState,selection:EditorSelection,inserted:string){const selected=state.update({selection}).state;return selected.changeByRange(range=>({changes:{from:range.from,to:range.to,insert:inserted},range:EditorSelection.cursor(range.from+inserted.length)}));}
 
-export default function EditorContextMenu({editor,point,input,onClose,onMark,onUnmark,annotationId,onShowAnnotations,onError}:{
-  editor:EditorView;point:{x:number;y:number};input?:HTMLTextAreaElement;onClose:()=>void;onMark:()=>void;onUnmark?:(id?:string)=>void;annotationId?:string;onShowAnnotations?:(context:AnnotationContext)=>void;onError?:(message:string)=>void;
+export default function EditorContextMenu({editor,point,input,onClose,onMark,onUnmark,annotationId,onShowAnnotations,onError,link,onOpenLink}:{
+  link?:string;onOpenLink?:(target:string)=>void;editor:EditorView;point:{x:number;y:number};input?:HTMLTextAreaElement;onClose:()=>void;onMark:()=>void;onUnmark?:(id?:string)=>void;annotationId?:string;onShowAnnotations?:(context:AnnotationContext)=>void;onError?:(message:string)=>void;
 }){
   const menu=useRef<HTMLDivElement>(null),[position,setPosition]=useState(point);
   const document=usePanelDocument(),window=document.defaultView!;
@@ -81,6 +81,7 @@ export default function EditorContextMenu({editor,point,input,onClose,onMark,onU
       <button type="button" role="menuitem" title="纯文本粘贴" aria-label="纯文本粘贴" disabled={readOnly} onClick={()=>void clipboard('plain')}><Clipboard size={16}/><span>纯文本</span></button>
     </div>
     <hr/>
+    {link&&onOpenLink&&<button type="button" role="menuitem" onClick={()=>run(()=>onOpenLink(link))}>跳转至文件</button>}
     {!input&&<button type="button" role="menuitem" disabled={!hasSelection} onClick={()=>run(onMark)}><Highlighter size={15}/><span>标注选区</span><kbd>Ctrl+Alt+M</kbd></button>}
     {!input&&onUnmark&&<button type="button" role="menuitem" disabled={!hasSelection&&!annotationId} onClick={()=>run(()=>onUnmark(annotationId))}><Eraser size={15}/><span>取消标注</span></button>}
     {onShowAnnotations&&<button type="button" role="menuitem" onClick={()=>run(showLocal)}><List size={15}/><span>查看文本标注</span></button>}

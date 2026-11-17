@@ -4,7 +4,7 @@ import type { DiskFile } from '../../shared/fileTypes';
 import type { Message } from '../chat/chatTypes';
 import type { InputBasisRequest } from '../chat/InputBasisPanel';
 import type { Proposal, UndoEdit } from '../../shared/core';
-import type { DisplayMode } from './markdownDisplay';
+import type { EditorDisplayMode } from './splitView';
 export type EditorSession = {
     id: string;
     disk: DiskFile | null;
@@ -15,7 +15,7 @@ export type EditorSession = {
     restoreScroll?: number;
     restoreScrollLeft?: number;
     typewriter?: boolean;
-    displayMode?: DisplayMode;
+    displayMode?: EditorDisplayMode;
     landing?: boolean;
     context?: {
         proposal: Proposal | null;

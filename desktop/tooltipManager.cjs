@@ -2,9 +2,10 @@ const path = require('node:path');
 const validColor = value => typeof value === 'string' && /^(?:rgba?\(\s*\d{1,3}(?:\s*,\s*\d{1,3}){2}(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)|#[0-9a-f]{6}(?:[0-9a-f]{2})?)$/i.test(value);
 function tooltipData(value) {
   if (!value || value.id !== 'global-toolbar' || typeof value.text !== 'string' || !value.text.length || value.text.length > 160) return null;
-  const a=value.anchor;
+  const a=value.anchor,shadow=value.shadow===undefined?'#00000066':value.shadow;
+  if(!validColor(shadow))return null;
   if(!a || ![a.x,a.y,a.width,a.height,value.width,value.height,value.fontSize].every(n=>typeof n==='number'&&Number.isFinite(n)) || a.x<0 || a.y<0 || a.width<=0 || a.height<=0 || a.x+a.width>2000 || a.y+a.height>2000 || value.width<=0 || value.width>800 || value.height<=0 || value.height>100 || value.fontSize<6 || value.fontSize>48 || ![value.background,value.color,value.border].every(validColor))return null;
-  return {text:value.text,anchor:{x:a.x,y:a.y,width:a.width,height:a.height},width:value.width,height:value.height,background:value.background,color:value.color,border:value.border,fontSize:value.fontSize};
+  return {text:value.text,anchor:{x:a.x,y:a.y,width:a.width,height:a.height},width:value.width,height:value.height,background:value.background,color:value.color,border:value.border,shadow,fontSize:value.fontSize};
 }
 function tooltipBounds(data, toolbar, zoom, area){
   const s=Number.isFinite(zoom)&&zoom>0?zoom:1, pad=8*s;

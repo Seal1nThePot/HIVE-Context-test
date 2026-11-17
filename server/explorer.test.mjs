@@ -58,7 +58,16 @@ it('passes an ordinary absolute file path to Windows Explorer without a shell',a
   if(process.platform!=='win32')return;await files.save({path:'a & b.md',text:'x',baseline:null});let args;
   const launcher=(...values)=>{args=values;const child=new EventEmitter();child.unref=()=>{};queueMicrotask(()=>child.emit('spawn'));return child;};
   await explorerStore({root,state,files},launcher).manage({action:'reveal',path:'a & b.md'});
-  expect(args[0]).toBe('explorer.exe');expect(args[1]).toEqual(['/select,',path.join(root,'a & b.md')]);expect(args[2].shell).toBe(false);
+  expect(args[0]).toBe('explorer.exe');expect(args[1]).toEqual([root]);expect(args[2]).toMatchObject({shell:false,windowsHide:false});
+});
+
+it('reveals the validated file through the desktop bridge and surfaces failures',async()=>{
+  await files.save({path:'中文 & 空格.md',text:'x',baseline:null});const targets=[];
+  const desktop=explorerStore({root,state,files},()=>{throw Error('Legacy launcher must not run');},{revealFile:async target=>{targets.push(target);}});
+  await expect(desktop.manage({action:'reveal',path:'中文 & 空格.md'})).resolves.toEqual({ok:true});expect(targets).toEqual([path.join(root,'中文 & 空格.md')]);
+  await expect(desktop.manage({action:'reveal',path:'../outside.md'})).rejects.toThrow();expect(targets).toHaveLength(1);
+  const failure=explorerStore({root,state,files},undefined,{revealFile:async()=>{throw Error('Explorer unavailable');}});
+  await expect(failure.manage({action:'reveal',path:'中文 & 空格.md'})).rejects.toThrow('Explorer unavailable');
 });
 
 it('searches names and body text only in the selected folder and its descendants',async()=>{

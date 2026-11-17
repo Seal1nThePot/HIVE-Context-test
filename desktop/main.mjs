@@ -1,12 +1,16 @@
-import { app, BrowserWindow, dialog, ipcMain, screen, Menu } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, screen, Menu, shell } from 'electron';
 import { fork } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import preferencesModule from './preferences.cjs';
 import windowPolicy from './windowPolicy.cjs';
 import {createPanelReadyHandler} from './panelReady.cjs';
+import {createPanelGeometry,createPanelRectHandler} from './panelGeometry.cjs';
 import {createTooltipManager} from './tooltipManager.cjs';
 import {resolveTemplateSource} from './templateSource.cjs';
+import {createRepositoryPicker} from './repositoryPicker.cjs';
+import {createAboutHandlers} from './about.cjs';
+import {createFileRevealHandler} from './fileReveal.cjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const appName = 'HIVE markdown editor';
@@ -17,12 +21,14 @@ app.setPath('userData', process.env.HIVE_DESKTOP_USER_DATA
   ? path.resolve(process.env.HIVE_DESKTOP_USER_DATA)
   : path.join(app.getPath('appData'), 'HIVE'));
 const preload = path.join(root, 'desktop', 'preload.cjs');
+const revealFile=createFileRevealHandler({shell});
 let service, mainWindow, origin, rendererReady = false, closePending = false, exiting = false, stoppingService = false;
 const panels = new Set();
 const panelWindows = new Map();
 const readyPanelIds = new Set();
 const deliberatelyHiddenPanels = new Set();
 const sizeTargets = new WeakMap();
+const panelGeometry=createPanelGeometry({mainWindow:()=>mainWindow});
 let lastActivePanel = null, restoringWindows = false;
 let panelDrag = null;
 let appActive = true, appBlurTimer;
@@ -57,7 +63,7 @@ function panelBounds(features, id) {
   const base = mainWindow.getBounds();
   if (id === 'global-toolbar') return {...windowPolicy.toolbarPosition(base, screen.getDisplayMatching(base).workArea),width:352,height:104};
   const editor = id === 'editor' || id.startsWith('editor:');
-  const maxWidth = id === 'settings' ? 900 : editor ? 760 : 380, maxHeight = id === 'settings' ? 800 : editor ? 620 : 520;
+  const maxWidth = id === 'settings' || id === 'repositories' ? 900 : editor ? 760 : 380, maxHeight = id === 'settings' || id === 'repositories' ? 800 : editor ? 620 : 520;
   const desired = { x: number('left', number('x', base.x + 50)), y: number('top', number('y', base.y + 50)), width: Math.min(maxWidth, Math.max(220, number('width', maxWidth))), height: Math.min(maxHeight, Math.max(140, number('height', maxHeight))) };
   const area = screen.getDisplayMatching(desired).workArea;
   desired.width = Math.min(desired.width, area.width); desired.height = Math.min(desired.height, area.height);
@@ -136,7 +142,7 @@ function startService() {
     const templateSource=resolveTemplateSource({projectRoot:root,executablePath:app.getPath('exe'),portableDirectory:process.env.PORTABLE_EXECUTABLE_DIR,override:process.env.HIVE_TEMPLATES_SOURCE});
     service = fork(path.join(root, 'server', 'index.mjs'), process.env.HIVE_DESKTOP_DEV === '1' && !app.isPackaged ? [] : ['--production'], {
       execPath: process.execPath, stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', HIVE_PORT: '0', HIVE_STATE_DIR: path.join(userData, 'state'), HIVE_DOCUMENTS: path.join(userData, 'documents'), HIVE_TEMPLATES_DIR: path.join(userData, 'templates'), HIVE_TEMPLATES_SOURCE:templateSource||'' },
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', HIVE_DESKTOP_SHELL:'1', HIVE_PORT: '0', HIVE_STATE_DIR: path.join(userData, 'state'), HIVE_DOCUMENTS: path.join(userData, 'documents'), HIVE_TEMPLATES_DIR: path.join(userData, 'templates'), HIVE_TEMPLATES_SOURCE:templateSource||'' },
     });
     let settled = false;
     const timeout = setTimeout(() => fail(new Error('本地服务启动超时。')), 30000);
@@ -151,11 +157,26 @@ function startService() {
         dialog.showErrorBox(`${appName} 本地服务已停止`, '请保留当前窗口并备份未保存的内容。保存与文件操作暂不可用。');
       }
     });
-    service.on('message', message => { if (message?.type !== 'hive-ready' || settled) return; settled = true; clearTimeout(timeout); resolve(message.port); });
+    const shellService=service;
+    service.on('message', message => {
+      if(message?.type==='hive-reveal-file'){void revealFile(message).then(reply=>{if(shellService.connected)shellService.send(reply,()=>{});});return;}
+      if (message?.type !== 'hive-ready' || settled) return; settled = true; clearTimeout(timeout); resolve(message.port);
+    });
   });
 }
 const isMainSender = event => !!mainWindow && event.sender === mainWindow.webContents;
 const isMainOrigin = event => isMainSender(event) && sameOrigin(event.senderFrame?.url);
+const about = createAboutHandlers({isMainOrigin:event => isMainOrigin(event) && event.senderFrame === mainWindow.webContents.mainFrame, app, shell, root, versions:process.versions, platform:process.platform, arch:process.arch, development:process.env.HIVE_DESKTOP_DEV === '1' && !app.isPackaged});
+ipcMain.handle('hive:about-info', about.getAboutInfo);
+ipcMain.handle('hive:open-app-data-directory', about.openAppDataDirectory);
+ipcMain.handle('hive:repository-directory',createRepositoryPicker({
+  isMainOrigin,
+  getParent:()=>{
+    const focused=BrowserWindow.getFocusedWindow();
+    return focused&&(focused===mainWindow||[...panelWindows.values()].includes(focused))?focused:mainWindow;
+  },
+  showOpenDialog:(parent,options)=>dialog.showOpenDialog(parent,options),
+}));
 ipcMain.on('hive:dock-tooltip', (event, value) => { if (isMainOrigin(event)) tooltip.show(value); });
 function updateDockOverlay() {
   if (!dockWindow || dockWindow.isDestroyed() || !mainWindow || mainWindow.isDestroyed()) return;
@@ -204,10 +225,11 @@ ipcMain.on('hive:panel-close', (event, id) => {
   if (isMainSender(event) && typeof id === 'string') { cancelPanelDrag(id); panelWindows.get(id)?.destroy(); }
 });
 ipcMain.on('hive:panel-ready',createPanelReadyHandler({
-  isMainOrigin,panelWindows,mainWindow:()=>mainWindow,nativePanelBounds:windowPolicy.nativePanelBounds,readyPanelIds,sizeTargets,
+  isMainOrigin,panelWindows,geometry:panelGeometry,readyPanelIds,sizeTargets,
   onAccepted:(id,child)=>{if(process.env.HIVE_DESKTOP_USER_DATA)console.log('HIVE window-ready:',JSON.stringify({id,bounds:child.getBounds()}));},
   onRejected:detail=>console.warn('HIVE panel-ready rejected:',JSON.stringify(detail)),
 }));
+ipcMain.on('hive:panel-rect',createPanelRectHandler({isMainSender,panelWindows,geometry:panelGeometry}));
 ipcMain.on('hive:window-command', (event, command, id) => {
   if (!isMainOrigin(event) || !windowPolicy.commandAllowed(command, id !== undefined, id) || (id !== undefined && typeof id !== 'string')) return;
   const target = id === undefined ? mainWindow : panelWindows.get(id);

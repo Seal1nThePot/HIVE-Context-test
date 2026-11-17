@@ -1,0 +1,13 @@
+/* Neutral initialization for the hidden native overlay; renderer theme values override these defaults. */
+:root{--hive-dock-region-border:#4779844d;--hive-dock-region-background:#47798406;--hive-dock-guide-border:#87969f;--hive-dock-guide-background:#f3f6f8f2;--hive-dock-guide-icon:#000000;--hive-dock-shadow:#00000022;--hive-dock-active-border:#477984;--hive-dock-active-background:#acced5f5;--hive-dock-active-icon:#000000;--hive-dock-preview-border:#477984;--hive-dock-preview-background:#47798426;--hive-dock-rail-border:#47798499;--hive-dock-rail-active-background:#47798477;}
+.dock-guide-region{position:absolute;box-sizing:border-box;border:1px dashed var(--hive-dock-region-border);background:var(--hive-dock-region-background);pointer-events:none}
+.dock-guide{position:absolute;display:flex;align-items:center;justify-content:center;box-sizing:border-box;border:1px solid var(--hive-dock-guide-border);border-radius:5px;background:var(--hive-dock-guide-background);color:var(--hive-dock-guide-icon);box-shadow:0 3px 14px var(--hive-dock-shadow);pointer-events:none;overflow:hidden}
+.dock-guide.outer-guide,.dock-guide.stack-guide{background:var(--hive-dock-guide-background);border-color:var(--hive-dock-guide-border)}
+.dock-guide.ready{border:2px solid var(--hive-dock-active-border);background:var(--hive-dock-active-background);color:var(--hive-dock-active-icon)}
+.hive-desktop .dock-guide.outer-guide::after{content:'';position:absolute;border-color:currentColor;border-style:solid;border-width:0;opacity:.65}
+.hive-desktop .dock-guide.outer-guide[data-dock-edge="left"]::after{left:4px;top:7px;bottom:7px;border-left-width:1px}
+.hive-desktop .dock-guide.outer-guide[data-dock-edge="right"]::after{right:4px;top:7px;bottom:7px;border-right-width:1px}
+.hive-desktop .dock-guide.outer-guide[data-dock-edge="top"]::after{top:4px;left:7px;right:7px;border-top-width:1px}
+.hive-desktop .dock-guide.outer-guide[data-dock-edge="bottom"]::after{bottom:4px;left:7px;right:7px;border-bottom-width:1px}
+.dock-placement-preview{position:absolute;pointer-events:none;box-sizing:border-box;border:2px solid var(--hive-dock-preview-border);border-radius:3px;background:var(--hive-dock-preview-background);box-shadow:0 0 0 3px var(--hive-dock-shadow)}
+.dock-native-rail-preview{position:absolute;box-sizing:border-box;border:2px dashed var(--hive-dock-rail-border);background:var(--hive-dock-rail-active-background)}

@@ -1,6 +1,8 @@
 import path from 'node:path';
 import {promises as fs} from 'node:fs';
+import {randomUUID} from 'node:crypto';
 import {imageType,MAX_IMAGE_BYTES} from './images.mjs';
+import {findImageReferences} from './image-references.mjs';
 
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 const folder='导入的图片';
@@ -26,13 +28,20 @@ export function importStore({root,files}){
       extension=type.extension;destination=folder;
       const dir=await files.resolve(folder,true);await fs.mkdir(dir,{recursive:true});
     }else throw fail('仅支持 Markdown、PNG、JPG、GIF 和 WebP。');
-    for(let number=1;number<=1000;number++){
-      const relative=[destination,base+(number>1?'-'+number:'')+extension].filter(Boolean).join('/');
-      const target=await files.resolve(relative,!!destination);
-      try{await fs.writeFile(target,buffer,{flag:'wx'});return {path:relative,kind:destination?'image':'markdown'};}
-      catch(error){if(error.code!=='EEXIST')throw error;}
-    }
-    throw fail('同名文件过多，请更换名称。',409);
+    const first=[destination,base+extension].filter(Boolean).join('/'),directory=path.dirname(await files.resolve(first,!!destination));
+    const temporary=path.join(directory,`.hive-import-${randomUUID()}.tmp`);
+    try{
+      // Publish only a complete file. An interrupted write stays in our unique
+      // temporary path, so cleanup can never remove a colliding user file.
+      await fs.writeFile(temporary,buffer,{flag:'wx'});
+      for(let number=1;number<=1000;number++){
+        const relative=[destination,base+(number>1?'-'+number:'')+extension].filter(Boolean).join('/');
+        const target=await files.resolve(relative,!!destination);
+        try{await fs.link(temporary,target);return {path:relative,kind:destination?'image':'markdown'};}
+        catch(error){if(error.code!=='EEXIST')throw error;}
+      }
+      throw fail('同名文件过多，请更换名称。',409);
+    }finally{await fs.rm(temporary,{force:true}).catch(()=>{});}
   });}
   async function list(){
     const dir=await files.resolve(folder,true);let entries;
@@ -45,5 +54,5 @@ export function importStore({root,files}){
     if(!stat.isFile()||stat.isSymbolicLink()||stat.size>MAX_IMAGE_BYTES)throw fail('图片无效或超过 12 MB。');
     const buffer=await fs.readFile(target);return {buffer,...imageType(buffer)};
   }
-  return {store,list,read};
+  return {store,list,read,references:relative=>findImageReferences({root,files},relative)};
 }

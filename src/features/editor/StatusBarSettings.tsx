@@ -13,25 +13,30 @@ export default function StatusBarSettings({preferences}:{preferences:StatusPrefe
   const available=statusItems.filter(([key])=>!preferences.items.includes(key));
   function change(items:StatusKey[],message:string){latest.current.setItems(items);setNotice(message);}
   function start(key:StatusKey,event:ReactPointerEvent){
-    if(event.button!==0)return;cleanup.current?.();skipClick.current=false;
-    const origin={x:event.clientX,y:event.clientY},pointerId=event.pointerId;let moving=false,drop:{zone:'shown'|'available';index:number}|null=null;
-    const clean=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',finish);window.removeEventListener('pointercancel',cancel);window.removeEventListener('blur',cancel);window.removeEventListener('keydown',keyDown,true);cleanup.current=null;setDragging(null);setInsertion(null);setOverAvailable(false);};
-    const cancel=()=>{drop=null;clean();};
+    if(event.button!==0||!event.isPrimary)return;cleanup.current?.();skipClick.current=false;
+    // The React owner stays in the main renderer when settings moves to a child window.
+    const target=event.currentTarget,doc=target.ownerDocument,win=doc.defaultView;if(!win)return;
+    const origin={x:event.clientX,y:event.clientY},pointerId=event.pointerId;let active=true,moving=false,drop:{zone:'shown'|'available';index:number}|null=null;
+    const clean=()=>{if(!active)return;active=false;win.removeEventListener('pointermove',move);win.removeEventListener('pointerup',finish);win.removeEventListener('pointercancel',cancel);win.removeEventListener('blur',cancel);win.removeEventListener('keydown',keyDown,true);target.removeEventListener('lostpointercapture',cancel);if(target.hasPointerCapture(pointerId))target.releasePointerCapture(pointerId);cleanup.current=null;setDragging(null);setInsertion(null);setOverAvailable(false);};
+    const cancel=()=>{if(moving)skipClick.current=true;drop=null;clean();};
     const keyDown=(next:KeyboardEvent)=>{if(next.key==='Escape'){next.preventDefault();next.stopPropagation();cancel();}};
-    const move=(next:PointerEvent)=>{if(next.pointerId!==pointerId)return;if(!moving&&Math.hypot(next.clientX-origin.x,next.clientY-origin.y)<5)return;
-      moving=true;next.preventDefault();setDragging(key);
-      const hit=document.elementFromPoint(next.clientX,next.clientY),zone=hit?.closest<HTMLElement>('[data-status-zone]');drop=null;
+    const locate=(next:PointerEvent)=>{
+      const hit=doc.elementFromPoint(next.clientX,next.clientY),zone=hit?.closest<HTMLElement>('[data-status-zone]');drop=null;
       if(zone&&panel.current?.contains(zone)){
         const item=hit?.closest<HTMLElement>('[data-status-index]'),rect=item?.getBoundingClientRect();
         drop={zone:zone.dataset.statusZone as 'shown'|'available',index:item&&rect?Number(item.dataset.statusIndex)+(next.clientX>rect.x+rect.width/2?1:0):latest.current.items.length};
       }
+    };
+    const move=(next:PointerEvent)=>{if(next.pointerId!==pointerId)return;if(!moving&&Math.hypot(next.clientX-origin.x,next.clientY-origin.y)<5)return;
+      moving=true;next.preventDefault();setDragging(key);locate(next);
       setOverAvailable(drop?.zone==='available');setInsertion(drop?.zone==='shown'?drop.index:null);
     };
-    const finish=(next:PointerEvent)=>{if(next.pointerId!==pointerId)return;const target=drop;clean();if(!moving)return;next.preventDefault();skipClick.current=true;setTimeout(()=>{skipClick.current=false;},0);
-      if(target?.zone==='shown')change(placeStatusItem(latest.current.items,key,target.index),'显示顺序已更新');
-      else if(target?.zone==='available')change(latest.current.items.filter(item=>item!==key),`已移除${label(key)}`);
+    const finish=(next:PointerEvent)=>{if(next.pointerId!==pointerId)return;if(moving)locate(next);const destination=drop;clean();if(!moving)return;next.preventDefault();skipClick.current=true;
+      if(destination?.zone==='shown')change(placeStatusItem(latest.current.items,key,destination.index),'显示顺序已更新');
+      else if(destination?.zone==='available')change(latest.current.items.filter(item=>item!==key),`已移除${label(key)}`);
     };
-    window.addEventListener('pointermove',move,{passive:false});window.addEventListener('pointerup',finish);window.addEventListener('pointercancel',cancel);window.addEventListener('blur',cancel);window.addEventListener('keydown',keyDown,true);cleanup.current=cancel;
+    win.addEventListener('pointermove',move,{passive:false});win.addEventListener('pointerup',finish);win.addEventListener('pointercancel',cancel);win.addEventListener('blur',cancel);win.addEventListener('keydown',keyDown,true);target.addEventListener('lostpointercapture',cancel);cleanup.current=cancel;
+    try{target.setPointerCapture(pointerId);}catch{/* Window listeners still handle hosts without pointer capture. */}
   }
   return <section className="settings-card status-bar-settings status-customizer" data-status-dragging={!!dragging}>
     <div className="status-customizer-summary"><div><h2>写作区底部栏</h2><p>{preferences.items.length?preferences.items.map(label).join(' · '):'未显示信息项'}</p></div><button type="button" className="settings-secondary" aria-expanded={expanded} aria-controls={panelId} onClick={()=>setExpanded(value=>!value)}>自定义<ChevronDown size={14} className={expanded?'expanded':''}/></button></div>
@@ -47,7 +52,7 @@ export default function StatusBarSettings({preferences}:{preferences:StatusPrefe
       </div>
       <div className="status-tray-heading"><b>可添加</b><small>点击或拖入上方；拖回此处可移除</small></div>
       <div className={'status-available-tray '+(overAvailable?'accepting':'')} role="group" aria-label="可添加的底栏项目" data-status-zone="available">
-        {available.map(([key])=><button key={key} type="button" onPointerDown={event=>start(key,event)} onClick={()=>{if(!skipClick.current)change([...preferences.items,key],`已添加${label(key)}`);}}><Plus size={12}/>{label(key)}</button>)}
+        {available.map(([key])=><button key={key} type="button" onPointerDown={event=>start(key,event)} onClick={event=>{const skip=skipClick.current&&event.detail!==0;skipClick.current=false;if(!skip)change([...preferences.items,key],`已添加${label(key)}`);}}><Plus size={12}/>{label(key)}</button>)}
         {!available.length&&<span className="status-tray-empty">所有项目均已显示</span>}
       </div>
       <div className="status-count-setting"><label>总字数<select aria-label="总字数统计方式" value={preferences.countMode} onChange={event=>preferences.setCountMode(event.target.value==='text'?'text':'characters')}><option value="characters">字符数</option><option value="text">纯字数</option></select></label><button type="button" className="text-button" onClick={()=>{preferences.reset();setNotice('已恢复为仅显示字符数');}}>恢复默认</button></div>

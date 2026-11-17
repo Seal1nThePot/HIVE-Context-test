@@ -1,12 +1,12 @@
 import {EditorView} from '@codemirror/view';
 // Each level has a distinct size. Keeping these values shared makes source/live hierarchy agree.
 export const headingTypography=[
-  {fontSize:'1.7em',fontWeight:'650',color:'#f1ede2'},
-  {fontSize:'1.45em',fontWeight:'600',color:'#e6dfd0'},
-  {fontSize:'1.25em',fontWeight:'600',color:'#d7d0bd'},
-  {fontSize:'1.15em',fontWeight:'600',color:'#d1c9b6'},
-  {fontSize:'1.07em',fontWeight:'600',color:'#c9c2b0'},
-  {fontSize:'1em',fontWeight:'650',color:'#bdb8a8'},
+  {fontSize:'1.7em',fontWeight:'650',color:'var(--hive-document-text, var(--text))'},
+  {fontSize:'1.45em',fontWeight:'600',color:'var(--hive-document-text, var(--text))'},
+  {fontSize:'1.25em',fontWeight:'600',color:'var(--hive-document-text, var(--text))'},
+  {fontSize:'1.15em',fontWeight:'600',color:'var(--hive-document-text, var(--text))'},
+  {fontSize:'1.07em',fontWeight:'600',color:'var(--hive-document-text, var(--text))'},
+  {fontSize:'1em',fontWeight:'650',color:'var(--hive-document-text, var(--text))'},
 ] as const;
 const headingRules:Record<string,Record<string,string>>={};
 headingTypography.forEach((style,index)=>{
@@ -21,6 +21,12 @@ export const typographyTheme=EditorView.theme({
   '.cm-line':{paddingLeft:'clamp(12px, 6.4%, 50px) !important',paddingRight:'clamp(12px, 6.4%, 50px) !important'},
   '&[data-display-mode=live] .cm-line.cm-typography-paragraph-end':{paddingBottom:'calc(2px + var(--hive-paragraph-spacing, 0em))'},
   '&[data-display-mode=live] .cm-line.cm-typography-indentable':{textIndent:'var(--hive-first-indent, 0em)'},
+  // Keep words intact when possible; strict East Asian line breaking protects
+  // punctuation. Anywhere is only the emergency break for unbreakable tokens.
+  '&[data-display-mode=live] .cm-line.cm-typography-prose:not(.cm-preview-aligned)':{textAlign:'justify',textAlignLast:'left',lineBreak:'strict',wordBreak:'normal',overflowWrap:'anywhere'},
+  '&[data-display-mode=live] .cm-line.cm-typography-prose:not(.cm-preview-aligned) .cm-typography-long-token':{textJustify:'inter-character'},
+  '&[data-display-mode=live] .cm-line.cm-typography-prose:not(.cm-preview-aligned) .cm-typography-break-token':{wordBreak:'break-all'},
+  '&[data-display-mode=live] .cm-line.cm-typography-prose:not(.cm-preview-aligned) .cm-typography-code-break':{wordBreak:'break-all'},
   '&[data-display-mode=live] .cm-preview-aligned[style*="center"], &[data-display-mode=live] .cm-preview-aligned[style*="right"]':{textIndent:'0'},
   '.cm-preview-code-line':{textIndent:'0',lineBreak:'auto'},
   ...headingRules,

@@ -5,6 +5,7 @@ import {inspectFormatting} from './formatting';
 import {markdownTree} from './markdownParse';
 import {scanMath,mergeSourceSpans,outsideMath,type SourceSpan} from './mathSyntax';
 import {paragraphTypographyStyles} from '../typography/paragraphTypography';
+import {longTokenSpans} from '../typography/longToken';
 
 type Span={from:number;to:number};
 type Node=SyntaxNode;
@@ -65,7 +66,19 @@ function patchTableCell(tr:Transaction){
 export function previewPlan(state:EditorState):PreviewPlan{
   const existing=cache.get(state.doc);if(existing)return existing;
   let tableOrdinal=0;
-  const doc=state.doc,text=doc.toString(),hasMath=text.includes('$'),replacements:PreviewReplacement[]=[],styles:PreviewStyle[]=[],mathExcluded:SourceSpan[]=[];
+  const doc=state.doc,text=doc.toString(),hasMath=text.includes('$'),replacements:PreviewReplacement[]=[],styles:PreviewStyle[]=[],mathExcluded:SourceSpan[]=[],prose:Span[]=[],tokenExcluded:Span[]=[];
+  // Reference definitions can occur after their use and are scoped to this document.
+  const references=new Map<string,string>();
+  const referenceKey=(value:string)=>value.replace(/\\([\\[\]])/g,'$1').trim().replace(/\s+/g,' ').toLowerCase();
+  const collectReferences=(node:Node)=>{
+    if(node.name==='LinkReference'){
+      const label=node.getChild('LinkLabel'),url=node.getChild('URL');
+      if(label&&url){const key=referenceKey(text.slice(label.from+1,label.to-1));if(!references.has(key))references.set(key,text.slice(url.from,url.to));}
+      return;
+    }
+    for(const child of children(node))collectReferences(child);
+  };
+  collectReferences(markdownTree(state).topNode);
   const hide=(from:number,to:number,reveal:Span={from,to},extra:Partial<PreviewReplacement>={})=>{if(to>from)replacements.push({from,to,reveal:{from:reveal.from,to:reveal.to},...extra});};
   const lineStyles=(from:number,to:number,className:string,align?:PreviewStyle['align'])=>{
     for(let number=doc.lineAt(from).number;number<=doc.lineAt(Math.max(from,to-1)).number;number++){const line=doc.line(number);styles.push({from:line.from,to:line.from,line:true,className,align});}
@@ -73,7 +86,11 @@ export function previewPlan(state:EditorState):PreviewPlan{
   const hideLine=(pos:number,reveal?:Span)=>{const line=doc.lineAt(pos);hide(line.from,Math.min(doc.length,line.to+1),reveal||{from:line.from,to:line.to},{block:true});};
   function walk(node:Node){
     const parts=children(node),span={from:node.from,to:node.to};
-    if(node.name==='Paragraph')styles.push(...paragraphTypographyStyles(node,doc));
+    if(node.name==='Paragraph'){
+      const paragraphStyles=paragraphTypographyStyles(node,doc);styles.push(...paragraphStyles);
+      if(paragraphStyles.some(item=>item.className.includes('cm-typography-prose')))prose.push(span);
+    }
+    if(['InlineCode','Image','HTMLBlock','HTMLTag','LinkReference'].includes(node.name))tokenExcluded.push(span);
     if(hasMath&&['FencedCode','CodeBlock','InlineCode','Table','Image','HTMLBlock','HTMLTag','Autolink','LinkReference','URL','LinkTitle'].includes(node.name))mathExcluded.push(span);
     if(hasMath&&node.name==='Link')for(const part of parts)if(part.name==='URL'||part.name==='LinkTitle')mathExcluded.push({from:part.from,to:part.to});
     const heading=/^(?:ATX|Setext)Heading([1-6])$/.exec(node.name);
@@ -91,7 +108,13 @@ export function previewPlan(state:EditorState):PreviewPlan{
     }
     if(node.name==='CodeBlock'){lineStyles(node.from,node.to,'cm-preview-code-line');return;}
     if(node.name==='InlineCode'){
-      const marks=children(node,'CodeMark');if(marks.length===2){styles.push({from:marks[0].to,to:marks[1].from,className:'cm-preview-inline-code'});for(const mark of marks)hide(mark.from,mark.to,span);}return;
+      const marks=children(node,'CodeMark');if(marks.length===2){
+        styles.push({from:marks[0].to,to:marks[1].from,className:'cm-preview-inline-code'});
+        // Technical paths can otherwise force the preceding short CJK fragment
+        // to stretch across a whole justified line. Ordinary inline code remains intact.
+        for(const token of longTokenSpans(text,marks[0].to,marks[1].from))if(token.kind!=='url')styles.push({...token,className:'cm-typography-code-break'});
+        for(const mark of marks)hide(mark.from,mark.to,span);
+      }return;
     }
     if(node.name==='Table'){
       const rowNodes=parts.filter(item=>item.name==='TableHeader'||item.name==='TableRow');
@@ -122,11 +145,23 @@ export function previewPlan(state:EditorState):PreviewPlan{
     if(node.name==='TaskMarker'){hide(node.from,node.to,span,{kind:'task',text:/[xX]/.test(text.slice(node.from,node.to))?'☑':'☐'});return;}
     if(node.name==='QuoteMark'){let to=node.to;if(text[to]===' ')to++;hide(node.from,to,span);return;}
     if(node.name==='Escape'){hide(node.from,node.from+1,span);return;}
+    if(node.name==='Image'){
+      const raw=text.slice(node.from,node.to),wiki=/^!\[\[([^\]\n]+)\]\]$/.exec(raw);
+      if(wiki){
+        const [path,...options]=wiki[1].split('|'),src=path.trim(),label=options.join('|').trim();
+        if(src){hide(node.from,node.to,span,{kind:'image',text:label||src,src});return;}
+      }
+    }
     if(node.name==='Link'||node.name==='Image'){
       const first=parts.find(item=>item.name==='LinkMark'),end=parts.find(item=>item.name==='LinkMark'&&text.slice(item.from,item.to)===']');
       if(first&&end){
         const url=parts.find(item=>item.name==='URL');
-        if(node.name==='Image'){hide(node.from,node.to,span,{kind:'image',text:text.slice(first.to,end.from).replace(/\\([\\[\]])/g,'$1')||'图片',src:url?text.slice(url.from,url.to):undefined});return;}
+        if(node.name==='Image'){
+          const alt=text.slice(first.to,end.from).replace(/\\([\\[\]])/g,'$1'),label=parts.find(item=>item.name==='LinkLabel');
+          const reference=label?text.slice(label.from+1,label.to-1)||alt:alt;
+          const src=url?text.slice(url.from,url.to):references.get(referenceKey(reference));
+          hide(node.from,node.to,span,{kind:'image',text:alt||'图片',src});return;
+        }
         styles.push({from:first.to,to:end.from,className:'cm-preview-link',title:url?text.slice(url.from,url.to):undefined});
         hide(node.from,first.to,span);hide(end.from,node.to,span);
         for(const part of parts)if(part.from>=first.to&&part.to<=end.from)walk(part);
@@ -150,6 +185,7 @@ export function previewPlan(state:EditorState):PreviewPlan{
     const {blocks,underlines}=inspectFormatting(state);
     for(const span of underlines)if(span.contentTo>span.contentFrom)styles.push({from:span.contentFrom,to:span.contentTo,className:'cm-format-underline'});
     for(const block of blocks){
+      tokenExcluded.push(block);
       lineStyles(block.contentFrom,block.contentTo,'cm-preview-aligned',block.alignment);
       hide(block.from,block.contentFrom,{from:block.from,to:block.openTo},{block:true});
       const closing=doc.lineAt(block.closeFrom),previous=closing.number>1?doc.line(closing.number-1):closing;
@@ -158,6 +194,11 @@ export function previewPlan(state:EditorState):PreviewPlan{
   }
   if(metadata)mathExcluded.push({from:metadata.from,to:metadata.to});
   const math=hasMath?scanMath(text,mathExcluded):{math:[],literal:[]},protectedSpans=mergeSourceSpans([...math.math,...math.literal]);
+  const tokenMasks=mergeSourceSpans([...tokenExcluded,...protectedSpans,...replacements]);
+  for(const paragraph of prose)for(const token of longTokenSpans(text,paragraph.from,paragraph.to)){
+    const pieces=outsideMath(token,tokenMasks);
+    if(pieces.length===1&&pieces[0].from===token.from&&pieces[0].to===token.to)styles.push({...token,className:'cm-typography-long-token'+(token.kind==='url'?'':' cm-typography-break-token')});
+  }
   const blockMathLines=mergeSourceSpans([...math.math.filter(item=>item.block),...math.literal].map(item=>({from:doc.lineAt(item.from).from,to:doc.lineAt(Math.max(item.from,item.to-1)).to+1})));
   const mathReplacements:PreviewReplacement[]=math.math.map(item=>({from:item.from,to:item.to,reveal:{from:item.from,to:item.to},block:item.block,kind:'math',text:item.status}));
   const plan={
@@ -170,12 +211,32 @@ export function previewPlan(state:EditorState):PreviewPlan{
   };cache.set(doc,plan);return plan;
 }
 
+function imageSelected(item:PreviewReplacement,range:EditorState['selection']['ranges'][number]){
+  return range.from<item.to&&range.to>item.from||range.empty&&range.from>item.from&&range.from<item.to;
+}
+const imageCache=new WeakMap<Text,PreviewReplacement[]>();
+/** Only selection changes crossing an image boundary affect its replacement. */
+export function imageSelectionSignature(state:EditorState){
+  let images=imageCache.get(state.doc);
+  if(!images){images=previewPlan(state).replacements.filter(item=>item.kind==='image').sort((a,b)=>a.from-b.from);imageCache.set(state.doc,images);}
+  const selected=new Set<number>();
+  for(const range of state.selection.ranges){
+    let low=0,high=images.length;
+    while(low<high){const middle=(low+high)>>1;if(images[middle].to<=range.from)low=middle+1;else high=middle;}
+    for(let index=low;index<images.length&&images[index].from<=range.to;index++)if(imageSelected(images[index],range))selected.add(index);
+  }
+  return [...selected].sort((a,b)=>a-b).join(',');
+}
 export function visibleReplacements(state:EditorState,focused:boolean){
   const active=focused?state.selection.ranges.map(range=>{
     const end=range.to>range.from&&state.doc.lineAt(range.to).from===range.to?range.to-1:range.to;
     return {from:state.doc.lineAt(range.from).from,to:state.doc.lineAt(end).to};
   }):[];
-  const filtered=previewPlan(state).replacements.filter(item=>item.kind==='table'||!active.some(line=>item.reveal.from<=line.to&&item.reveal.to>line.from));
+  const filtered=previewPlan(state).replacements.filter(item=>{
+    if(item.kind==='table'||item.kind==='task')return true;
+    if(item.kind==='image')return !focused||!state.selection.ranges.some(range=>imageSelected(item,range));
+    return !active.some(line=>item.reveal.from<=line.to&&item.reveal.to>line.from);
+  });
   const result:PreviewReplacement[]=[];
   for(const item of filtered.sort((a,b)=>a.from-b.from||b.to-a.to)){
     const previous=result.at(-1);if(previous&&item.from<previous.to){if(item.to>previous.to&&!previous.kind&&!item.kind)result[result.length-1]={...previous,to:item.to,block:previous.block||item.block};continue;}

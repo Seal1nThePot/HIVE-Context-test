@@ -2,19 +2,34 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileTimes } from "./file-times.mjs";
+import { fileIndex } from "./file-index.mjs";
+import { scanFileTree } from "./file-index-scan.mjs";
 
 export const hash = (text) =>
   crypto.createHash("sha256").update(text).digest("hex");
 const fail = (message, status = 400) =>
   Object.assign(new Error(message), { status });
-export function fileStore(root, state) {
+export function fileStore(root, state, options = {}) {
   const times = state ? fileTimes(state) : null;
   const locks = new Map();
   let mutations = Promise.resolve();
-  function transaction(fn) {
+  function enqueue(fn) {
     const task = mutations.catch(() => {}).then(fn);
     mutations = task;
     return task;
+  }
+  const clearInactiveTimes = () => {if (!index.debugStats().active) times?.clear?.();};
+  const index = fileIndex(root, counters => enqueue(async () => {
+    try {return await scanFileTree({root, times, options, counters});}
+    catch (error) {times?.clear?.(); throw error;}
+    finally {clearInactiveTimes();}
+  }), options);
+  function transaction(fn) {
+    return enqueue(async () => {
+      try {return await fn();}
+      catch (error) {times?.clear?.(); throw error;}
+      finally {index.invalidate(); clearInactiveTimes();}
+    });
   }
   async function resolve(relative, directory = false) {
     if (
@@ -56,41 +71,16 @@ export function fileStore(root, state) {
       if (locks.get(key) === result) locks.delete(key);
     }
   }
-  async function listTree(dir, prefix, timeData, changed) {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-    const result = [];
-    for (const entry of entries) {
-      if (entry.name.startsWith(".") || entry.isSymbolicLink()) continue;
-      const relative = prefix + entry.name;
-      const stat = await fs.stat(path.join(dir, entry.name));
-      const modifiedAt = stat.mtimeMs;
-      const observed = times ? times.observe(timeData, relative, stat) : {createdAt:stat.birthtimeMs,dirty:false};
-      const createdAt = observed.createdAt;
-      changed.value ||= observed.dirty;
-      if (entry.isDirectory())
-        result.push({
-          name: entry.name,
-          path: relative,
-          type: "folder",
-          modifiedAt, createdAt,
-          children: await listTree(path.join(dir, entry.name), relative + "/", timeData, changed),
-        });
-      else if (/\.md$/i.test(entry.name))
-        result.push({ name: entry.name, path: relative, type: "file", modifiedAt, createdAt });
-    }
-    return result.sort((a, b) =>
-      a.type === b.type
-        ? a.name.localeCompare(b.name, "zh-CN")
-        : a.type === "folder"
-          ? -1
-          : 1,
-    );
-  }
   async function list(dir = root, prefix = "") {
-    const data=times ? await times.read() : {}, changed={value:false};
-    const result=await listTree(dir, prefix, data, changed);
-    if(times && changed.value)await times.write(data);
-    return result;
+    // Compatibility reads (search, references and tests) explicitly ask for a
+    // fresh tree; polling uses snapshot() and does not walk the disk each time.
+    if (dir === root && !prefix) return (await index.snapshot({force:true})).entries;
+    return enqueue(async () => {
+      const counters = {readdirCount:0, statCount:0, maxPendingStats:0};
+      try {return (await scanFileTree({root, dir, prefix, times, options, counters})).entries;}
+      catch (error) {times?.clear?.(); throw error;}
+      finally {clearInactiveTimes();}
+    });
   }
   async function read(relative, knownHash) {
     const target = await resolve(relative);
@@ -191,7 +181,9 @@ export function fileStore(root, state) {
       return read(to);
     });
   }
-  return { list: (...args) => transaction(() => list(...args)), read, resolve, transaction,
+  return { list, snapshot:index.snapshot, invalidate:index.invalidate, debugStats:index.debugStats,
+    suspend:() => {index.suspend(); times?.clear?.();}, resume:index.resume,
+    close:async () => {await index.close(); await mutations.catch(() => {}); times?.clear?.();}, read, resolve, transaction,
     save: (...args) => transaction(() => save(...args)),
     folder: (...args) => transaction(() => folder(...args)),
     rename: (...args) => transaction(() => rename(...args)) };

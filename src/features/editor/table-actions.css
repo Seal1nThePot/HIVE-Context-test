@@ -1,0 +1,23 @@
+.cm-editor .cm-table-widget .cm-table-edge{position:absolute;z-index:4;width:18px;height:18px;padding:0;border:1px solid var(--hive-surface-border,var(--line));border-radius:50%;background:var(--hive-popup-bg,var(--panel));color:var(--hive-popup-text,var(--text));font:12px/16px sans-serif;text-align:center;opacity:0;cursor:pointer}
+.cm-editor .cm-table-widget td:hover>.cm-table-edge,.cm-editor .cm-table-widget th:hover>.cm-table-edge,.cm-editor .cm-table-widget .cm-table-edge:focus-visible{opacity:1}
+.cm-editor .cm-table-widget .cm-table-edge:focus-visible{outline:2px solid var(--hive-accent,var(--gold))}
+/* Join the edge buttons to their cells so crossing the small visual gap keeps hover. */
+.cm-editor .cm-table-widget .cm-table-edge::after{content:"";position:absolute;inset:-6px}
+.cm-editor .cm-table-widget .cm-table-edge:disabled{opacity:0;pointer-events:none}
+.cm-table-add-column{right:-23px;top:50%;transform:translateY(-50%)}
+.cm-table-add-row{bottom:-23px;left:50%;transform:translateX(-50%)}
+.cm-editor .cm-table-final-segment{padding-bottom:24px}
+.cm-editor .cm-table-widget .cm-table-select-row,.cm-editor .cm-table-widget .cm-table-select-column{font-size:7px;width:14px;height:14px;line-height:12px}
+.cm-table-select-row{left:-20px;top:50%;transform:translateY(-50%)}
+.cm-table-select-column{top:-20px;left:50%;transform:translateX(-50%)}
+.cm-table-context-menu{position:fixed;z-index:10000;padding:4px;border:1px solid var(--hive-surface-border,var(--line));border-radius:6px;background:var(--hive-popup-bg,var(--panel));box-shadow:0 3px 12px #0003}
+.cm-table-context-menu button{display:block;border:0;border-radius:4px;padding:6px 12px;background:transparent;color:var(--hive-popup-text,var(--text));cursor:pointer}
+.cm-table-context-menu button:hover:not(:disabled),.cm-table-context-menu button:focus-visible{background:var(--hive-panel-bg,var(--panel-2))}
+.cm-table-context-menu button:disabled{opacity:.45;cursor:default}
+.cm-editor .cm-table-widget textarea{height:auto;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere}
+.cm-table-status:empty{display:none}
+.cm-editor .cm-table-widget .cm-table-cell-preview{min-height:24px;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;cursor:text;outline-offset:2px}
+.cm-editor .cm-table-widget .cm-table-cell-preview code{font-family:monospace;background:color-mix(in srgb, currentColor 9%, transparent);border-radius:3px;padding:0 2px}
+.cm-editor .cm-table-widget .cm-table-cell-preview a{color:var(--hive-accent,var(--gold));text-decoration:underline}
+.cm-editor .cm-table-widget textarea[hidden],.cm-editor .cm-table-widget .cm-table-cell-preview[hidden]{display:none}
+.cm-editor .cm-table-widget textarea{text-align:inherit}

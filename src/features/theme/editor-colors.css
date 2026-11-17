@@ -1,0 +1,29 @@
+/* Editor highlights are independent of selection colors used by the rest of the UI. */
+html .cm-editor .cm-selectionBackground {background:var(--hive-editor-inactive-selection-background) !important;}
+html .cm-editor.cm-focused .cm-selectionBackground {background:var(--hive-editor-selection-background) !important;}
+/* CodeMirror draws its own selection layer. Keep native backgrounds transparent so alpha is applied once. */
+html .cm-editor .cm-content .cm-line::selection,
+html .cm-editor .cm-content .cm-line ::selection {background:transparent !important;color:var(--hive-editor-selection-text) !important;}
+html .cm-editor .cm-content textarea::selection,
+html .cm-editor .cm-content textarea:focus::selection {background:var(--hive-editor-selection-background) !important;color:var(--hive-editor-selection-text) !important;}
+html .cm-editor .cm-content,
+html .cm-editor .cm-content .cm-line,
+html .cm-editor .cm-content textarea {caret-color:var(--hive-editor-cursor) !important;}
+html .cm-editor .cm-cursor {border-left-color:var(--hive-editor-cursor) !important;border-left-width:2px !important;}
+/* A stronger tint and an inset edge make blank current lines visible without shifting text.
+   Both use the configured alpha so a transparent user override remains transparent. */
+html .cm-editor .cm-activeLine {background:var(--hive-editor-active-line-background) !important;box-shadow:inset 0 0 0 1px var(--hive-editor-active-line-background);}
+html .cm-editor .cm-selectionMatch {background:var(--hive-editor-selection-match-background) !important;}
+html .cm-editor .cm-searchMatch {background:var(--hive-editor-search-match-background) !important;}
+html .cm-editor .cm-searchMatch-selected {background:var(--hive-editor-search-current-background) !important;}
+html .cm-editor .cm-searchMatch .cm-selectionMatch {background:transparent !important;}
+html .cm-editor .cm-text-annotation,
+html .cm-editor .cm-table-marked {background:var(--hive-editor-annotation-background) !important;border-bottom-color:var(--hive-editor-annotation-underline) !important;}
+html .cm-editor .cm-table-selected {background:var(--hive-editor-table-selection-background) !important;}
+html .cm-editor .cm-table-select-top {border-top-color:var(--hive-editor-table-selection-border) !important;}
+html .cm-editor .cm-table-select-bottom {border-bottom-color:var(--hive-editor-table-selection-border) !important;}
+html .cm-editor .cm-table-select-left {border-left-color:var(--hive-editor-table-selection-border) !important;}
+html .cm-editor .cm-table-select-right {border-right-color:var(--hive-editor-table-selection-border) !important;}
+.editor-color-settings > p {color:var(--muted);font-size:12px;line-height:1.7;}
+
+html body .cm-editor .cm-preview-link, html body .cm-editor [data-hive-link] {color:var(--hive-editor-link-text) !important;text-decoration:underline;}

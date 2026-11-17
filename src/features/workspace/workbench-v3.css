@@ -11,7 +11,7 @@
 .workspace-drag-grip {
   width: 9px;
   min-width: 9px;
-  color: #6b7c5b;
+  color: var(--hive-header-text);
   cursor: grab;
   flex: none;
 }
@@ -53,8 +53,8 @@
   padding-top: 10px;
 }
 .document-pane.workspace-panel.panel-floating {
-  border-color: #8d8c59;
-  background: #1e211e;
+  border-color: var(--hive-surface-border);
+  background: var(--hive-document-bg);
   min-height: 300px;
 }
 .document-pane > .document-tabs {
@@ -87,7 +87,7 @@
   min-width: 0;
   border: 0;
   background: transparent;
-  color: #d3c390;
+  color: var(--hive-header-text);
   font-size: calc(12px * var(--text-scale, 1));
   padding: 4px 0;
   cursor: pointer;
@@ -95,8 +95,8 @@
   outline-offset: 1px;
 }
 .chat-mode-heading option {
-  background: #263020;
-  color: #d9d8bb;
+  background: var(--hive-input-bg);
+  color: var(--hive-input-text);
   font-size: calc(12px * var(--text-scale, 1));
 }
 .chat-mode-heading small {
@@ -145,8 +145,8 @@
   box-shadow: none;
 }
 .bottom-bar.floating-mode-dock .ai-controls {
-  box-shadow: 0 6px 24px #0006;
-  background: #293122ed;
+  box-shadow: 0 6px 24px var(--hive-dock-frame-shadow);
+  background: var(--hive-dock-frame-bg);
   backdrop-filter: blur(8px);
 }
 .layout-drop-targets {
@@ -164,22 +164,22 @@
   align-items: center;
   justify-content: center;
   gap: 4px;
-  border: 1px dashed #c9b4739c;
+  border: 1px dashed var(--hive-dock-guide-border);
   border-radius: 8px;
-  background: #283721e8;
-  color: #dfce94;
+  background: var(--hive-dock-guide-background);
+  color: var(--hive-dock-guide-icon);
   font-size: calc(12px * var(--text-scale, 1));
-  box-shadow: 0 6px 25px #0006;
+  box-shadow: 0 6px 25px var(--hive-shadow-color);
 }
 .layout-drop-targets > div:hover {
   border-style: solid;
-  background: #53643af0;
-  color: #fff4c7;
-  outline: 2px solid #c6b07155;
+  background: var(--hive-dock-active-background);
+  color: var(--hive-dock-active-icon);
+  outline: 2px solid var(--hive-dock-active-border);
 }
 .layout-drop-targets small {
   font-size: calc(9px * var(--text-scale, 1));
-  color: #a9b88e;
+  color: var(--hive-dock-hint-text);
 }
 .inline-annotation-editor {
   position: fixed;
@@ -189,11 +189,11 @@
   max-height: calc(100dvh - 18px);
   overflow: auto;
   padding: 13px;
-  border: 1px solid var(--hive-popup-border, var(--line, #a39c5d));
+  border: 1px solid var(--hive-popup-border);
   border-radius: 9px;
-  background: var(--hive-popup-bg, var(--panel, #2a3423));
-  box-shadow: var(--hive-popup-shadow, 0 12px 45px #0009);
-  color: var(--hive-popup-text, var(--text, #cbd7b9));
+  background: var(--hive-popup-bg);
+  box-shadow: var(--hive-popup-shadow);
+  color: var(--hive-popup-text);
 }
 .annotation-tool-active .cm-content,.annotation-tool-active .cm-line {cursor:crosshair;}
 .inline-annotation-editor textarea {
@@ -204,15 +204,15 @@
   resize: vertical;
   margin: 0 0 11px;
   padding: 8px 10px;
-  border: 1px solid var(--line, #667d48);
+  border: 1px solid var(--hive-input-border);
   border-radius: 5px;
-  background: var(--bg, #1b2815);
+  background: var(--hive-input-bg);
   font-size: calc(11px * var(--text-scale, 1));
   line-height: 1.8;
-  color: var(--text, #d8e0c5);
+  color: var(--hive-input-text);
 }
 .inline-annotation-editor textarea::placeholder {
-  color: var(--muted, #71895e);
+  color: var(--hive-input-text);
 }
 .inline-annotation-footer {
   display: flex;
@@ -238,13 +238,13 @@
   justify-content: space-between;
   align-items: center;
   gap: 5px;
-  color: #71865f;
+  color: var(--text);
   font-size: calc(8px * var(--text-scale, 1));
   margin: 0 2px 10px;
 }
 .outline-manage-hint > button {
   font-size: calc(8px * var(--text-scale, 1));
-  color: #b4b680;
+  color: var(--hive-link);
   padding: 2px 0;
   gap: 3px;
   white-space: nowrap;
@@ -257,7 +257,7 @@
 }
 .node-management > small {
   font-size: calc(8px * var(--text-scale, 1));
-  color: #778e64;
+  color: var(--text);
   margin-right: auto;
 }
 .node-management .icon-button {
@@ -270,7 +270,7 @@
   align-items: center;
   gap: 13px;
   padding: 30px 9px;
-  color: #9cae7f;
+  color: var(--text);
 }
 .empty-outline > p {
   font-size: calc(10px * var(--text-scale, 1));
@@ -285,10 +285,10 @@
   resize: vertical;
   margin-top: 8px;
   padding: 10px 12px;
-  border: 1px solid #4b6136;
+  border: 1px solid var(--hive-input-border);
   border-radius: 5px;
-  background: #1c2815;
-  color: #d1ddbe;
+  background: var(--hive-input-bg);
+  color: var(--hive-input-text);
   line-height: 1.8;
   font-size: calc(11px * var(--text-scale, 1));
 }
@@ -302,17 +302,17 @@
   width: 100%;
   margin-top: 8px;
   padding: 9px;
-  border: 1px solid #4c6137;
-  background: #1c2815;
+  border: 1px solid var(--hive-input-border);
+  background: var(--hive-input-bg);
   border-radius: 5px;
-  color: #c6d6ac;
+  color: var(--hive-input-text);
   font-size: calc(10px * var(--text-scale, 1));
   min-width: 0;
 }
 .scratch-toolbar > .scratch-file-link {
   justify-content: flex-start;
   padding: 0;
-  color: #ccc8a7;
+  color: var(--hive-link);
   margin-right: auto;
   font-size: calc(11px * var(--text-scale, 1));
 }

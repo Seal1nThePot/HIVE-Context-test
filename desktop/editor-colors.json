@@ -1,0 +1,15 @@
+{
+  "linkText": {"label":"链接文字颜色","alpha":false},
+  "cursor": {"label":"输入光标","alpha":false},
+  "selectionBackground": {"label":"选中文字高亮","alpha":true},
+  "selectionText": {"label":"选中文字颜色","alpha":false},
+  "inactiveSelectionBackground": {"label":"失去焦点的选区","alpha":true},
+  "activeLineBackground": {"label":"当前行高亮","alpha":true},
+  "selectionMatchBackground": {"label":"相同文字高亮","alpha":true},
+  "searchMatchBackground": {"label":"搜索结果高亮","alpha":true},
+  "searchCurrentBackground": {"label":"当前搜索结果","alpha":true},
+  "annotationBackground": {"label":"文本标注高亮","alpha":true},
+  "annotationUnderline": {"label":"标注下划线","alpha":false},
+  "tableSelectionBackground": {"label":"表格选区高亮","alpha":true},
+  "tableSelectionBorder": {"label":"表格选区边框","alpha":false}
+}

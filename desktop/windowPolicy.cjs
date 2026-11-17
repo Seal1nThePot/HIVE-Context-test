@@ -8,6 +8,13 @@ function nativePanelBounds(rect, contentBounds, zoom) {
   const scale=Number.isFinite(zoom)&&zoom>0?zoom:1;
   return {x:Math.round(contentBounds.x+rect.x*scale),y:Math.round(contentBounds.y+rect.y*scale),width:Math.max(220,Math.round(rect.width*scale)),height:Math.max(140,Math.round(rect.height*scale))};
 }
+// Workspace rectangles are main-content CSS pixels. Electron content bounds
+// are screen DIPs; Windows display scale is already handled by Electron.
+function panelContentRect(bounds, contentBounds, zoom) {
+  if(!bounds||![bounds.x,bounds.y,bounds.width,bounds.height].every(Number.isFinite)||bounds.width<=0||bounds.height<=0)return null;
+  const scale=Number.isFinite(zoom)&&zoom>0?zoom:1;
+  return {x:(bounds.x-contentBounds.x)/scale,y:(bounds.y-contentBounds.y)/scale,width:bounds.width/scale,height:bounds.height/scale};
+}
 const resizeEdges = new Set(['n','s','e','w','ne','nw','se','sw']);
 function dragAllowed(activeId, id, phase, ready, available, edge) {
   if (typeof id !== 'string' || !ready || !available || !['start','move','end','cancel'].includes(phase)) return false;
@@ -35,6 +42,7 @@ function resizeBounds(bounds, start, cursor, edge, minWidth = 220, minHeight = 1
   if (edge.includes('n')) { height = Math.max(minHeight,bounds.height-dy); y = bounds.y+bounds.height-height; }
   return {x,y,width,height};
 }
+const dockingColorFields=require('./docking-colors.json');
 function dockFeedback(value) {
   if (value === null) return null;
   if (!value || typeof value !== 'object' || !Array.isArray(value.guides) || value.guides.length > 16) throw new Error('Invalid dock feedback');
@@ -52,6 +60,11 @@ function dockFeedback(value) {
   if (value.ready != null) { ready = {preview:rect(value.ready.preview)}; if (value.ready.button != null) ready.button = rect(value.ready.button); }
   let rail;
   if (value.rail != null) { if (!['left','right'].includes(value.rail.edge)) throw new Error('Invalid rail'); rail = {edge:value.rail.edge,rect:rect(value.rail.rect)}; }
-  return {guides,ready,...(rail ? {rail} : {})};
+  let colors;
+  if(value.colors!==undefined){
+    if(!value.colors||typeof value.colors!=='object'||Array.isArray(value.colors))throw new Error('Invalid docking colors');colors={};
+    for(const [key,field] of Object.entries(dockingColorFields))if(value.colors[key]!==undefined){const color=value.colors[key];if(typeof color!=='string'||!(field.alpha?/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i:/^#[0-9a-f]{6}$/i).test(color))throw new Error('Invalid docking color');colors[key]=color.toLowerCase();}
+  }
+  return {guides,ready,...(rail ? {rail} : {}),...(colors?{colors}:{})};
 }
-module.exports = { validCommand, allowNavigation, commandAllowed, readyPanels, contentPoint, nativePanelBounds, dragAllowed, dragPosition, dragBounds, withTargetSize, restoredPosition, toolbarPosition, resizeBounds, dockFeedback };
+module.exports = { validCommand, allowNavigation, commandAllowed, readyPanels, contentPoint, nativePanelBounds, panelContentRect, dragAllowed, dragPosition, dragBounds, withTargetSize, restoredPosition, toolbarPosition, resizeBounds, dockFeedback };

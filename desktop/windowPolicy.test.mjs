@@ -84,4 +84,8 @@ describe('desktop window policy', () => {
     expect(policy.dockFeedback(null)).toBeNull();
     for (const value of [{guides:Array(17).fill({})},{guides:[{key:'x',label:'a'.repeat(33),button:rect}]},{guides:[],ready:{preview:{...rect,x:Infinity}}},{guides:[],rail:{edge:'top',rect}},{guides:[],ready:{preview:{...rect,width:-1}}}]) expect(()=>policy.dockFeedback(value)).toThrow();
   });
+  it('transports validated customizable docking colors and excludes arbitrary CSS',()=>{
+    expect(policy.dockFeedback({guides:[],ready:null,colors:{guideIcon:'#ABCDEF',previewBackground:'#12345677',arbitrary:'url(x)'}}).colors).toEqual({guideIcon:'#abcdef',previewBackground:'#12345677'});
+    for(const colors of [{guideBackground:'url(x)'},{guideIcon:'#abcdef55'},{railBackground:'red'},[]])expect(()=>policy.dockFeedback({guides:[],ready:null,colors})).toThrow();
+  });
 });

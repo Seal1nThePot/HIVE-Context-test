@@ -4,6 +4,7 @@ import { ChevronDown, CircleHelp, Download, Lock, LockOpen, Save, Settings2, Min
 import type { EditorSession } from '../features/editor/editorSessionTypes';
 import type { PanelWorkspaceApi } from '../features/workspace/PanelFrame';
 import type { useFileWorkspace } from '../features/files/WorkspaceContext';
+import {repositoryLabel} from '../features/files/WorkspaceContext';
 import PanelSwitcher, { type PanelCategory } from '../features/workspace/PanelSwitcher';
 import { activeModelLabel, type Config } from '../features/settings/modelConfig';
 import type { SettingsSection } from '../features/settings/SettingsPage';
@@ -41,19 +42,19 @@ export function AppHeader({ workspace, sessions, editorState, editorIds, panelLa
         <div className="user-avatar" aria-label="用户头像">我</div>
         <button
           className="workspace-switcher"
-          title="仓库管理"
+          title={`仓库管理 · ${fileWorkspace.info.root}`}
           aria-label="仓库管理"
           onClick={() => {
-            openSettings('workspace');
+            workspace.open('repositories');
           }}
         >
-          <b>仓库管理</b>
+          <b>{repositoryLabel(fileWorkspace.info.repositories.find(item=>item.id===fileWorkspace.info.id)||fileWorkspace.info)}</b>
           <ChevronDown size={13} />
         </button>
         <div className="quick-file-actions" aria-label="文档保存操作">
           <div className="save-with-autosave">
             <button type="button" className="header-save-button" aria-label="保存正文" title="保存 · Ctrl+S" disabled={!file||fileBusy} onClick={()=>void save()}><Save size={16}/></button>
-            <label className="auto-save-toggle" title={fileWorkspace.info.autoSave?'自动保存已开启 · 点击关闭':'自动保存已关闭 · 点击开启'}><input type="checkbox" role="switch" aria-label="自动保存正文" checked={fileWorkspace.info.autoSave} onChange={event=>void fileWorkspace.update({autoSave:event.target.checked}).catch(error=>setError(error.message))}/></label>
+            <label className="auto-save-toggle" data-no-drag title={fileWorkspace.info.autoSave?'自动保存已开启 · 点击关闭':'自动保存已关闭 · 点击开启'}><input type="checkbox" role="switch" aria-label="自动保存正文" checked={fileWorkspace.info.autoSave} onChange={event=>void fileWorkspace.update({autoSave:event.target.checked}).catch(error=>setError(error.message))}/></label>
           </div>
           <button type="button" className="header-save-as" aria-label="另存为" title="另存为 Markdown" disabled={fileBusy||!editorState.current?.doc.length} onClick={()=>openSaveAs()}><Download size={16}/></button>
         </div>
@@ -73,6 +74,7 @@ export function AppHeader({ workspace, sessions, editorState, editorIds, panelLa
           <span className="header-divider" />
           <PanelSwitcher items={[
             {id:"files",label:"文档（文件列表）",open:leftOpen,category:'files',keywords:['目录','文件夹','浏览器']},
+            {id:'repositories',label:'仓库管理',open:workspace.isOpen('repositories'),category:'files',keywords:['仓库','项目','目录','切换']},
             {id:"trash",label:"回收站",open:workspace.isOpen('trash'),category:'files',keywords:['恢复','删除','清理']},
             ...editorIds.map(id=>({id,label:panelLabel(id),open:workspace.isOpen(id),fixed:id==='editor',category:'documents',description:`正文 ${editorIds.indexOf(id)+1}`,keywords:['笔记','文章','Markdown']})),
             {id:"conversation",label:"对话",open:chatOpen,category:'ai',keywords:['聊天','模型']},

@@ -35,20 +35,46 @@ describe('typography display preferences',()=>{
 describe('semantic paragraph typography',()=>{
   it('adds spacing once at the paragraph end and indents only the first source line',()=>{
     const state=create('第一行，屏幕可以多次折行\n同一语义段的软换行\n第三行。\n\n下一个段落。'),styles=paragraphs(state);
-    expect(styles).toHaveLength(3);
+    expect(styles).toHaveLength(4);
     expect(styles.filter(style=>style.className?.includes('paragraph-end')).map(style=>state.doc.lineAt(style.from).number)).toEqual([3,5]);
     expect(styles.filter(style=>style.className?.includes('indentable')).map(style=>state.doc.lineAt(style.from).number)).toEqual([1,5]);
+    expect(styles.filter(style=>style.className?.includes('typography-prose')).map(style=>state.doc.lineAt(style.from).number)).toEqual([1,2,3,5]);
   });
   it('respects metadata, headings, code, GFM tables, list/quote nesting and display math boundaries',()=>{
     const text='---\ntitle: 元数据\n---\n\n# 一级\n\n正文。\n\n```md\n代码\n```\n\n| 甲 | 乙 |\n| --- | --- |\n| 丙 | 丁 |\n\n- 列表\n\n> 引用\n\n$$\nx+y\n$$\n\n后文。';
     const state=create(text),styles=paragraphs(state);
     expect(styles.filter(style=>style.className?.includes('indentable')).map(style=>state.doc.lineAt(style.from).text)).toEqual(['正文。','后文。']);
     expect(styles.map(style=>state.doc.lineAt(style.from).text)).toEqual(['正文。','- 列表','> 引用','后文。']);
+    expect(styles.filter(style=>style.className?.includes('typography-prose')).map(style=>state.doc.lineAt(style.from).text)).toEqual(['正文。','后文。']);
   });
   it('keeps inline math in prose but never indents image-only display blocks',()=>{
     const state=create('带有 $x$ 的正文。\n\n![图片](image.png)\n\n$$x+y$$');
     expect(paragraphs(state).filter(style=>style.className?.includes('indentable')).map(style=>state.doc.lineAt(style.from).text)).toEqual(['带有 $x$ 的正文。']);
     for(const text of ['$$\n尚未闭合','$$malformed'])expect(paragraphs(create(text))).toEqual([]);
+  });
+  it('keeps every source line of ordinary prose marked in the rendered view without altering source mode',()=>{
+    const text='中 English 123，第一行继续折行。\n第二行含 https://example.com/long-path。\n第三行。',state=create(text);
+    const classes=renderedLineClasses(state);
+    expect(classes.filter(item=>item.className.includes('cm-typography-prose')).map(item=>state.doc.lineAt(item.from).number)).toEqual([1,2,3]);
+    const source=state.update({effects:setDisplayMode.of('source')}).state;
+    expect(source.sliceDoc()).toBe(text);expect(source.field(markdownPreview).size).toBe(0);
+  });
+  it('only marks long tokens in prose, preserving code, math, explicit alignment and normal words',()=>{
+    const url='https://example.org/research/2026/notes?language=English',path='C:/SyntheticProject/chapters/chapter-001.md',word='SupercalifragilisticexpialidociousSupercalifragilisticexpialidocious';
+    const text=`普通 international ${url} ${path} ${word}\n\n\`${url}\`\n\n$$\n${word}\n$$\n\n- ${url}\n\n<div style="text-align: left;">\n\n${url}\n\n</div>`;
+    const state=create(text),plan=previewPlan(state),tokens=plan.styles.filter(style=>style.className?.includes('cm-typography-long-token'));
+    expect(tokens.map(item=>state.sliceDoc(item.from,item.to))).toEqual([url,path,word]);
+    expect(tokens[0].className).not.toContain('cm-typography-break-token');
+    expect(tokens.slice(1).every(item=>item.className?.includes('cm-typography-break-token'))).toBe(true);
+    expect(previewPlan(state.update({selection:{anchor:4}}).state)).toBe(plan);
+    expect(state.update({effects:setDisplayMode.of('source')}).state.field(markdownPreview).size).toBe(0);
+    expect(state.sliceDoc()).toBe(text);
+  });
+  it('allows long technical inline code to wrap without marking ordinary code words',()=>{
+    const path='markdownPresentation/formatting',text=`文字 \`${path}\` 与 \`international\`。`;
+    const state=create(text),tokens=previewPlan(state).styles.filter(style=>style.className==='cm-typography-code-break');
+    expect(tokens.map(item=>state.sliceDoc(item.from,item.to))).toEqual([path]);
+    expect(state.sliceDoc()).toBe(text);
   });
   it('switches display modes repeatedly without accumulating spacing, changing text or losing undo/selections',()=>{
     let state=create('第一段。\n\n第二段。');state=state.update({changes:{from:4,insert:'新增'},selection:EditorSelection.create([EditorSelection.range(1,3),EditorSelection.cursor(10)]),userEvent:'input.type'}).state;

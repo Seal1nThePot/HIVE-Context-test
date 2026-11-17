@@ -12,6 +12,11 @@ function sample():ViewPreset {
 }
 const encode=(view:ViewPreset)=>JSON.stringify({version:1,views:[view]});
 describe('saved views',()=>{
+  it('retains the repository management panel and its position lock in saved views',()=>{
+    const view=sample();view.layout.open.push('repositories');view.layout.rects.repositories=rect;view.layout.lockedPanels=['repositories'];
+    const saved=parseViewCollection(encode(view)).views[0];
+    expect(saved.layout.open).toContain('repositories');expect(saved.layout.lockedPanels).toEqual(['repositories']);
+  });
   it('accepts a trash panel in saved layouts with independent locks',()=>{
     const view=sample();view.layout.open.push('trash');view.layout.rects.trash=rect;view.layout.lockedPanels=['trash'];
     expect(parseViewCollection(encode(view)).views[0].layout.open).toContain('trash');
@@ -52,6 +57,7 @@ describe('saved views',()=>{
     const view=sample();expect(parseViewCollection(encode(view)).views[0].editors[0].displayMode).toBeUndefined();
     view.editors[0].displayMode='source';view.editors[0].typewriter=true;
     expect(parseViewCollection(encode(view)).views[0].editors[0]).toMatchObject({displayMode:'source',typewriter:true});
+    view.editors[0].displayMode='split';expect(parseViewCollection(encode(view)).views[0].editors[0].displayMode).toBe('split');
     view.editors[0].displayMode='unknown' as never;expect(()=>parseViewCollection(encode(view))).toThrow('格式无效');
   });
   it('preserves per-editor typewriter flags and supports legacy views without flags',()=>{

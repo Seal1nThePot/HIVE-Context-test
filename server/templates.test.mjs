@@ -9,9 +9,32 @@ import {templateStore,validateTemplateColors} from './templates.mjs';
 const sourceFixture=fileURLToPath(new URL('../templates/olive-gold',import.meta.url));
 let directory,temporary,bundled,store,fixture,initialRevision;
 beforeEach(async()=>{temporary=await fs.mkdtemp(path.join(os.tmpdir(),'hive-template-files-'));directory=path.join(temporary,'runtime');bundled=path.join(temporary,'bundled');await fs.cp(sourceFixture,path.join(bundled,'olive-gold'),{recursive:true});store=await templateStore(directory,bundled);fixture=JSON.parse(await fs.readFile(path.join(bundled,'olive-gold','colors.json'),'utf8'));initialRevision=(await store.read('olive-gold')).revision;});
-afterEach(async()=>{store?.close();if(temporary&&path.resolve(temporary).startsWith(path.resolve(os.tmpdir())+path.sep)&&path.basename(temporary).startsWith('hive-template-files-'))await fs.rm(temporary,{recursive:true,force:true});});
+afterEach(async()=>{await store?.close();if(temporary&&path.resolve(temporary).startsWith(path.resolve(os.tmpdir())+path.sep)&&path.basename(temporary).startsWith('hive-template-files-'))await fs.rm(temporary,{recursive:true,force:true});});
 
 describe('local template folders',()=>{
+  it('persists optional editor highlights on explicit save and reconstructs the saved baseline',async()=>{
+    const colors={...fixture,editorProfiles:{black:{selectionBackground:'#aabbcc66',selectionText:'#123456'},white:{annotationBackground:'#11223344'}}};
+    const saved=await store.save('olive-gold',{revision:initialRevision,colors});expect(saved.defaults.editorProfiles).toEqual(colors.editorProfiles);
+    await fs.unlink(path.join(directory,'olive-gold','colors.json'));expect((await store.read('olive-gold')).colors.editorProfiles).toEqual(colors.editorProfiles);
+    for(const profile of [{cursor:'#12345677'},{selectionBackground:'url(x)'}])expect(()=>validateTemplateColors({...colors,editorProfiles:{black:profile}})).toThrow('文本编辑页面颜色');
+  });
+  it('persists docking overrides and alpha in explicit saves and reconstructed baselines',async()=>{
+    const colors={...fixture,dockingProfiles:{black:{guideIcon:'#abcdef',guideBackground:'#12345655'},white:{railActiveBackground:'#65432177'}}};
+    const saved=await store.save('olive-gold',{revision:initialRevision,colors});expect(saved.defaults.dockingProfiles).toEqual(colors.dockingProfiles);
+    await fs.unlink(path.join(directory,'olive-gold','colors.json'));expect((await store.read('olive-gold')).colors.dockingProfiles).toEqual(colors.dockingProfiles);
+    await expect(store.save('olive-gold',{revision:saved.revision,colors:{...colors,dockingProfiles:{black:{guideIcon:'url(x)'}}}})).rejects.toMatchObject({status:400});
+  });
+  it('waits for an in-flight source write before close resolves',async()=>{
+    await store.close();const source=path.join(temporary,'source');await fs.cp(bundled,source,{recursive:true});store=await templateStore(directory,bundled,{sourceDirectory:source});
+    const target=path.join(directory,'olive-gold','colors.json'),rename=fs.rename.bind(fs);let signal,release;
+    const entered=new Promise(resolve=>{signal=resolve;}),gate=new Promise(resolve=>{release=resolve;});let blocked=false;
+    vi.spyOn(fs,'rename').mockImplementation(async(from,to)=>{if(to===target&&!blocked){blocked=true;signal();await gate;}return rename(from,to);});
+    await fs.writeFile(path.join(source,'olive-gold','colors.json'),JSON.stringify({...fixture,customBase:'#314159'}));
+    const syncing=store.syncSource();await entered;let closed=false;const closing=store.close();
+    try{expect(closing).toBeInstanceOf(Promise);closing.then(()=>{closed=true;});await Promise.resolve();expect(closed).toBe(false);}
+    finally{release();await syncing;await closing;vi.restoreAllMocks();}
+    expect(JSON.parse(await fs.readFile(target,'utf8')).customBase).toBe('#314159');expect(closed).toBe(true);
+  });
   it('seeds metadata without replacing an existing template or user palette',async()=>{
     const original=await store.read('olive-gold');expect(original.revision).toMatch(/^[a-f0-9]{64}$/);
     fixture.colors.accent='#bfb178';fixture.colorProfiles.black.accent='#bfb178';
@@ -60,14 +83,14 @@ describe('local template folders',()=>{
     await expect(windows.open('..')).rejects.toMatchObject({status:400});expect(launch).toHaveBeenCalledTimes(1);
   });
   it('imports new source folders automatically and preserves user colors on the first link',async()=>{
-    const local={...fixture,customBase:'#334455'};await store.save('olive-gold',{revision:initialRevision,colors:local});store.close();
+    const local={...fixture,customBase:'#334455'};await store.save('olive-gold',{revision:initialRevision,colors:local});await store.close();
     const source=path.join(temporary,'source');await fs.cp(bundled,source,{recursive:true});store=await templateStore(directory,bundled,{sourceDirectory:source});
     expect((await store.read('olive-gold')).colors.customBase).toBe('#334455');
     const added=path.join(source,'new-theme');await fs.mkdir(added);await fs.writeFile(path.join(added,'template.json'),JSON.stringify({version:1,id:'new-theme',name:'新增源模板',description:'自动导入',bases:['white'],colorsFile:'colors.json'}));await fs.writeFile(path.join(added,'colors.json'),JSON.stringify(fixture));
     await store.syncSource();expect((await store.list()).templates.some(item=>item.id==='new-theme')).toBe(true);expect(JSON.parse(await fs.readFile(path.join(directory,'new-theme','colors.json'),'utf8')).version).toBe(1);
   });
   it('watches valid source updates, backs up local colors, and survives partial JSON writes',async()=>{
-    await store.save('olive-gold',{revision:initialRevision,colors:{...fixture,customBase:'#334455'}});store.close();
+    await store.save('olive-gold',{revision:initialRevision,colors:{...fixture,customBase:'#334455'}});await store.close();
     const source=path.join(temporary,'source');await fs.cp(bundled,source,{recursive:true});store=await templateStore(directory,bundled,{sourceDirectory:source});
     const sourceFile=path.join(source,'olive-gold','colors.json'),runtimeFile=path.join(directory,'olive-gold','colors.json');
     await fs.writeFile(sourceFile,'{"version":');await store.syncSource();expect((await store.read('olive-gold')).colors.customBase).toBe('#334455');expect((await store.list()).warnings.some(value=>value.includes('保留上一份'))).toBe(true);
@@ -76,12 +99,12 @@ describe('local template folders',()=>{
     expect(JSON.parse(await fs.readFile(path.join(directory,'olive-gold','colors.before-source.json'),'utf8')).customBase).toBe('#334455');
   });
   it('retains the source baseline across restarts without replacing later local edits',async()=>{
-    const source=path.join(temporary,'source');await fs.cp(bundled,source,{recursive:true});store.close();store=await templateStore(directory,bundled,{sourceDirectory:source});
-    const initial=await store.read('olive-gold');const saved=await store.save('olive-gold',{revision:initial.revision,colors:{...fixture,customBase:'#123456'}});store.close();
+    const source=path.join(temporary,'source');await fs.cp(bundled,source,{recursive:true});await store.close();store=await templateStore(directory,bundled,{sourceDirectory:source});
+    const initial=await store.read('olive-gold');const saved=await store.save('olive-gold',{revision:initial.revision,colors:{...fixture,customBase:'#123456'}});await store.close();
     store=await templateStore(directory,bundled,{sourceDirectory:source});expect((await store.read('olive-gold')).revision).toBe(saved.revision);expect((await store.read('olive-gold')).colors.customBase).toBe('#123456');
   });
   it('applies only changed source values and retains unrelated black customization',async()=>{
-    const local=structuredClone(fixture);local.colorProfiles.black.accent='#bfb178';local.colors.accent='#bfb178';local.writingDockProfiles.black.aiButton.icon='#27301f';local.writingDock.aiButton.icon='#27301f';await store.save('olive-gold',{revision:initialRevision,colors:local});store.close();
+    const local=structuredClone(fixture);local.colorProfiles.black.accent='#bfb178';local.colors.accent='#bfb178';local.writingDockProfiles.black.aiButton.icon='#27301f';local.writingDock.aiButton.icon='#27301f';await store.save('olive-gold',{revision:initialRevision,colors:local});await store.close();
     const source=path.join(temporary,'source');await fs.cp(bundled,source,{recursive:true});store=await templateStore(directory,bundled,{sourceDirectory:source});
     const update=structuredClone(fixture);update.surfaceColors.gray.document='#faf9f3';await fs.writeFile(path.join(source,'olive-gold','colors.json'),JSON.stringify(update));await store.syncSource();
     const result=(await store.read('olive-gold')).colors;expect(result.surfaceColors.gray.document).toBe('#faf9f3');expect(result.colorProfiles.black.accent).toBe('#bfb178');expect(result.writingDockProfiles.black.aiButton.icon).toBe('#27301f');
@@ -89,6 +112,6 @@ describe('local template folders',()=>{
   it('reconstructs a missing generated file from its durable authored baseline',async()=>{
     const authored=structuredClone(fixture);authored.surfaceColors.black.document='#293847';const saved=await store.save('olive-gold',{revision:initialRevision,colors:authored});
     expect(saved.defaults.surfaceColors.black.document).toBe('#293847');expect(JSON.parse(await fs.readFile(path.join(directory,'olive-gold','colors.before-save.json'),'utf8')).surfaceColors.black.document).toBe(fixture.surfaceColors.black.document);
-    await fs.unlink(path.join(directory,'olive-gold','colors.json'));store.close();store=await templateStore(directory,path.join(temporary,'missing-bundle'));const restored=await store.read('olive-gold');expect(restored.colors.surfaceColors.black.document).toBe('#293847');expect(restored.defaults.surfaceColors.black.document).toBe('#293847');
+    await fs.unlink(path.join(directory,'olive-gold','colors.json'));await store.close();store=await templateStore(directory,path.join(temporary,'missing-bundle'));const restored=await store.read('olive-gold');expect(restored.colors.surfaceColors.black.document).toBe('#293847');expect(restored.defaults.surfaceColors.black.document).toBe('#293847');
   });
 });
