@@ -1,5 +1,3 @@
-import {readFileSync} from 'node:fs';
-import {resolve} from 'node:path';
 import {describe,it,expect,vi} from 'vitest';
 import {EditorState} from '@codemirror/state';
 import {history,undo} from '@codemirror/commands';
@@ -73,12 +71,24 @@ describe('dollar math recognition and live source boundaries',()=>{
     state.field(markdownPreview).between(item.from,item.to,(from,to,decoration)=>{if(to>from&&decoration.spec.widget)replaced=true;if(from===to&&decoration.spec.widget)notice=true;});
     expect(replaced).toBe(false);expect(notice).toBe(true);expect(state.doc.toString()).toContain(source);
   });
-  it('recognizes the acceptance fixtures and performs no rendering during 31,908-formula state creation',()=>{
+  it('recognizes generated inputs and performs no rendering during 31,908-formula state creation',()=>{
     const request=vi.spyOn(mathRenderer,'request');
     try{
-      const basic=create(readFileSync(resolve('performance/math-fixtures/01-公式功能验收.md'),'utf8'));
+      const basic=create([
+        '行内 $E=mc^2$。行内分式 $\\frac{a+b}{c}$。',
+        '$$\n\\sum_{i=1}^{n} i^2 = \\frac{n(n+1)(2n+1)}{6}\n$$',
+        '$$\\int_0^1 x^2\\,dx = \\frac{1}{3}$$',
+        '$$\n\\begin{pmatrix}a & b \\\\ c & d\\end{pmatrix}\n$$',
+      ].join('\n\n'));
       expect(formulas(basic)).toHaveLength(5);
-      const dense=create(readFileSync(resolve('performance/math-fixtures/02-密集独立公式.md'),'utf8'));
+      const denseText='# 密集独立数学公式\n\n每组数值各异，用于区分重复公式缓存和持续滚动负载。\n\n'+
+        Array.from({length:15954},(_,index)=>{
+          const n=index+1;
+          return '第 '+String(n).padStart(6,'0')+' 组，行内 $x_{'+n+'}^2 + '+n+' = y_{'+n+'}$。\n\n$$\n'+
+            '\\sum_{k=1}^{'+n+'} k = \\frac{'+n+'('+n+'+1)}{2}\n$$\n\n';
+        }).join('');
+      expect(new TextEncoder().encode(denseText).length).toBeGreaterThan(1_800_000);
+      const dense=create(denseText);
       expect(formulas(dense)).toHaveLength(31908);expect(formulas(dense).filter(item=>item.block)).toHaveLength(15954);
       expect(formulas(dense).every(item=>item.text===undefined&&item.src===undefined)).toBe(true);
       expect(request).not.toHaveBeenCalled();

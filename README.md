@@ -34,7 +34,7 @@ npm run desktop
 
 `desktop` 会先构建客户端，再启动 Electron。需要生成 Windows 便携程序时运行 `npm run desktop:portable`；依赖、构建产物和运行数据不提交到源码仓库。原型浏览器版自 0.1.1 起冻结，后续以桌面软件为维护入口。
 
-后台标签短暂隐藏后释放编辑界面，返回时保留本次运行中的正文、滚动和撤销记录；重复打开未变化的同文件保留原编辑状态，旧读取结果不覆盖后来编辑。版本维护记录见 [docs/record/版本维护记录.md](docs/record/版本维护记录.md)，代码原因、内存对照及验收边界见 [docs/performance-0.1.2.md](docs/performance-0.1.2.md)。本机专用的性能验证入口使用独立用户目录；完整极限集通过 [生成说明](performance/README.md) 在本地重建，仓库仅保留自动化测试必需的公式样例。
+后台标签短暂隐藏后释放编辑界面，返回时保留本次运行中的正文、滚动和撤销记录；重复打开未变化的同文件保留原编辑状态，旧读取结果不覆盖后来编辑。版本维护记录见 [docs/record/版本维护记录.md](docs/record/版本维护记录.md)，代码原因、内存对照及验收边界见 [docs/performance-0.1.2.md](docs/performance-0.1.2.md)。本机专用的性能验证入口使用独立用户目录；`performance/` 及其测试件、脚本和原始采样仅保留在本地。自动化公式压力用例在测试内生成，不依赖该目录。
 
 Windows 桌面版名称为 **HIVE markdown editor**。打包后可使用相应版本的 `release/HIVE markdown editor <版本>.exe`，或通过 **启动Windows版.cmd** 打开程序文件夹版。普通打包程序的文稿和设置仍在 `%APPDATA%\HIVE`；可在「我的写作空间」中选择自己的文档文件夹。
 
