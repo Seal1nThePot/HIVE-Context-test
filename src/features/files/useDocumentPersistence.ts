@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { minimalReplacement } from '../../shared/core';
+import {mapStoredSessionContext} from '../editor/storedDocumentChanges';
 import type { ApiClient } from '../../shared/api';
 import type { DiskFile } from '../../shared/fileTypes';
 import type { EditorSession } from '../editor/editorSessionTypes';
 import type { Entry } from './explorerState';
 import type { WorkspaceInfo } from './WorkspaceContext';
 import { diskSyncDecision } from './fileSync';
+import {documentMatchesText} from '../editor/documentText';
+import {beginFileActivity} from './fileOperations';
+import type {Transaction} from '@codemirror/state';
 type PersistenceOptions = {
     api: ApiClient;
     sessions: RefObject<Map<string, EditorSession>>;
@@ -22,8 +26,10 @@ type PersistenceOptions = {
     setError: (message: string) => void;
     inform: (message: string) => void;
     redraw: () => void;
+    appAlive?:RefObject<boolean>;
+    onStoredChange?:(id:string,transaction:Transaction)=>void;
 };
-export function useDocumentPersistence({ api, sessions, activeSession, disk, switching, structuring, fileBusy, tick, autoSave, setDirty, setFileBusy, setEntries, setError, inform, redraw }: PersistenceOptions) {
+export function useDocumentPersistence({ api, sessions, activeSession, disk, switching, structuring, fileBusy, tick, autoSave, setDirty, setFileBusy, setEntries, setError, inform, redraw,appAlive,onStoredChange }: PersistenceOptions) {
     const savingPaths = useRef(new Set<string>()), syncRunning = useRef(false);
     const [fileConflicts, setFileConflicts] = useState<Record<string, string>>({});
     const conflicts = useRef<Record<string, string>>({});
@@ -38,29 +44,36 @@ export function useDocumentPersistence({ api, sessions, activeSession, disk, swi
         if (savingPaths.current.has(source.path))
             return false;
         const snapshot = state.doc.toString();
+        const owners=new Map([...sessions.current.values()].filter(other=>other.disk?.path===source.path).map(other=>[other.id,{session:other,disk:other.disk}]));
         savingPaths.current.add(source.path);
-        if (!quiet)
-            setFileBusy(true);
+        const release=quiet?()=>{}:beginFileActivity(sessions,value=>{if(appAlive?.current!==false)setFileBusy(value);});
         try {
             const result = await api<{
                 hash: string;
             }>("/file", { path: source.path, text: snapshot, baseline: source.hash, eol: source.eol, bom: source.bom });
+            if(appAlive?.current===false)return true;
+            let adopted=false;
             for (const other of sessions.current.values()) {
                 if (other.disk?.path !== source.path)
                     continue;
+                const owner=owners.get(other.id);
+                if(owner?(owner.session!==other||owner.disk!==other.disk):(other.disk.hash!==source.hash||other.disk.text!==source.text))continue;
+                adopted=true;
                 other.disk = { ...source, text: snapshot, hash: result.hash };
-                other.dirty = (other.view?.state || other.state)?.doc.toString() !== snapshot;
+                other.dirty = !(other.view?.state || other.state)?.doc.eq(state.doc);
             }
             const current = sessions.current.get(activeSession.current)!;
-            disk.current = current.disk;
-            setDirty(current.dirty);
-            setConflict(source.path, '');
+            if(current){disk.current = current.disk;setDirty(current.dirty);}
+            if(adopted)setConflict(source.path, '');
             redraw();
             if (!quiet)
                 inform('已保存到本机。');
             return true;
         }
         catch (error) {
+            if(appAlive?.current===false)return false;
+            const relevant=[...owners.values()].some(owner=>sessions.current.get(owner.session.id)===owner.session&&owner.session.disk===owner.disk);
+            if(!relevant)return false;
             setConflict(source.path, (error as Error).message);
             if (!quiet)
                 setError((error as Error).message);
@@ -68,33 +81,37 @@ export function useDocumentPersistence({ api, sessions, activeSession, disk, swi
         }
         finally {
             savingPaths.current.delete(source.path);
-            if (!quiet)
-                setFileBusy(false);
+            release();
         }
     }
     function applyDiskFile(data: DiskFile) {
+        if(appAlive?.current===false)return;
+        const changesByDocument=new Map<NonNullable<EditorSession['state']>['doc'],{from:number;to:number;insert:string}>();
         for (const session of sessions.current.values()) {
             if (session.disk?.path !== data.path)
                 continue;
             const state = session.view?.state || session.state;
             if (!state)
                 continue;
-            const before = state.doc.toString();
+            const unchanged=documentMatchesText(state.doc,data.text);
             session.disk = { ...data };
             session.dirty = false;
             if (session.id === activeSession.current)
                 disk.current = session.disk;
-            if (before !== data.text) {
-                const change = minimalReplacement({ from: 0, to: before.length, original: before, file: data.path, stale: false }, data.text);
-                const changes = { from: change.from, to: change.to, insert: change.text };
+            if (!unchanged) {
+                let changes=changesByDocument.get(state.doc);
+                if(!changes){
+                    const before=state.doc.toString();
+                    const change = minimalReplacement({ from: 0, to: before.length, original: before, file: data.path, stale: false }, data.text);
+                    changes={from:change.from,to:change.to,insert:change.text};changesByDocument.set(state.doc,changes);
+                }
                 if (session.view)
                     session.view.dispatch({ changes, userEvent: 'input.disk-sync' });
                 else {
-                    session.state = state.update({ changes }).state;
-                    if (session.context) {
-                        session.context.proposal = null;
-                        session.context.undo = [];
-                    }
+                    const transaction=state.update({changes});session.state=transaction.state;
+                    session.contentVersion=(session.contentVersion||0)+1;
+                    mapStoredSessionContext(session.context,transaction);
+                    onStoredChange?.(session.id,transaction);
                 }
             }
         }
@@ -112,14 +129,21 @@ export function useDocumentPersistence({ api, sessions, activeSession, disk, swi
         try {
             const paths = [...new Set([...sessions.current.values()].flatMap(session => session.disk ? [session.disk.path] : []))];
             const baselines = new Map([...sessions.current.values()].filter(session => session.disk).map(session => [session.disk!.path, session.disk!.hash]));
+            const knownBaselines = Object.fromEntries([...baselines].filter(([path, hash]) =>
+                [...sessions.current.values()].every(session => session.disk?.path !== path || session.disk.hash === hash)));
             const data = await api<{
                 entries: Entry[];
                 workspace: WorkspaceInfo;
                 files: (DiskFile | {
                     path: string;
                     error: string;
+                } | {
+                    path: string;
+                    hash: string;
+                    unchanged: true;
                 })[];
-            }>('/workspace/sync', { paths });
+            }>('/workspace/sync', { paths, baselines: knownBaselines });
+            if(appAlive?.current===false)return;
             setEntries(previous => JSON.stringify(previous) === JSON.stringify(data.entries) ? previous : data.entries);
             for (const remote of data.files) {
                 if (savingPaths.current.has(remote.path))
@@ -132,7 +156,9 @@ export function useDocumentPersistence({ api, sessions, activeSession, disk, swi
                         setConflict(remote.path, remote.error + ' 本地内容仍保留，可另存副本。');
                     continue;
                 }
-                const decision = diskSyncDecision(matching.map(session => ({ baseline: session.disk!, text: (session.view?.state || session.state)?.doc.toString() || '' })), remote);
+                if ('unchanged' in remote)
+                    continue;
+                const decision = diskSyncDecision(matching.map(session => ({ baseline: session.disk!, text: (session.view?.state || session.state)?.doc || '' })), remote);
                 if (decision === 'unchanged')
                     continue;
                 if (decision === 'conflict') {
@@ -143,7 +169,7 @@ export function useDocumentPersistence({ api, sessions, activeSession, disk, swi
             }
         }
         catch (error) {
-            setError((error as Error).message);
+            if(appAlive?.current!==false)setError((error as Error).message);
         }
         finally {
             syncRunning.current = false;

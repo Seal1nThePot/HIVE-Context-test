@@ -92,16 +92,19 @@ export function fileStore(root, state) {
     if(times && changed.value)await times.write(data);
     return result;
   }
-  async function read(relative) {
+  async function read(relative, knownHash) {
     const target = await resolve(relative);
     const stat = await fs.stat(target);
     if (stat.size > 2_000_000)
       throw fail("原型支持 2 MB 以内的 Markdown 文件。");
     const raw = await fs.readFile(target, "utf8");
+    const currentHash = hash(raw);
+    if (typeof knownHash === "string" && currentHash === knownHash)
+      return { path: relative, hash: currentHash, unchanged: true };
     return {
       path: relative,
       text: raw.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n"),
-      hash: hash(raw),
+      hash: currentHash,
       eol: raw.includes("\r\n") ? "CRLF" : "LF",
       bom: raw.startsWith("\uFEFF"),
     };

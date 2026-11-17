@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { EditorState, EditorSelection } from "@codemirror/state";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {usePanelDocument} from '../../shared/panelDocument';
+import { EditorState, EditorSelection,type Text } from "@codemirror/state";
 import EditorContextMenu, {type AnnotationContext} from './EditorContextMenu';
 import {useAnnotationTool} from '../annotations/useAnnotationTool';
 import {
@@ -18,7 +19,7 @@ import {
 import { searchKeymap, highlightSelectionMatches,getSearchQuery,findNext,findPrevious } from "@codemirror/search";
 import {floatingSearchExtensions,configureFloatingSearch} from './searchTools';
 import {useFileWorkspace} from '../files/WorkspaceContext';
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { markdown } from "@codemirror/lang-markdown";
 import {
   HighlightStyle,
   syntaxHighlighting,
@@ -26,10 +27,12 @@ import {
 } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import { annotationHighlights } from "../annotations/annotationDecorations";
-import {configureMarkdownDisplay,configureImageContext,markdownDisplayExtensions,type DisplayMode} from './markdownDisplay';
-import {GFM} from '@lezer/markdown';
+import {configureMarkdownDisplay,configureImageContext,markdownDisplayExtensions,displayModeField,setDisplayMode,type DisplayMode} from './markdownDisplay';
+import {sourceMarkdownLanguage} from './sourceSyntax';
 import {inlineFormatting,paragraphAlignment,type Alignment,type InlineFormat} from './formatting';
 import {configureTypewriter,typewriterExtensions} from './typewriter';
+import {usePanelActivity} from '../../shared/panelActivity';
+import {deferredEditorSleep} from './editorSleep';
 
 const colors = HighlightStyle.define([
   {
@@ -51,16 +54,18 @@ const colors = HighlightStyle.define([
   { tag: tags.quote, color: "#92998d" },
 ]);
 export function makeState(
-  doc: string,
+  doc: string|Text,
   onUpdate: (u: ViewUpdate) => void,
   label = "Markdown 正文编辑器",
+  displayMode:DisplayMode='live',
 ) {
   return EditorState.create({
     doc,
     extensions: [
-      markdown({ base: markdownLanguage, extensions:GFM }),
+      markdown({ base: sourceMarkdownLanguage }),
       annotationHighlights,
       markdownDisplayExtensions,
+      displayModeField.init(()=>displayMode),
       floatingSearchExtensions,
       typewriterExtensions,
       EditorState.allowMultipleSelections.of(true),
@@ -153,6 +158,8 @@ export default function Editor({
   typewriter=false,
   displayMode='live',
   annotationTool=false,
+  initialState=null,
+  keepAlive=false,
 }: {
   onReady: (v: EditorView | null) => void;
   onUpdate: (u: ViewUpdate) => void;
@@ -167,17 +174,44 @@ export default function Editor({
   typewriter?:boolean;
   displayMode?:DisplayMode;
   annotationTool?:boolean;
+  initialState?:EditorState|null;
+  keepAlive?:boolean;
 }) {
   const fileWorkspace=useFileWorkspace();
+  const panelDocument=usePanelDocument();
   const host = useRef<HTMLDivElement>(null),
     callback = useRef(onUpdate);
   const editorRef=useRef<EditorView|null>(null),rightSelection=useRef<{selection:EditorSelection;doc:EditorState['doc']}|null>(null);
+  const visible=usePanelActivity(),[retained,setRetained]=useState(visible),awake=visible||keepAlive||retained;
+  const initial=useRef(initialState);initial.current=initialState;
+  const nativeComposition=useRef(false),gestures=useRef(new Set<number>());
+  const sleep=useRef<ReturnType<typeof deferredEditorSleep>|null>(null);
+  useEffect(()=>{
+    const controller=deferredEditorSleep({set:(callback,delay)=>setTimeout(callback,delay),clear:id=>clearTimeout(id as ReturnType<typeof setTimeout>)},()=>setRetained(false),()=>nativeComposition.current||gestures.current.size>0||!!editorRef.current?.composing);
+    sleep.current=controller;controller.visible(visible||keepAlive);
+    return()=>{controller.dispose();sleep.current=null;};
+  },[]);
+  useLayoutEffect(()=>{if(visible||keepAlive)setRetained(true);sleep.current?.visible(visible||keepAlive);},[visible,keepAlive]);
+  useEffect(()=>{
+    const element=host.current;if(!element||!awake)return;
+    const start=()=>{nativeComposition.current=true;},end=()=>{nativeComposition.current=false;sleep.current?.released();};
+    const down=(event:PointerEvent)=>{gestures.current.add(event.pointerId);};
+    const up=(event:PointerEvent)=>{gestures.current.delete(event.pointerId);sleep.current?.released();};
+    const blur=()=>{gestures.current.clear();sleep.current?.released();};
+    const window=panelDocument.defaultView!;
+    element.addEventListener('compositionstart',start,true);element.addEventListener('compositionend',end,true);element.addEventListener('pointerdown',down,true);
+    window.addEventListener('pointerup',up,true);window.addEventListener('pointercancel',up,true);window.addEventListener('blur',blur);
+    return()=>{element.removeEventListener('compositionstart',start,true);element.removeEventListener('compositionend',end,true);element.removeEventListener('pointerdown',down,true);window.removeEventListener('pointerup',up,true);window.removeEventListener('pointercancel',up,true);window.removeEventListener('blur',blur);};
+  },[panelDocument,awake]);
   const [context,setContext]=useState<{x:number;y:number;annotationId?:string;input?:HTMLTextAreaElement}|null>(null);
   callback.current = onUpdate;
-  useAnnotationTool(editorRef,annotationTool,onMarkSelection);
-  useEffect(() => {
+  useAnnotationTool(editorRef,annotationTool&&awake,onMarkSelection);
+  useLayoutEffect(() => {
+    if(!awake)return;
+    let restored=initial.current||makeState("", (u) => callback.current(u),undefined,displayMode);
+    if(restored.field(displayModeField,false)!==displayMode)restored=restored.update({effects:setDisplayMode.of(displayMode)}).state;
     const view = new EditorView({
-      state: makeState("", (u) => callback.current(u)),
+      state: restored,
       parent: host.current!,
     });
     editorRef.current=view;
@@ -188,8 +222,10 @@ export default function Editor({
       onReady(null);
       editorRef.current=null;
       view.destroy();
+      rightSelection.current=null;setContext(null);
     };
-  }, [onReady]);
+  }, [onReady,awake]);
+  useEffect(()=>{const view=editorRef.current;if(!view)return;view.setRoot(panelDocument);view.requestMeasure();view.dom.dispatchEvent(new Event('hive:panel-document-changed'));setContext(null);},[panelDocument,onReady,awake]);
   useEffect(()=>{
     const view=editorRef.current;if(!view)return;
     const handler=(event:Event)=>{const detail=(event as CustomEvent<{ranges:{from:number;to:number}[];action:'mark'|'unmark'}>).detail;
@@ -200,13 +236,13 @@ export default function Editor({
       if(detail.action==='mark')onMarkSelection?.();else if(detail.action==='unmark')onUnmarkSelection?.();
     };
     view.dom.addEventListener('hive:table-annotation',handler);return()=>view.dom.removeEventListener('hive:table-annotation',handler);
-  },[onMarkSelection,onUnmarkSelection]);
+  },[onMarkSelection,onUnmarkSelection,awake]);
   useEffect(()=>{if(editorRef.current){configureMarkdownDisplay(editorRef.current,displayMode);configureTypewriter(editorRef.current,typewriter);configureFloatingSearch(editorRef.current,searchActive);configureImageContext(editorRef.current,documentFile?{file:documentFile,workspace:fileWorkspace.info.id}:null);}});
   return <><div className={'editor-host'+(annotationTool?' annotation-tool-active':'')} ref={host} onFocusCapture={onFocus}
     onPointerDownCapture={event=>{const editor=editorRef.current;if(event.button===2&&editor)rightSelection.current={selection:editor.state.selection,doc:editor.state.doc};}}
     onContextMenu={event=>{
       const editor=editorRef.current;if(!onMarkSelection||!editor)return;
-      event.preventDefault();event.stopPropagation();const target=event.target as HTMLElement,input=target instanceof HTMLTextAreaElement&&target.closest('[data-table-widget]')?target:undefined;const snapshot=rightSelection.current;rightSelection.current=null;
+      event.preventDefault();event.stopPropagation();const target=event.target as HTMLElement,input=target.tagName==='TEXTAREA'&&target.closest('[data-table-widget]')?target as HTMLTextAreaElement:undefined;const snapshot=rightSelection.current;rightSelection.current=null;
       if(!input&&snapshot&&snapshot.selection.ranges.some(range=>!range.empty)&&snapshot.doc===editor.state.doc)editor.dispatch({selection:snapshot.selection});
       setContext({x:event.clientX,y:event.clientY,input,annotationId:input?undefined:(event.target as Element).closest<HTMLElement>('[data-annotation-id]')?.dataset.annotationId});
     }}
@@ -229,7 +265,7 @@ export default function Editor({
       if(!onMarkSelection||!(event.key==='ContextMenu'||event.shiftKey&&event.key==='F10'))return;
       const editor=editorRef.current;if(!editor)return;event.preventDefault();event.stopPropagation();
       const point=editor.coordsAtPos(editor.state.selection.main.head),rect=editor.dom.getBoundingClientRect();
-      const target=event.target as HTMLElement,input=target instanceof HTMLTextAreaElement&&target.closest('[data-table-widget]')?target:undefined;const inputRect=input?.getBoundingClientRect();setContext({x:inputRect?.left??point?.left??rect.left+12,y:inputRect?.bottom??point?.bottom??rect.top+20,input});
+      const target=event.target as HTMLElement,input=target.tagName==='TEXTAREA'&&target.closest('[data-table-widget]')?target as HTMLTextAreaElement:undefined;const inputRect=input?.getBoundingClientRect();setContext({x:inputRect?.left??point?.left??rect.left+12,y:inputRect?.bottom??point?.bottom??rect.top+20,input});
     }}/>
-    {context&&editorRef.current&&onMarkSelection&&<EditorContextMenu editor={editorRef.current} point={context} input={context.input} onClose={()=>setContext(null)} onMark={onMarkSelection} onUnmark={onUnmarkSelection} annotationId={context.annotationId} onShowAnnotations={onShowAnnotations} onError={onError}/>}</>;
+    {awake&&context&&editorRef.current&&onMarkSelection&&<EditorContextMenu editor={editorRef.current} point={context} input={context.input} onClose={()=>setContext(null)} onMark={onMarkSelection} onUnmark={onUnmarkSelection} annotationId={context.annotationId} onShowAnnotations={onShowAnnotations} onError={onError}/>}</>;
 }

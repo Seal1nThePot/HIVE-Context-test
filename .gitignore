@@ -7,4 +7,25 @@ dist/
 # 个人写作与本地快照，不随仓库发布
 documents/
 *.zip
-reference/
+
+# 本机发布、运行与压测产物；performance 仅允许显式列出的报告/脚本
+release/
+.publish/
+.env
+.env.*
+!.env.example
+*.log
+__pycache__/
+*.pyc
+performance/*
+!performance/README.md
+!performance/scripts/
+performance/scripts/*
+!performance/scripts/generate.py
+!performance/make_math_fixtures.py
+!performance/math-fixtures/
+performance/math-fixtures/*
+!performance/math-fixtures/01-公式功能验收.md
+!performance/math-fixtures/02-密集独立公式.md
+!performance/math-fixtures/03-异常和超限公式.md
+!performance/math-fixtures/manifest.json

@@ -25,6 +25,28 @@ describe('generation transport',()=>{
   it('surfaces a streamed provider error',async()=>{
     await expect(streamModelText(vi.fn<typeof fetch>().mockResolvedValue(sse('event: error\ndata: "额度不足"\n\n')),options(),()=>{})).rejects.toThrow('额度不足');
   });
+  it.each([
+    ['provider error','event: error\ndata: "额度不足"\n\n','额度不足'],
+    ['invalid JSON','event: chunk\ndata: invalid\n\n',undefined],
+    ['consumer error','event: chunk\ndata: "正文"\n\n','consumer failed'],
+  ])('cancels an open response and releases its reader after %s',async(label,text,message)=>{
+    const cancel=vi.fn(),body=new ReadableStream<Uint8Array>({start(controller){controller.enqueue(new TextEncoder().encode(text!));},cancel});
+    const pending=streamModelText(vi.fn<typeof fetch>().mockResolvedValue(new Response(body)),options(),()=>{if(label==='consumer error')throw new Error('consumer failed');});
+    if(message)await expect(pending).rejects.toThrow(message);else await expect(pending).rejects.toThrow();
+    expect(cancel).toHaveBeenCalledOnce();expect(body.locked).toBe(false);
+  });
+  it('cancels a pending read on abort and detaches its abort listener',async()=>{
+    const controller=new AbortController(),cancel=vi.fn(),body=new ReadableStream<Uint8Array>({cancel}),remove=vi.spyOn(controller.signal,'removeEventListener');
+    const pending=streamModelText(vi.fn<typeof fetch>().mockResolvedValue(new Response(body)),{...options(),signal:controller.signal},()=>{});
+    const checked=expect(pending).rejects.toMatchObject({name:'AbortError'});
+    await Promise.resolve();controller.abort();await checked;
+    expect(cancel).toHaveBeenCalledOnce();expect(body.locked).toBe(false);expect(remove).toHaveBeenCalledWith('abort',expect.any(Function));
+  });
+  it('releases a completed reader without cancelling a successful response',async()=>{
+    const response=sse('event: chunk\ndata: "正文"\n\nevent: done\ndata: null\n\n');
+    expect(await streamModelText(vi.fn<typeof fetch>().mockResolvedValue(response),options(),()=>{})).toBe('正文');
+    expect(response.body!.locked).toBe(false);
+  });
   it('surfaces an HTTP error before reading any stream',async()=>{
     await expect(streamModelText(vi.fn<typeof fetch>().mockResolvedValue(Response.json({error:'连接失败'},{status:502})),options(),()=>{})).rejects.toThrow('连接失败');
   });
@@ -35,5 +57,12 @@ describe('generation transport',()=>{
   it('cancels a pending demo response through the original abort signal',async()=>{
     vi.useFakeTimers();const controller=new AbortController(),pending=generateDemoText({requestMode:'continue',requestLimit:100,node:'位置',target:'',userPrompt:'继续',signal:controller.signal});
     const checked=expect(pending).rejects.toMatchObject({name:'AbortError'});controller.abort();await checked;expect(vi.getTimerCount()).toBe(0);
+  });
+  it('removes the demo abort listener after completion and rejects an already stopped request',async()=>{
+    vi.useFakeTimers();const controller=new AbortController(),add=vi.spyOn(controller.signal,'addEventListener'),remove=vi.spyOn(controller.signal,'removeEventListener');
+    const input={requestMode:'discuss' as const,requestLimit:100,node:'位置',target:'',userPrompt:'讨论',signal:controller.signal};
+    const pending=generateDemoText(input);await vi.advanceTimersByTimeAsync(750);await pending;
+    expect(remove).toHaveBeenCalledWith('abort',add.mock.calls[0][1]);expect(vi.getTimerCount()).toBe(0);
+    controller.abort();await expect(generateDemoText(input)).rejects.toMatchObject({name:'AbortError'});expect(vi.getTimerCount()).toBe(0);
   });
 });

@@ -9,6 +9,7 @@ const propertyTypes:{id:PropertyType;label:string;Icon:typeof AlignLeft}[]=[{id:
 const commonProperties=[{key:'aliases',Icon:CornerUpRight},{key:'cssclasses',Icon:List},{key:'tags',Icon:Tags}];
 
 export default function NotePropertiesDialog({target,onClose,onApplied}:{target:InsertTarget;onClose:()=>void;onApplied:()=>void}){
+  const document=target.editor.dom.ownerDocument,window=document.defaultView!;
   const dialog=useRef<HTMLDialogElement>(null),snapshot=useRef(target.editor.state.doc),counter=useRef(0);
   const [initial]=useState(()=>{try{return {rows:readNoteProperties(snapshot.current.toString()),error:''};}catch(error){return {rows:[],error:(error as Error).message};}});
   const [rows,setRows]=useState<NoteProperty[]>(()=>initial.rows.length?initial.rows:[{id:'new:initial',key:'',type:'text',value:''}]),[error,setError]=useState('');
@@ -19,13 +20,13 @@ export default function NotePropertiesDialog({target,onClose,onApplied}:{target:
     const button=dialog.current?.querySelector<HTMLButtonElement>('.property-type[aria-expanded=true]'),menu=typeMenuRef.current;
     if(!button||!menu)return;
     const rect=button.getBoundingClientRect(),height=menu.offsetHeight,width=menu.offsetWidth;
-    setTypePosition({left:Math.max(8,Math.min(innerWidth-width-8,rect.left)),top:rect.bottom+height+5<=innerHeight-8?rect.bottom+5:Math.max(8,rect.top-height-5)});
+    setTypePosition({left:Math.max(8,Math.min(window.innerWidth-width-8,rect.left)),top:rect.bottom+height+5<=window.innerHeight-8?rect.bottom+5:Math.max(8,rect.top-height-5)});
     menu.querySelector<HTMLButtonElement>('[aria-checked=true]')?.focus();
-  },[typeMenu]);
-  useEffect(()=>{const close=()=>setTypeMenu(null);window.addEventListener('resize',close);return()=>window.removeEventListener('resize',close);},[]);
-  useEffect(()=>{const previous=document.activeElement as HTMLElement|null;dialog.current?.showModal();dialog.current?.querySelector<HTMLInputElement>('[role="combobox"]')?.focus();return()=>{dialog.current?.close();if(previous?.isConnected)previous.focus({preventScroll:true});};},[]);
+  },[typeMenu,document,window]);
+  useEffect(()=>{const close=()=>setTypeMenu(null);window.addEventListener('resize',close);return()=>window.removeEventListener('resize',close);},[window]);
+  useEffect(()=>{const previous=document.activeElement as HTMLElement|null,element=dialog.current;element?.showModal();dialog.current?.querySelector<HTMLInputElement>('[role="combobox"]')?.focus();return()=>{element?.close();if(previous?.isConnected)previous.focus({preventScroll:true});};},[document]);
   function change(id:string,update:Partial<NoteProperty>){setRows(old=>old.map(row=>row.id===id?{...row,...update}:row));setError('');}
-  function chooseName(row:NoteProperty,key:string,index:number){change(row.id,{key,...(!row.value&&row.type==='text'?{type:'list'}:{})});setSuggestion(null);requestAnimationFrame(()=>dialog.current?.querySelector<HTMLElement>(`[aria-label="属性值 ${index+1}"]`)?.focus());}
+  function chooseName(row:NoteProperty,key:string,index:number){change(row.id,{key,...(!row.value&&row.type==='text'?{type:'list'}:{})});setSuggestion(null);window.requestAnimationFrame(()=>dialog.current?.querySelector<HTMLElement>(`[aria-label="属性值 ${index+1}"]`)?.focus());}
   function apply(){
     setError('');if(!target.valid()||target.editor.state.doc!==snapshot.current){setError('当前笔记或内容已变化，请关闭后重新打开笔记属性。');return;}
     try{const transaction=notePropertiesTransaction(target.editor.state,rows);if(transaction)target.editor.dispatch(transaction);onApplied();}catch(error){setError((error as Error).message);}
@@ -42,12 +43,12 @@ export default function NotePropertiesDialog({target,onClose,onApplied}:{target:
           if(event.key==='Enter'&&suggestion===row.id&&choice>=0&&suggestions[choice]){event.preventDefault();chooseName(row,suggestions[choice].key,index);}
         }}/>
         {suggestion===row.id&&suggestions.length>0&&<div className="property-suggestions" role="listbox" id={`property-suggestions-${row.id}`} aria-label="常用属性">{suggestions.map((item,option)=><button key={item.key} id={`property-option-${row.id}-${option}`} type="button" role="option" aria-selected={choice===option} onMouseDown={event=>event.preventDefault()} onClick={()=>chooseName(row,item.key,index)}><item.Icon size={16}/>{item.key}</button>)}</div>}
-        {typeMenu===row.id&&<div ref={typeMenuRef} className="property-suggestions property-type-menu" style={typePosition} role="menu" aria-label="属性类型" onKeyDown={event=>{if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();const buttons=Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button')),index=buttons.indexOf(document.activeElement as HTMLButtonElement);buttons[event.key==='Home'?0:event.key==='End'?buttons.length-1:(index+(event.key==='ArrowDown'?1:buttons.length-1))%buttons.length]?.focus();}}}>{propertyTypes.map(item=><button key={item.id} type="button" role="menuitemradio" aria-checked={item.id===row.type} onClick={()=>{change(row.id,{type:item.id,...(item.id==='boolean'?{value:row.value==='true'?'true':'false'}:{})});setTypeMenu(null);requestAnimationFrame(()=>dialog.current?.querySelector<HTMLElement>(`[aria-label="属性值 ${index+1}"]`)?.focus());}}><item.Icon size={16}/>{item.label}</button>)}</div>}
+        {typeMenu===row.id&&<div ref={typeMenuRef} className="property-suggestions property-type-menu" style={typePosition} role="menu" aria-label="属性类型" onKeyDown={event=>{if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();const buttons=Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button')),index=buttons.indexOf(document.activeElement as HTMLButtonElement);buttons[event.key==='Home'?0:event.key==='End'?buttons.length-1:(index+(event.key==='ArrowDown'?1:buttons.length-1))%buttons.length]?.focus();}}}>{propertyTypes.map(item=><button key={item.id} type="button" role="menuitemradio" aria-checked={item.id===row.type} onClick={()=>{change(row.id,{type:item.id,...(item.id==='boolean'?{value:row.value==='true'?'true':'false'}:{})});setTypeMenu(null);window.requestAnimationFrame(()=>dialog.current?.querySelector<HTMLElement>(`[aria-label="属性值 ${index+1}"]`)?.focus());}}><item.Icon size={16}/>{item.label}</button>)}</div>}
         </div>
         {row.type==='boolean'?<select aria-label={`属性值 ${index+1}`} value={row.value} onChange={event=>change(row.id,{value:event.target.value})}><option value="false">否</option><option value="true">是</option></select>:row.type==='date'?<input type="date" aria-label={`属性值 ${index+1}`} value={row.value} onChange={event=>change(row.id,{value:event.target.value})}/>:<textarea aria-label={`属性值 ${index+1}`} rows={row.type==='yaml'?3:1} placeholder={row.type==='list'?'没有值（每行一项）':row.type==='datetime'?'2026-11-16T15:30:00（可带时区）':'没有值'} value={row.value} onChange={event=>change(row.id,{value:event.target.value})}/>}
         <button type="button" className="property-remove" aria-label={`删除属性 ${index+1}`} title="删除属性" onClick={()=>setRows(old=>old.filter(item=>item.id!==row.id))}><Trash2 size={14}/></button>
       </div>;})}</div>
-      <button type="button" className="property-add" disabled={rows.length>=64} onClick={()=>{setRows(old=>[...old,{id:'new:'+(++counter.current),key:'',type:'text',value:''}]);requestAnimationFrame(()=>dialog.current?.querySelector<HTMLInputElement>('.note-property-row:last-child input')?.focus());}}><Plus size={14}/>添加属性</button>
+      <button type="button" className="property-add" disabled={rows.length>=64} onClick={()=>{setRows(old=>[...old,{id:'new:'+(++counter.current),key:'',type:'text',value:''}]);window.requestAnimationFrame(()=>dialog.current?.querySelector<HTMLInputElement>('.note-property-row:last-child input')?.focus());}}><Plus size={14}/>添加属性</button>
       </>}
       {error&&<p role="alert" className="properties-error">{error}</p>}
       <footer><button type="button" onClick={onClose}>取消</button><button type="submit" className="gold-button" disabled={!!initial.error}>应用到笔记</button></footer>

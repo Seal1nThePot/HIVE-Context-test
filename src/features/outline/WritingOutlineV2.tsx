@@ -1,3 +1,4 @@
+import {usePanelDocument} from '../../shared/panelDocument';
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -43,6 +44,7 @@ export default function WritingOutlineV2({
   ready: boolean;
   onRetry: () => void;
 }) {
+  const document=usePanelDocument(),window=document.defaultView!;
   const [view, setView] = useState<"nodes" | "toc">("nodes"),
     [editing, setEditing] = useState<WritingNode | null>(null),
     [undo, setUndo] = useState<{ node: WritingNode; index: number }[]>([]),

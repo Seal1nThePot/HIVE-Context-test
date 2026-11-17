@@ -1,9 +1,12 @@
 import {EditorState,StateEffect,StateField,type Extension} from '@codemirror/state';
 import {Decoration,EditorView,WidgetType,type DecorationSet} from '@codemirror/view';
-import {previewPlan,visibleReplacements,type PreviewReplacement} from './markdownPresentation';
+import {previewPlan,visibleReplacements,localPreviewUpdate,type PreviewReplacement} from './markdownPresentation';
 import {localImageUrl,type ImageContext} from './insertions';
 import {TableWidget,type TableMark} from './tableWidget';
 import {annotationHighlights,setAnnotationMarks} from '../annotations/annotationDecorations';
+import {markdownParseState} from './markdownParse';
+import {tableSegments} from './tableViewport';
+import {MathWidget} from './mathWidget';
 
 export type DisplayMode='live'|'source';
 export const setDisplayMode=StateEffect.define<DisplayMode>(),setPreviewFocus=StateEffect.define<boolean>();
@@ -13,8 +16,9 @@ const setImageContext=StateEffect.define<ImageContext|null>(),imageContext=State
 
 class PreviewWidget extends WidgetType{
   constructor(readonly item:PreviewReplacement,readonly context:ImageContext|null){super();}
-  eq(other:PreviewWidget){return JSON.stringify(this.item)===JSON.stringify(other.item)&&JSON.stringify(this.context)===JSON.stringify(other.context);}
+  eq(other:PreviewWidget){return (this.item===other.item||this.item.kind===other.item.kind&&this.item.from===other.item.from&&this.item.to===other.item.to&&this.item.text===other.item.text&&this.item.src===other.item.src)&&this.context?.workspace===other.context?.workspace&&this.context?.file===other.context?.file;}
   toDOM(view:EditorView){
+    const document=view.dom.ownerDocument;
     const item=this.item;
     const edit=(element:HTMLElement,from=item.from)=>element.addEventListener('mousedown',event=>{event.preventDefault();event.stopPropagation();view.dispatch({selection:{anchor:from},userEvent:'select.pointer'});view.focus();});
     if(item.kind==='properties'){const block=document.createElement('div');block.className='cm-preview-properties';block.textContent='笔记属性';block.title='点击编辑属性源码';edit(block);return block;}
@@ -34,9 +38,18 @@ class PreviewWidget extends WidgetType{
 }
 export const markdownPreview=StateField.define<DecorationSet>({
   create:build,
-  update(value,tr){return tr.docChanged||tr.selection||tr.effects.some(effect=>effect.is(setDisplayMode)||effect.is(setPreviewFocus)||effect.is(setImageContext)||effect.is(setAnnotationMarks))?build(tr.state):value;},
+  update(value,tr){
+    if(tr.docChanged||tr.effects.some(effect=>effect.is(setDisplayMode)||effect.is(setPreviewFocus)||effect.is(setImageContext)||effect.is(setAnnotationMarks)))return build(tr.state);
+    if(tr.selection&&tr.state.field(previewFocus,false)&&activeLines(tr.startState)!==activeLines(tr.state))return build(tr.state);
+    return value;
+  },
   provide:field=>EditorView.decorations.from(field),
 });
+function activeLines(state:EditorState){return state.selection.ranges.map(range=>{const end=range.to>range.from&&state.doc.lineAt(range.to).from===range.to?range.to-1:range.to;return `${state.doc.lineAt(range.from).from}:${state.doc.lineAt(end).to}`;}).join(',');}
+class WideTableNotice extends WidgetType{
+  eq(){return true;}
+  toDOM(view:EditorView){const note=view.dom.ownerDocument.createElement('div');note.className='cm-table-source-notice';note.textContent='此表列数较多，以下直接编辑 Markdown 源码；所有内容与撤销记录均保留。';return note;}
+}
 function build(state:EditorState){
   if(state.field(displayModeField,false)==='source')return Decoration.none;
   const ranges=[];
@@ -46,7 +59,19 @@ function build(state:EditorState){
     else if(style.to>style.from)ranges.push(Decoration.mark({class:style.className,attributes}).range(style.from,style.to));
   }
   const marks:TableMark[]=[];state.field(annotationHighlights,false)?.between(0,state.doc.length,(from,to,decoration)=>{const id=decoration.spec.attributes?.['data-annotation-id'];if(id)marks.push({from,to,id,note:decoration.spec.attributes?.['aria-label']||'文本标注'});});
-  for(const item of visibleReplacements(state,state.field(previewFocus,false)===true))ranges.push(Decoration.replace({block:item.block,widget:item.kind==='table'?new TableWidget(item,state.field(imageContext,false)||null,marks.filter(mark=>mark.from<item.to&&mark.to>item.from)):item.kind?new PreviewWidget(item,state.field(imageContext,false)||null):undefined}).range(item.from,item.to));
+  for(const item of visibleReplacements(state,state.field(previewFocus,false)===true)){
+    if(item.kind==='table'){
+      const segments=tableSegments(item,state.doc);
+      if(!segments.length){ranges.push(Decoration.widget({widget:new WideTableNotice(),block:true,side:-1}).range(item.from));continue;}
+      for(const segment of segments)ranges.push(Decoration.replace({block:true,widget:new TableWidget(item,state.field(imageContext,false)||null,marks.filter(mark=>mark.from<segment.to&&mark.to>segment.from),segment.fromRow,segment.toRow)}).range(segment.from,segment.to));
+    }else if(item.kind==='math'){
+      const widget=new MathWidget(item,state.doc);
+      if(item.text){
+        ranges.push(Decoration.widget({widget,block:item.block,side:-1}).range(item.from));
+        ranges.push(Decoration.mark({class:'cm-math-source'}).range(item.from,item.to));
+      }else ranges.push(Decoration.replace({block:item.block,widget}).range(item.from,item.to));
+    }else ranges.push(Decoration.replace({block:item.block,widget:item.kind?new PreviewWidget(item,state.field(imageContext,false)||null):undefined}).range(item.from,item.to));
+  }
   return Decoration.set(ranges,true);
 }
 export const markdownDisplayTheme=EditorView.baseTheme({
@@ -65,6 +90,8 @@ export const markdownDisplayTheme=EditorView.baseTheme({
   '.cm-preview-properties':{fontSize:'.8em',color:'#9daa88',padding:'5px 12px',marginBottom:'8px',borderBottom:'1px solid #46513a',cursor:'text'},
   '.cm-preview-rule':{border:'0',borderTop:'1px solid #526043',margin:'14px 50px'},
   '.cm-table-widget':{overflowX:'auto'},
+  '.cm-table-source-notice':{padding:'5px 50px',color:'#b9c49e',fontSize:'.85em'},
+  '.cm-table-widget[data-table-segment] .cm-preview-table':{marginTop:'0',marginBottom:'0'},
   '.cm-table-marked':{backgroundColor:'#c9ae4030'},
   '.cm-table-select-top':{borderTop:'2px solid #e5cf72 !important'},
   '.cm-table-select-bottom':{borderBottom:'2px solid #e5cf72 !important'},
@@ -79,7 +106,7 @@ export const markdownDisplayTheme=EditorView.baseTheme({
   '.cm-preview-table td,.cm-preview-table th':{border:'1px solid #46513a',padding:'6px 12px',textAlign:'left'},
   '.cm-preview-table th':{background:'#ffffff08',fontWeight:'600'},
 });
-export const markdownDisplayExtensions:Extension=[displayModeField,previewFocus,imageContext,markdownPreview,markdownDisplayTheme,EditorView.focusChangeEffect.of((_state,focused)=>setPreviewFocus.of(focused))];
+export const markdownDisplayExtensions:Extension=[displayModeField,previewFocus,imageContext,markdownParseState,localPreviewUpdate,markdownPreview,markdownDisplayTheme,EditorView.focusChangeEffect.of((_state,focused)=>setPreviewFocus.of(focused))];
 export function configureImageContext(view:EditorView,context:ImageContext|null){
   if(view.state.field(imageContext,false)===undefined)view.dispatch({effects:StateEffect.appendConfig.of(imageContext)});
   const current=view.state.field(imageContext);if(current?.file!==context?.file||current?.workspace!==context?.workspace)view.dispatch({effects:setImageContext.of(context)});

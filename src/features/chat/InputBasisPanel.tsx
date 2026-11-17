@@ -1,3 +1,4 @@
+import {usePanelDocument} from '../../shared/panelDocument';
 import {reasoningLevels} from './modelReasoning';
 import {useEffect,useRef,useState} from 'react';
 import {ArrowDown,ArrowUp,FileText,Folder,GripVertical,Plus,Trash2} from 'lucide-react';
@@ -12,9 +13,10 @@ function same(a:ReferenceSource,b:ReferenceSource){return a.path===b.path&&a.typ
 function markdownCount(entry:Entry):number{return entry.type==='file'?(/\.md$/i.test(entry.path)?1:0):(entry.children||[]).reduce((sum,child)=>sum+markdownCount(child),0);}
 function reordered(items:ReferenceSource[],from:number,to:number){const next=[...items],item=next.splice(from,1)[0];next.splice(to,0,item);return next;}
 export default function InputBasisPanel({request,file,mode,sources,entries,onChange,workspaceId}:Props){
+  const document=usePanelDocument(),window=document.defaultView!;
   const [picker,setPicker]=useState(false),[query,setQuery]=useState(''),[preview,setPreview]=useState<{from:number;gap:number}|null>(null);
   const list=useRef<HTMLOListElement>(null),cleanup=useRef<(()=>void)|null>(null);
-  useEffect(()=>()=>cleanup.current?.(),[]);
+  useEffect(()=>()=>cleanup.current?.(),[document]);
   const all=flattenEntries(entries);
   function add(source:ReferenceSource){if(sources.length<32&&!sources.some(item=>same(item,source)))onChange([...sources,source]);}
   function beginSort(index:number,event:React.PointerEvent<HTMLButtonElement>){

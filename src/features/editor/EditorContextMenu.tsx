@@ -6,7 +6,9 @@ import {selectAll} from '@codemirror/commands';
 import {Scissors,Copy,ClipboardPaste,Clipboard,Highlighter,List,TextSelect,Eraser} from 'lucide-react';
 import {previewPlan} from './markdownPresentation';
 import {cellContent} from './tableWidget';
+import {tableCell} from './tableViewport';
 import './editor-context-menu.css';
+import {usePanelDocument} from '../../shared/panelDocument';
 
 export type AnnotationContext={ranges:{from:number;to:number}[];ids:string[]};
 export function decodedOffsets(raw:string){const offsets=[0];let pos=0;while(pos<raw.length){const br=/^<br\s*\/?\s*>/i.exec(raw.slice(pos));if(br)pos+=br[0].length;else if(raw[pos]==='\\'&&(raw[pos+1]==='\\'||raw[pos+1]==='|'))pos+=2;else pos++;offsets.push(pos);}return offsets;}
@@ -18,22 +20,23 @@ export default function EditorContextMenu({editor,point,input,onClose,onMark,onU
   editor:EditorView;point:{x:number;y:number};input?:HTMLTextAreaElement;onClose:()=>void;onMark:()=>void;onUnmark?:(id?:string)=>void;annotationId?:string;onShowAnnotations?:(context:AnnotationContext)=>void;onError?:(message:string)=>void;
 }){
   const menu=useRef<HTMLDivElement>(null),[position,setPosition]=useState(point);
+  const document=usePanelDocument(),window=document.defaultView!;
   const snapshot=useRef({doc:editor.state.doc,selection:editor.state.selection,input,inputValue:input?.value,start:input?.selectionStart??0,end:input?.selectionEnd??0}).current;
   const hasSelection=input?snapshot.start!==snapshot.end:snapshot.selection.ranges.some(range=>!range.empty);
   const readOnly=editor.state.readOnly||!!input?.readOnly;
   const focusTarget=()=>input?.isConnected?input.focus():editor.focus();
   useLayoutEffect(()=>{
     const rect=menu.current?.getBoundingClientRect();if(!rect)return;
-    const scale=Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale'))||1;
+    const scale=Number.parseFloat(window.getComputedStyle(document.documentElement).getPropertyValue('--ui-scale'))||1;
     setPosition({x:Math.max(8,Math.min(point.x,window.innerWidth-rect.width-8)),y:Math.max(8,Math.min(point.y,window.innerHeight-rect.height-90*scale))});
     menu.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
-  },[point]);
+  },[point,document,window]);
   useEffect(()=>{
     const outside=(event:PointerEvent)=>{if(!menu.current?.contains(event.target as Node))onClose();};
     const close=()=>onClose();
     document.addEventListener('pointerdown',outside);window.addEventListener('resize',close);window.addEventListener('blur',close);
     return()=>{document.removeEventListener('pointerdown',outside);window.removeEventListener('resize',close);window.removeEventListener('blur',close);};
-  },[onClose]);
+  },[onClose,document,window]);
   function run(action:()=>void){onClose();action();}
   function showLocal(){
     if(!valid()){onError?.('选区或正文已变化，请重新选择。');return;}
@@ -41,9 +44,9 @@ export default function EditorContextMenu({editor,point,input,onClose,onMark,onU
     const root=input.closest<HTMLElement>('[data-table-widget]'),cell=input.closest<HTMLElement>('[data-cell]');
     const ordinal=Number(root?.dataset.tableOrdinal);
     const table=Number.isFinite(ordinal)?previewPlan(editor.state).replacements.find(item=>item.kind==='table'&&item.tableOrdinal===ordinal):undefined;
-    const row=Number(input.dataset.row),col=Number(input.dataset.col),source=table?.rows?.[row]?.[col];
+    const row=Number(input.dataset.row),col=Number(input.dataset.col),source=table&&tableCell(table,row,col);
     if(!source||source.virtual!==undefined){onError?.('请先选中单元格中的文字。');return;}
-    const part=cellContent(source,editor.state.doc.toString()),offsets=decodedOffsets(part.raw);
+    const part=cellContent(source,editor.state.doc),offsets=decodedOffsets(part.raw);
     const from=part.from+(offsets[snapshot.start]??part.raw.length),to=part.from+(offsets[snapshot.end]??part.raw.length);
     let ids:string[]=[];try{const parsed=JSON.parse(cell?.dataset.tableAnnotationIds||'[]');if(Array.isArray(parsed))ids=parsed.filter(value=>typeof value==='string');}catch{/* ignore invalid metadata */}
     onShowAnnotations?.({ranges:[{from,to}],ids});
@@ -54,8 +57,8 @@ export default function EditorContextMenu({editor,point,input,onClose,onMark,onU
     if(!valid()||action!=='copy'&&(readOnly||editor.state.readOnly||!!input?.readOnly)){onError?.('选区或正文已变化，无法完成操作，请重新选择。');return;}
     const text=input?snapshot.inputValue!.slice(snapshot.start,snapshot.end):snapshot.selection.ranges.filter(range=>!range.empty).map(range=>snapshot.doc.sliceString(range.from,range.to)).join('\n');
     try{
-      if(action==='copy'||action==='cut')await navigator.clipboard.writeText(text);
-      const inserted=action==='paste'||action==='plain'?await navigator.clipboard.readText():'';
+      if(action==='copy'||action==='cut')await window.navigator.clipboard.writeText(text);
+      const inserted=action==='paste'||action==='plain'?await window.navigator.clipboard.readText():'';
       if(action!=='copy'){
         if(!valid()||editor.state.readOnly||!!input?.readOnly){onError?.('剪贴板操作期间正文已变化，请重新选择。');return;}
         if(input){input.focus();input.setRangeText(inserted,snapshot.start,snapshot.end,'end');input.dispatchEvent(new Event('input',{bubbles:true}));}

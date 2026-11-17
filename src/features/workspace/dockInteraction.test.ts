@@ -5,6 +5,19 @@ const scene=():DockScene=>({panel:'outline',tree:initialDockTree(),bounds:{x:0,y
 const center=(guide:DockGuide)=>({x:guide.button.x+guide.button.width/2,y:guide.button.y+guide.button.height/2});
 const anchor={x:600,y:400};
 describe('instant preview and release docking',()=>{
+  it('deduplicates equivalent outer and inner desktop placements for a single destination',()=>{
+    const state={...scene(),tree:leaf('editor'),dedupeEquivalent:true};
+    const guides=createDockGuides(state,dockTargetAt(state,anchor));
+    expect(guides.filter(guide=>guide.edge==='left')).toHaveLength(1);
+    expect(guides.filter(guide=>guide.edge==='right')).toHaveLength(1);
+    expect(guides.find(guide=>guide.edge==='center')).toBeDefined();
+    expect(createDockGuides({...state,dedupeEquivalent:false},dockTargetAt(state,anchor))).toHaveLength(9);
+  });
+  it('keeps different outer and inner desktop outcomes even when they share an arrow direction',()=>{
+    const state={...scene(),dedupeEquivalent:true},guides=createDockGuides(state,dockTargetAt(state,anchor));
+    expect(guides.filter(guide=>guide.edge==='left')).toHaveLength(2);
+    expect(guides.filter(guide=>guide.edge==='left').map(guide=>guide.scope)).toEqual(['workspace','panel']);
+  });
   it('removes splits and stacks on locked targets, including a previously visible compass',()=>{
     const state=scene(),intent=new DockIntent(),target=dockTargetAt(state,anchor)!;
     expect(intent.step(anchor,state).guides.length).toBeGreaterThan(0);

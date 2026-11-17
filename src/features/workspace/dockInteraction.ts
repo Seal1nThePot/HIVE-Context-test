@@ -3,7 +3,7 @@ import {dockedPanels,insertDockPanel,insertDockPanelAtRoot,measureDockTree,remov
 type Point={x:number;y:number};
 export type DockPointer=Point&{free?:boolean};
 export type DockTarget={id:string;rect:Rect;floating:boolean};
-export type DockScene={panel:string;tree:DockTree|null;bounds:Rect;viewport:Rect;floating:{id:string;rect:Rect;layer:number}[];scale:number;locked?:boolean;protectedPanels?:string[];positionLockedPanels?:string[]};
+export type DockScene={panel:string;tree:DockTree|null;bounds:Rect;viewport:Rect;floating:{id:string;rect:Rect;layer:number}[];scale:number;locked?:boolean;protectedPanels?:string[];positionLockedPanels?:string[];dedupeEquivalent?:boolean};
 export type DockGuide={key:string;target:string;edge:DockPlacementEdge;scope:'panel'|'workspace';button:Rect;preview:Rect;label:string};
 export type DockFeedback={visible:boolean;target:DockTarget|null;guides:DockGuide[];ready:DockGuide|null};
 export const contains=(rect:Rect,point:Point)=>point.x>=rect.x&&point.x<=rect.x+rect.width&&point.y>=rect.y&&point.y<=rect.y+rect.height;
@@ -45,7 +45,18 @@ export function createDockGuides(scene:DockScene,target:DockTarget|null):DockGui
     }
     if(!scene.protectedPanels?.includes(target.id))add('panel','center',button(center.x,center.y,34*scene.scale),target.rect,target.id);
   }
-  return guides;
+  if(!scene.dedupeEquivalent)return guides;
+  const results=new Set<string>(),structures=new Set<string>();
+  const structure=(tree:DockTree):unknown=>tree.type==='split'?[tree.axis,structure(tree.a),structure(tree.b)]:tree.type==='group'?['tabs',tree.panels,tree.active]:tree.panel;
+  return guides.filter(guide=>{
+    if(guide.edge==='center')return true;
+    const tree=guide.scope==='workspace'?insertDockPanelAtRoot(rest,scene.panel,guide.edge,'equivalent'):insertDockPanel(rest,scene.panel,guide.target,guide.edge,'equivalent');
+    const measured=measureDockTree(tree,bounds);
+    const topology=JSON.stringify(structure(tree));
+    const signature=JSON.stringify({panels:Object.entries(measured.panels).sort(([a],[b])=>a.localeCompare(b)).map(([id,rect])=>[id,...[rect.x,rect.y,rect.width,rect.height].map(value=>Math.round(value*1000)/1000)]),groups:measured.groups.map(group=>[group.panels,group.active])});
+    if(results.has(signature)||structures.has(topology))return false;
+    results.add(signature);structures.add(topology);return true;
+  });
 }
 
 /** The current preview is the drop result; no dwell or re-entry is required. */

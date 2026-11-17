@@ -16,7 +16,7 @@ const root = path.resolve(
 const local = path.resolve(
   process.env.HIVE_STATE_DIR || path.join(project, ".local"),
 );
-const port = Number(process.env.HIVE_PORT || 4317);
+let port = Number(process.env.HIVE_PORT ?? 4317);
 await fs.mkdir(root, { recursive: true });
 const modelSettings = await modelConfigStore(local, {envKey:process.env.HIVE_API_KEY || ""});
 const spaces = await workspaceStore(local, root);
@@ -58,8 +58,15 @@ app.post('/api/references/resolve',async(req,res)=>res.json(await resolveReferen
 app.post('/api/workspace/sync', async(req,res)=>{
   const paths=req.body.paths;
   if(!Array.isArray(paths)||paths.length>100||paths.some(value=>typeof value!=='string')) return res.status(400).json({error:'同步文件列表无效。'});
-  const files=await Promise.all([...new Set(paths)].map(async file=>{
-    try{return await req.workspace.files.read(file);}catch(error){return {path:file,error:error.code==='ENOENT'?'文件已在磁盘删除或移动。':error.message};}
+  const unique=[...new Set(paths)], files=new Array(unique.length);
+  const baselines=req.body.baselines;
+  let next=0;
+  await Promise.all(Array.from({length:Math.min(4,unique.length)},async()=>{
+    while(next<unique.length){
+      const index=next++,file=unique[index];
+      const knownHash=baselines && typeof baselines==='object' && Object.hasOwn(baselines,file) ? baselines[file] : undefined;
+      try{files[index]=await req.workspace.files.read(file,knownHash);}catch(error){files[index]={path:file,error:error.code==='ENOENT'?'文件已在磁盘删除或移动。':error.message};}
+    }
   }));
   res.json({workspace:spaces.read(),entries:await req.workspace.files.list(),files});
 });
@@ -319,9 +326,16 @@ if (process.argv.includes("--production")) {
   });
   app.use(vite.middlewares);
 }
-const server = app.listen(port, "127.0.0.1", () =>
-  console.log(`HIVE ready: http://127.0.0.1:${port}\nDocuments: ${spaces.read().root}`),
-);
+const server = app.listen(port, "127.0.0.1", () => {
+  port = server.address().port;
+  console.log(`HIVE ready: http://127.0.0.1:${port}\nDocuments: ${spaces.read().root}`);
+  if (process.send) process.send({ type: 'hive-ready', port });
+});
+function shutdown() { server.close(() => process.exit(0)); server.closeAllConnections(); }
+if (process.send) {
+  process.on('message', message => { if (message?.type === 'hive-shutdown') shutdown(); });
+  process.on('disconnect', shutdown);
+}
 server.on("error", (error) => {
   console.error(
     error.code === "EADDRINUSE"

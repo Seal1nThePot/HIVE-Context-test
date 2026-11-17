@@ -1,0 +1,27 @@
+{
+  "purpose": "Math feature acceptance and viewport stress; not a performance result",
+  "denseGroups": 15954,
+  "denseInlineFormulas": 15954,
+  "denseDisplayFormulas": 15954,
+  "externalImageRequests": 0,
+  "files": [
+    {
+      "path": "01-公式功能验收.md",
+      "bytes": 701,
+      "sha256": "4d3b28af51b2b9c207c2bb7134349dfc02a12769cfb566de794db2904dd31441",
+      "baselineSizeCompatible": true
+    },
+    {
+      "path": "02-密集独立公式.md",
+      "bytes": 1800087,
+      "sha256": "9726bc1d5c5585bd1ad4d275d1694c4e9cc07e2990ff7351e51510acd0863bd6",
+      "baselineSizeCompatible": true
+    },
+    {
+      "path": "03-异常和超限公式.md",
+      "bytes": 6285,
+      "sha256": "86343eb8e0cb004473622065d7149a68a0736db6c2f7cf112c691477c73e1f64",
+      "baselineSizeCompatible": true
+    }
+  ]
+}

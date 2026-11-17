@@ -1,0 +1,8 @@
+.cm-math-widget { cursor: text; color: inherit; }
+span.cm-math-widget { display: inline-block; max-width: 100%; max-height: 12em; overflow: auto; vertical-align: middle; }
+div.cm-math-widget { margin: 8px 24px; max-width: calc(100% - 48px); max-height: 24em; overflow: auto; white-space: pre-wrap; }
+.cm-math-widget .katex-display { margin: .35em 0; }
+.cm-math-widget .katex { color: inherit; }
+.cm-math-notice { color: #b9c49e; font-size: .8em; white-space: normal; }
+div.cm-math-notice { padding: 4px 24px; }
+.cm-math-source { font-family: Consolas, monospace; }

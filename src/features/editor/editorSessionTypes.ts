@@ -11,7 +11,9 @@ export type EditorSession = {
     state: EditorState | null;
     view: EditorView | null;
     dirty: boolean;
+    contentVersion?:number;
     restoreScroll?: number;
+    restoreScrollLeft?: number;
     typewriter?: boolean;
     displayMode?: DisplayMode;
     landing?: boolean;

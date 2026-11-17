@@ -1,5 +1,5 @@
 .workbench.free-workbench { position:relative; display:block; overflow:hidden; min-height:0; background:#171c17; }
-.free-workbench > .workspace-panel { margin:0; max-width:none; max-height:none; overflow:hidden; box-sizing:border-box; }
+.free-workbench > .workspace-panel, .desktop-panel-surface > .workspace-panel { margin:0; max-width:none; max-height:none; overflow:hidden; box-sizing:border-box; }
 .independent-workspace-panel { display:flex; flex-direction:column; background:#1c231c; border:1px solid #303b2c; }
 .independent-workspace-panel.panel-floating { border-color:#8d8c59; border-radius:9px; box-shadow:0 14px 45px #0008; }
 .independent-panel-header { display:flex; align-items:center; gap:8px; height:44px; min-height:44px; padding:0 10px 0 14px; border-bottom:1px solid #303b2c; background:#1a211a; color:#bec5ab; font-size: calc(11px * var(--text-scale, 1)); }

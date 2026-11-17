@@ -1,14 +1,17 @@
 {
   "name": "hive-writing-prototype",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.2",
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
     "dev": "node server/index.mjs",
     "start": "node server/index.mjs --production",
     "build": "tsc -b && vite build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "desktop": "npm run build && electron .",
+    "desktop:dev": "node scripts/desktop-dev.mjs",
+    "desktop:portable": "npm run build && electron-builder --win portable"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.0",
@@ -17,9 +20,11 @@
     "@codemirror/search": "^6.5.0",
     "@codemirror/state": "^6.5.0",
     "@codemirror/view": "^6.38.0",
+    "@lezer/common": "1.5.5",
     "@lezer/highlight": "^1.2.1",
     "@lezer/markdown": "1.8.1",
     "express": "^5.1.0",
+    "katex": "0.19.1",
     "lucide-react": "^0.468.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
@@ -31,8 +36,29 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "electron": "^45.3.3",
+    "electron-builder": "^26.18.0",
     "typescript": "^5.9.0",
     "vite": "^7.1.0",
     "vitest": "^5.1.0"
+  },
+  "main": "desktop/main.mjs",
+  "build": {
+    "appId": "local.hive.writing",
+    "productName": "HIVE markdown editor",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "server/**",
+      "desktop/**",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ]
+    }
   }
 }

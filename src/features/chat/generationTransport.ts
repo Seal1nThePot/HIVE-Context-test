@@ -13,12 +13,19 @@ export type DemoGeneration = {
 };
 export async function generateDemoText({ requestMode, requestLimit, node, target, userPrompt, submitted, signal }: DemoGeneration): Promise<string> {
     let raw = '';
+    if (signal.aborted)
+        throw new DOMException("Stopped", "AbortError");
     await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(resolve, 750);
-        signal.addEventListener("abort", () => {
+        const abort = () => {
             clearTimeout(timer);
+            signal.removeEventListener("abort", abort);
             reject(new DOMException("Stopped", "AbortError"));
-        }, { once: true });
+        };
+        const timer = setTimeout(() => {
+            signal.removeEventListener("abort", abort);
+            resolve();
+        }, 750);
+        signal.addEventListener("abort", abort, { once: true });
     });
     if (requestMode === "discuss")
         raw = submitted
@@ -83,7 +90,11 @@ export async function streamModelText(request: typeof fetch, { messages, selecti
         const data = await response.json();
         throw new Error(data.error);
     }
-    const reader = response.body!.getReader(), decoder = new TextDecoder();
+    if (!response.body)
+        throw new Error("模型响应没有可读取的内容。");
+    const reader = response.body.getReader(), decoder = new TextDecoder();
+    // Parsing and consumer callbacks can fail while the network response is still open.
+    const cancel = () => { void reader.cancel().catch(() => {}); };
     let buffer = "", done = false;
     const block = (text: string) => {
         const lines = text.split("\n");
@@ -104,21 +115,34 @@ export async function streamModelText(request: typeof fetch, { messages, selecti
             onChunk(raw);
         }
     };
-    while (true) {
-        const { value, done: ended } = await reader.read();
-        if (ended)
-            break;
-        buffer += decoder.decode(value, { stream: true });
-        let i;
-        while ((i = buffer.indexOf("\n\n")) >= 0) {
-            block(buffer.slice(0, i));
-            buffer = buffer.slice(i + 2);
+    signal.addEventListener("abort", cancel, { once: true });
+    try {
+        if (signal.aborted)
+            throw new DOMException("Stopped", "AbortError");
+        while (true) {
+            const { value, done: ended } = await reader.read();
+            if (signal.aborted)
+                throw new DOMException("Stopped", "AbortError");
+            if (ended)
+                break;
+            buffer += decoder.decode(value, { stream: true });
+            let i;
+            while ((i = buffer.indexOf("\n\n")) >= 0) {
+                block(buffer.slice(0, i));
+                buffer = buffer.slice(i + 2);
+            }
         }
+        buffer += decoder.decode();
+        if (buffer.trim())
+            block(buffer);
+        if (!done)
+            throw new Error("响应中断，本次未生成可采纳建议。");
+        return raw;
+    } catch (error) {
+        cancel();
+        throw error;
+    } finally {
+        signal.removeEventListener("abort", cancel);
+        reader.releaseLock();
     }
-    buffer += decoder.decode();
-    if (buffer.trim())
-        block(buffer);
-    if (!done)
-        throw new Error("响应中断，本次未生成可采纳建议。");
-    return raw;
 }

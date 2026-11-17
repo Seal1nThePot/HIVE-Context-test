@@ -26,6 +26,8 @@ export function canResizeSplit(layout:WorkspaceLayout,splitId:string):boolean {
 
 /** Old views and already-open pages must also retain a visible, independent main document. */
 export function retainPrimaryEditor(layout:WorkspaceLayout):WorkspaceLayout {
+  // An explicit native-window shelf action is distinct from repairing an old broken view.
+  if(layout.nativePrimaryHidden&&layout.autoHide?.editor)return layout;
   let next=layout;
   if(next.autoHide?.editor)next=releaseAutoHidePanel(next,PRIMARY_EDITOR);
   if(next.floatingGroups.some(group=>group.panels.includes(PRIMARY_EDITOR)))next=detachWorkspacePanel(next,PRIMARY_EDITOR);

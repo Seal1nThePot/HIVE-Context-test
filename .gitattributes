@@ -3,3 +3,5 @@
 *.ps1 text eol=crlf
 *.png binary
 *.jpg binary
+# 公式验收文档是精确输入数据，尾部空行属于测试内容
+performance/math-fixtures/*.md -whitespace

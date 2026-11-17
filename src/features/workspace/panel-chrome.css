@@ -105,3 +105,12 @@
 .modal .appearance-setting input[type=number] { width:100%; min-width:0; padding:5px; margin:0; font-size:calc(11px * var(--text-scale)); }
 .appearance-setting > span,.appearance-settings > button { font-size:calc(10px * var(--text-scale)); color:#b6bc9e; }
 @media(max-width:600px) { .appearance-setting { grid-template-columns:1fr 64px 20px; } .appearance-setting label { grid-column:1 / -1; } }
+
+/* Main-workspace splits use their shared divider as the sole resize edge. */
+.free-workbench:not(.desktop-panel-workbench) .workspace-panel.panel-docked {border:0;box-shadow:none;border-radius:0;}
+.free-workbench:not(.desktop-panel-workbench) .workspace-panel.panel-docked > .panel-resize,
+.free-workbench:not(.desktop-panel-workbench) .workspace-group-docked > .panel-resize {display:none;}
+.free-workbench:not(.desktop-panel-workbench) .workspace-group-docked > .workspace-group-header {border:0;border-bottom:1px solid #3b4335;box-shadow:none;}
+/* Keep the rail scrollable without drawing its scrollbar. */
+.nearby-workbench-middle > .rail-edge-wrap .nearby-panel-rail {scrollbar-width:none;}
+.nearby-workbench-middle > .rail-edge-wrap .nearby-panel-rail::-webkit-scrollbar {display:none;}

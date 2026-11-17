@@ -1,6 +1,6 @@
 # 工作台面板层（现状，2026-11-16）
 
-面板层分四块：**纯数据**（`panelLayout` / `workspaceState` / `autoHide` / `workspacePolicy`）、**交互意图**（`dockInteraction`）、**React 绑定**（`usePanelWorkspace`）、**组件**（`PanelIconRail` / `PanelSwitcher` / `PanelControl` / `WorkspaceTabs` / `DockGuides` / `ViewControls`）。纯数据层全部有测试，改逻辑先跑 `npm test`。
+面板层分五块：**纯数据**（`panelLayout` / `workspaceState` / `autoHide` / `workspacePolicy`）、**交互意图**（`dockInteraction` / `railHoldGesture` / `panelLockGesture`）、**目录元数据**（`panelCatalog`）、**React 绑定**（`usePanelWorkspace` / `useViewSnapshots`）、**组件**（`PanelFrame`（含 `PanelControls`）/ `PanelIconRail` / `RailEdgeHandle` / `PanelSwitcher` / `PanelControl` / `WorkspaceTabs` / `DockGuides` / `ViewControls`）。纯数据与手势层全部有测试，改逻辑先跑 `npm test`。
 
 ## 1. `panelLayout.ts` — 停靠树
 
@@ -80,7 +80,7 @@ type AutoHidePlacement = {edge: DockEdge; offset: number; rect: Rect}
 
 ## 6. `usePanelWorkspace.tsx` — React 绑定
 
-`usePanelWorkspace(stageRef, onActivate?, headerHeight = 28)` 返回：`panel(id)`（ref/floating/movable/primary/canDock/autoHidden/peek 等）、`open`、`close`、`minimize`、`toggle`、`isOpen`、`isDockedRight`、`chrome`、`capture`、`restoreLayout`、`reset`、`openIds`、`minimizedIds`、`tabGroups`、`splitEditor`、`openDocumentTab`、`locked`、`toggleLocked` 等。
+`usePanelWorkspace(stageRef, onActivate?, headerHeight = 28)` 返回（`PanelChrome` 类型在 `PanelFrame.tsx` 里定义，是本 hook 返回值 + 会话表 + 面板标题/开关动作的组合）：`panel(id)`（ref/floating/movable/primary/canDock/autoHidden/peek 等）、`open`、`close`、`minimize`、`toggle`、`isOpen`、`isDockedRight`、`chrome`、`capture`、`restoreLayout`、`reset`、`openIds`、`minimizedIds`、`tabGroups`、`splitEditor`、`openDocumentTab`、`locked`、`toggleLocked` 等。
 
 行为要点：
 
@@ -94,7 +94,10 @@ type AutoHidePlacement = {edge: DockEdge; offset: number; rect: Rect}
 | 组件 | 职责 |
 | --- | --- |
 | `PanelControl` | 面板标题栏按钮：浮动/打开/关闭/最小化/折叠边；`primary` 时隐藏关闭，`movable=false` 时禁用拖拽 |
-| `PanelSwitcher` | 「面板」下拉菜单（portal，键盘上下/Home/End，Escape 关闭）；`fixed` 项（主编辑区）显示「（主版面）」并禁用 |
+| `PanelSwitcher` | 「面板」下拉菜单（portal，键盘上下/Home/End，Escape 关闭）；按 `panelCatalog` 的分类分组、支持搜索；`fixed` 项（主编辑区）显示「（主版面）」并禁用 |
+| `PanelFrame` | 停靠/浮动面板外框：`ref={panel.ref}`、`style={panel.style}`、`data-panel-id`、`onPointerDownCapture={panel.raise}`、标题栏（`data-lock-panel` / `data-position-locked` / `onPointerDown={panel.beginDrag}`）、`children`、非 `scratch` 的底栏、`panel.handles` |
+| `PanelControls` | 面板标题栏按钮组：编辑区额外挂 `DisplayModeControl`（显示模式/打字机），`groupMembers` 时整组关闭/最小化，编辑区额外「插入笔记属性」「标题目录」动作 |
+| `RailEdgeHandle` | 图标条边缘的拖拽把手，配合 `railHoldGesture` 判定长按拖出 |
 | `PanelIconRail` | 舞台边缘的自动隐藏图标条，`PanelRailItem{id,label,offset,active,Icon,number}`，点击回调带锚点矩形 |
 | `WorkspaceTabs` | 标签组渲染：`group/ style/ label/ onSelect/ onDrag/ handles/ controls/ onNewTab` |
 | `DockGuides` | 渲染 `DockFeedback.guides` 与进度 |
@@ -110,17 +113,40 @@ type AutoHidePlacement = {edge: DockEdge; offset: number; rect: Rect}
 
 `remapViewLayout(layout, mapping)` 用于文件改名/移动后把旧 id 映射到新 id。
 
-## 9. 新增一个面板
+## 9. `panelCatalog.ts` — 面板目录
 
-1. `App.tsx` `panelLabel` 加标题，`renderPanel` 加内容，`iconRail`/`panelControls` 决定入口。
+`PanelCategory = files | documents | writing | ai | tools`（显示名：文件管理 / 正文编辑区 / 写作辅助 / AI / 工具）。
+
+- `panelCategory(item)`：显式 `category` 优先；否则按 id 猜——`files|file|trash` → files，`editor`/`editor-*`/`editor:*`/`fixed` → documents，`outline|toc|draft|scratch|annotations|annotation` → writing，`chat|conversation|basis` → ai，其余 tools。
+- `filterPanels(items, category, query)`：query 按空白切词，全部命中 `label + description + keywords` 才保留；有搜索词时忽略分类。
+- `groupPanels(items)`：按分类分桶，供 `PanelSwitcher` 渲染。
+
+## 10. 手势层
+
+`railHoldGesture.ts`：`RAIL_HOLD_MS=1000`、`RAIL_MOVE_PX=5`。
+
+- `RailHoldGesture`：按下→`arm(now)` 满 1 秒才武装；未武装时移动超 5px 直接 `cancelled`；`end()` 返回是否已武装（决定「点击打开」还是「拖出」）。`effectiveRailHoldMs` 把配置值与最小值（默认 200ms）取大。
+- `railDropOffset(x,y,rect)`：落在图标条上 → `0.25`/`0.75`（上下半区）。
+- `railDragTarget(edge,x,y,rect,viewport,scale)`：在图标条范围内返回 offset；向内拖 ≥`64*scale` 返回 `'dock'`（拖回停靠）。
+- `railCrossTarget(source,...)`：左右两条图标条之间的跨边拖拽，返回 `{kind:'rail',edge,offset}` 或 `{kind:'dock'}`。
+
+`panelLockGesture.ts`：`PanelLockGesture = 'doubleClick' | 'longPress'`、`PANEL_LOCK_HOLD_MS=600`、`PANEL_LOCK_MOVE_PX=5`。
+
+- `PanelLockGestureTracker(mode, toggle)`：`longPress` 模式下标题栏按住 600ms 触发锁定；移动 ≥5px 或 `end()` 取消。
+- `doubleClick(id)`：`doubleClick` 模式返回 `true` 表示已处理（调用方据此阻止默认双击行为）。
+- 只跟踪标题栏按下，内容区与控件由调用方过滤。
+
+## 11. 新增一个面板
+
+1. `App.tsx` `panelLabel` 加标题，在 JSX 里加一个 `<PanelFrame chrome={chrome} id=... title=... className=...>` 包住内容（外框职责见 §7）；入口在 `AppHeader` 的 `PanelSwitcher`，分类关键词补到 `panelCatalog`。
 2. `viewPresets.ts` 的 `known` 集合加 id（否则旧视图校验会抛错）。
 3. 若涉及主编辑区规则，检查 `workspacePolicy`（`isEditorPanel`、`canMovePanel`、`retainPrimaryEditor`）。
 4. 需要默认尺寸就在 `usePanelWorkspace.suggestedRect` 加分支。
 5. 有自动隐藏需求时确认 `autoHide` 的 `edge/offset` 计算能覆盖新尺寸。
 6. 补 `panelLayout.test.ts` / `workspaceState.test.ts` / `workspacePolicy.test.ts` / `autoHide.test.ts` 的用例。
-7. 更新本文档与 `frontend-map.md` 的面板清单。
+7. 更新本文档与 `frontend-map.md` 的面板清单；若新面板要在旧视图里存活，同步 `viewPresets.ts` 的 `known` 集合（§8）。
 
-## 10. 易踩的坑
+## 12. 易踩的坑
 
 - **主编辑区不是普通面板**：任何"打开/收起/合并"路径都要过 `retainPrimaryEditor`，否则会出现只有对话没有正文的界面。
 - **autoHide 与 minimized 必须同进同退**：只改一个会在恢复视图时报"面板状态无效"。

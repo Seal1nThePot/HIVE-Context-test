@@ -1,8 +1,24 @@
 import {describe,expect,it} from 'vitest';
 import {dockedPanels,measureDockTree,resizeDockSplit} from './panelLayout';
-import {floatWorkspaceGroup,placeWorkspaceGroup,activateWorkspacePanel,defaultWorkspace,detachWorkspacePanel,findPanelGroup,hideWorkspacePanel,openWorkspacePanel,placeWorkspacePanel} from './workspaceState';
+import {floatWorkspaceGroup,placeWorkspaceGroup,activateWorkspacePanel,defaultWorkspace,detachWorkspacePanel,findPanelGroup,hideWorkspacePanel,openWorkspacePanel,placeWorkspacePanel,isolateWorkspacePanel} from './workspaceState';
 const rect={x:100,y:200,width:500,height:400};
 describe('workspace tabs and minimize',()=>{
+  it('separates one native-window home from a docked group without duplicating panel identities',()=>{
+    const original=placeWorkspacePanel(defaultWorkspace(),'editor:second','editor','center',rect);
+    const next=isolateWorkspacePanel(original,'editor:second');
+    expect(findPanelGroup(next.tree,'editor:second')).toBeUndefined();
+    expect(dockedPanels(next.tree).filter(id=>id==='editor:second')).toHaveLength(1);
+    expect(next.open).toEqual(original.open);
+    expect(findPanelGroup(original.tree,'editor:second')?.panels).toEqual(['editor','editor:second']);
+  });
+  it('separates a native tool from a floating group and preserves the remaining panel geometry',()=>{
+    const grouped=placeWorkspacePanel(defaultWorkspace(),'conversation','files','center',rect),group=findPanelGroup(grouped.tree,'files')!;
+    const original=floatWorkspaceGroup(grouped,group,rect),next=isolateWorkspacePanel(original,'files');
+    expect(next.floatingGroups).toEqual([]);
+    expect(next.rects.conversation).toEqual(rect);
+    expect(next.rects.files).toEqual({...rect,x:rect.x+20,y:rect.y+20});
+    expect(next.open).toEqual(original.open);
+  });
   it('moves a tab group as one unit and preserves order, active member and dimensions',()=>{
     let layout=defaultWorkspace();
     layout=placeWorkspacePanel(layout,'conversation','files','center',rect);

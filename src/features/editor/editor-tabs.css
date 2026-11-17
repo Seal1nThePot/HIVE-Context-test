@@ -1,0 +1,47 @@
+/* File names stay readable while the surrounding controls retain their space. */
+.free-workbench .document-tabs > .document-tab {
+  flex:0 1 auto;
+  width:auto;
+  max-width:65%;
+  min-width:0;
+  height:100%;
+  padding:0 calc(10px * var(--ui-scale));
+  gap:calc(7px * var(--ui-scale));
+  color:#e2e3d7;
+  background:#30392c;
+  border-top-color:transparent;
+  box-sizing:border-box;
+}
+.free-workbench .document-tab > span,
+.workspace-document-tabs .workspace-tab-label {
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:calc(13px * var(--text-scale));
+  font-weight:600;
+}
+.free-workbench .active-editor > .document-tabs > .document-tab {
+  color:#fff1c4;
+  background:#414a36;
+  box-shadow:inset 0 -2px #cabb7b;
+}
+.document-tabs > .document-tab[data-tab-detachable=true] {cursor:grab;touch-action:none;}
+.document-tabs > .document-tab[data-tab-detachable=true]:active {cursor:grabbing;}
+.document-tab > .dirty-dot,
+.workspace-document-tabs .dirty-dot {flex:none;}
+.document-tabs > .tab-spacer {min-width:0;}
+.free-workbench .document-tabs > .icon-button {flex:none;}
+.workspace-document-tabs .workspace-tabs > button {
+  display:flex;
+  align-items:center;
+  gap:calc(7px * var(--ui-scale));
+  max-width:calc(260px * var(--ui-scale));
+  color:#d4d9c8;
+  background:#2a3227;
+}
+.workspace-document-tabs .workspace-tabs > button[aria-selected=true] {
+  color:#fff1c4;
+  background:#414a36;
+  box-shadow:inset 0 -2px #cabb7b;
+}

@@ -1,3 +1,4 @@
+import {usePanelDocument} from '../../shared/panelDocument';
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { TextAnnotation } from "./annotations";
@@ -11,6 +12,7 @@ export default function AnnotationPanel({items,selected,toggle,selectAll,remove,
   remove:(id:string)=>void;locate:(item:TextAnnotation)=>void;reanchor:(item:TextAnnotation)=>void;
   onSend:(ids:string[])=>void;busy:boolean;saveError:boolean;retrySave:()=>void;
 }){
+  const document=usePanelDocument(),window=document.defaultView!;
   const [context,setContext]=useState<{id:string;x:number;y:number}|null>(null), menu=useRef<HTMLDivElement>(null);
   useEffect(()=>{
     if(!context)return;
@@ -19,7 +21,7 @@ export default function AnnotationPanel({items,selected,toggle,selectAll,remove,
     const key=(event:KeyboardEvent)=>{if(event.key==='Escape')setContext(null);};
     document.addEventListener('pointerdown',outside);document.addEventListener('keydown',key);
     return()=>{document.removeEventListener('pointerdown',outside);document.removeEventListener('keydown',key);};
-  },[context]);
+  },[context,document]);
   const item=items.find(value=>value.id===context?.id),chosen=items.filter(value=>selected.has(value.id));
   const run=(action:()=>void)=>{setContext(null);action();};
   function backup(){const url=URL.createObjectURL(new Blob([JSON.stringify(items,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='文本标注备份.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}

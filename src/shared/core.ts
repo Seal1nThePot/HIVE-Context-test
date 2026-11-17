@@ -1,10 +1,10 @@
-import {frontmatterBlock} from './frontmatter';
+import {documentFrontmatter} from './frontmatter';
+import {markdownContent} from './markdownContent';
 import { ChangeDesc, EditorState } from "@codemirror/state";
-import { syntaxTree, ensureSyntaxTree } from "@codemirror/language";
+import {outlineTree} from '../features/editor/markdownParse';
+import {localPreviewUpdate} from '../features/editor/markdownPresentation';
 import { markdownLanguage } from "@codemirror/lang-markdown";
 import { z } from "zod";
-import {GFM,parser as markdownParser} from '@lezer/markdown';
-const countParser=markdownParser.configure(GFM);
 
 export type Mode = "discuss" | "outline" | "edit" | "continue";
 export type Anchor = {
@@ -32,42 +32,7 @@ export const modeLabels: Record<Mode, string> = {
   continue: "往下续写",
 };
 
-// Shared source projection for writing limits and the editor's display statistics.
-export function markdownContent(text: string) {
-  const metadata=frontmatterBlock(text);if(metadata)text=text.slice(metadata.to);
-  const hidden: { from: number; to: number }[] = [];
-  let paragraphs=0;
-  countParser.parse(text).iterate({
-    enter(node) {
-      if(node.name==='Paragraph'||node.name==='Task'||/^(ATX|Setext)Heading[1-6]$/.test(node.name)){
-        let cursor=node.from,body='';
-        for(let child=node.node.firstChild;child;child=child.nextSibling)if(child.name==='HeaderMark'||child.name==='TaskMarker'){body+=text.slice(cursor,child.from);cursor=child.to;}
-        if((body+text.slice(cursor,node.to)).trim())paragraphs++;
-      }
-      if (
-        /^(HeaderMark|EmphasisMark|StrikethroughMark|CodeMark|QuoteMark|ListMark|TaskMarker|TableDelimiter|LinkMark|LinkTitle|CodeInfo|HTMLTag)$/.test(
-          node.name,
-        ) ||
-        (node.name === "URL" &&
-          /^(Link|Image)$/.test(node.node.parent?.name || "")) ||
-        (node.name === 'HTMLBlock' && /^(?:<div style="text-align: (?:left|center|right);">|<\/div>)$/.test(text.slice(node.from,node.to).trim()))
-      )
-        hidden.push({ from: node.from, to: node.to });
-      if (node.name === "Escape")
-        hidden.push({ from: node.from, to: node.from + 1 });
-    },
-  });
-  let cursor = 0,
-    visible = "";
-  for (const range of hidden.sort((a, b) => a.from - b.from)) {
-    if (range.from >= cursor) {
-      visible += text.slice(cursor, range.from);
-      cursor = range.to;
-    }
-  }
-  visible += text.slice(cursor);
-  return {text:visible,paragraphs};
-}
+export {markdownContent};
 // Visible Unicode code points, including punctuation; whitespace and Markdown syntax are excluded.
 export function visibleCount(text: string) {
   return Array.from(markdownContent(text).text.replace(/\s/g, "")).length;
@@ -136,17 +101,25 @@ export function canApply(anchor: Anchor, text: string, file: string) {
   );
 }
 
+/** Preview eligibility needs only the owned range, including when the cursor moves. */
+export function canApplyToDocument(anchor:Anchor,doc:EditorState['doc']|undefined,file:string){
+  return !!doc&&!anchor.stale&&anchor.file===file&&anchor.from>=0&&anchor.to>=anchor.from&&anchor.to<=doc.length&&doc.sliceString(anchor.from,anchor.to)===anchor.original;
+}
+
 export type Heading = {
   from: number;
   to: number;
   level: number;
   title: string;
 };
+const headingCache=new WeakMap<EditorState['doc'],Heading[]>();
 export function headings(state: EditorState) {
-  const metadataEnd=frontmatterBlock(state.doc.toString())?.to||0;
+  const cached=headingCache.get(state.doc);if(cached)return cached;
+  const local=state.field(localPreviewUpdate,false),previous=local&&headingCache.get(local.previousDoc);
+  if(local&&previous){const mapped=previous.map(heading=>({...heading,from:local.changes.mapPos(heading.from,1),to:local.changes.mapPos(heading.to,-1)}));headingCache.set(state.doc,mapped);return mapped;}
+  const metadataEnd=documentFrontmatter(state.doc)?.to||0;
   const result: Heading[] = [];
-  const tree =
-    ensureSyntaxTree(state, state.doc.length, 80) ?? syntaxTree(state);
+  const tree = outlineTree(state);
   tree.iterate({
     enter(node) {
       const match = /^(?:ATX|Setext)Heading(\d)$/.exec(node.name);
@@ -161,9 +134,10 @@ export function headings(state: EditorState) {
             .replace(/\s+#+\s*$/, "")
             .split("\n")[0],
         });
+      if(match||/^(Table|FencedCode|CodeBlock|Paragraph|HTMLBlock)$/.test(node.name))return false;
     },
   });
-  return result;
+  headingCache.set(state.doc,result);return result;
 }
 
 const schema = z.object({

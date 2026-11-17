@@ -83,6 +83,11 @@ describe('fixed document workspace',()=>{
     const measured=measureDockTree(next.tree,bounds);
     expect(measured.groups.some(group=>group.panels.includes('editor'))).toBe(false);expect(measured.panels.editor).not.toEqual(measured.panels.outline);expect(next.open).toContain('outline');
   });
+  it('preserves an explicit native shelf action for the primary editor',()=>{
+    const hidden=hideWorkspacePanel(defaultWorkspace(),'editor',rect,true,panelAutoHidePlacement(rect,bounds));
+    const next=retainPrimaryEditor({...hidden,nativePrimaryHidden:true});
+    expect(next.open).not.toContain('editor');expect(next.autoHide?.editor).toBeDefined();expect(dockedPanels(next.tree)).not.toContain('editor');
+  });
   it('preserves document-only primary tabs while preventing tools from joining any tab in that group',()=>{
     const next=retainPrimaryEditor(placeWorkspacePanel(defaultWorkspace(),'editor:second','editor','center',rect));
     expect(measureDockTree(next.tree,bounds).groups[0].panels).toEqual(['editor','editor:second']);

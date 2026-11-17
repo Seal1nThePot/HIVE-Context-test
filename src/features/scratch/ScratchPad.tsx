@@ -5,6 +5,7 @@ import type { EditorState } from "@codemirror/state";
 import Editor, { makeState } from "../editor/Editor";
 import { Download, Save } from "lucide-react";
 import { minimalReplacement, visibleCount } from "../../shared/core";
+import {usePanelDocument} from '../../shared/panelDocument';
 type Snapshot = { text: string; hash: string | null };
 export default function ScratchPad({
   onError,
@@ -20,6 +21,7 @@ export default function ScratchPad({
   searchActive=false,
   annotationTool=false,
   active = false,
+  keepAlive=false,
 }: {
   onError: (message: string) => void;
   onEditor?: (view: EditorView | null,save?:()=>Promise<boolean>) => void;
@@ -34,8 +36,10 @@ export default function ScratchPad({
   searchActive?:boolean;
   annotationTool?:boolean;
   active?: boolean;
+  keepAlive?:boolean;
 }) {
   const fileWorkspace=useFileWorkspace(),fetch=fileWorkspace.request;
+  const panelDocument=usePanelDocument();
   const state = useRef<EditorState | null>(null),
     view = useRef<EditorView | null>(null),
     saved = useRef<Snapshot>({ text: "", hash: null }),
@@ -43,7 +47,9 @@ export default function ScratchPad({
     isSaving = useRef(false),
     dirty = useRef(false),
     loaded = useRef(false),
-    alive = useRef(true);
+    alive = useRef(true),
+    scrollTop = useRef(0),scrollLeft=useRef(0),
+    removeScrollListener = useRef<(() => void) | null>(null);
   const [status, setStatus] = useState("载入草稿…"),
     [count, setCount] = useState(0),
     [ready, setReady] = useState(false),
@@ -101,24 +107,35 @@ export default function ScratchPad({
     }
   }, []);
   const onReady = useCallback((next: EditorView | null) => {
-    if (!next && view.current) state.current = view.current.state;
+    if (!next && view.current) { state.current = view.current.state;if(view.current.dom.getClientRects().length){scrollTop.current=view.current.scrollDOM.scrollTop;scrollLeft.current=view.current.scrollDOM.scrollLeft;} removeScrollListener.current?.(); removeScrollListener.current = null; }
     view.current = next;
-    if (next && state.current) next.setState(state.current);
+    if (next) {
+      if (state.current&&next.state!==state.current) next.setState(state.current);
+      const rememberScroll = () => {if(next.dom.getClientRects().length){scrollTop.current = next.scrollDOM.scrollTop;scrollLeft.current=next.scrollDOM.scrollLeft;} };
+      next.scrollDOM.addEventListener('scroll', rememberScroll);
+      const savedScroll = scrollTop.current,savedLeft=scrollLeft.current,window=next.dom.ownerDocument.defaultView!;
+      const frame=window.requestAnimationFrame(() => { if (view.current === next){next.scrollDOM.scrollTop = savedScroll;next.scrollDOM.scrollLeft=savedLeft;} });
+      removeScrollListener.current = () => {next.scrollDOM.removeEventListener('scroll', rememberScroll);window.cancelAnimationFrame(frame);};
+    }
     callbacks.current.onEditor?.(next,next?()=>saveRef.current():undefined);
   }, []);
   useEffect(() => {
     alive.current = true;
     let cancelled = false;
+    const baseline = saved.current.hash;
     if (!loaded.current || (active && !dirty.current))
       fetch("/api/scratch")
         .then(async (response) => {
           const data = await response.json();
           if (!response.ok) throw new Error(data.error);
-          if (cancelled || dirty.current) return;
+          if (cancelled || dirty.current || isSaving.current || saved.current.hash !== baseline) return;
+          const reuse = state.current && saved.current.hash === data.hash && saved.current.text === data.text;
           saved.current = data;
           loaded.current = true;
-          state.current = makeState(data.text, onUpdate, "Markdown 草稿编辑器");
-          view.current?.setState(state.current);
+          if (!reuse) {
+            state.current = makeState(data.text, onUpdate, "Markdown 草稿编辑器");
+            view.current?.setState(state.current);
+          }
           setCount(visibleCount(data.text));
           setStatus("草稿已保存");
           setReady(true);
@@ -176,7 +193,7 @@ export default function ScratchPad({
         type: "text/markdown;charset=utf-8",
       }),
     );
-    const a = document.createElement("a");
+    const a = panelDocument.createElement("a");
     a.href = url;
     a.download = "自由草稿.md";
     a.click();
@@ -214,8 +231,8 @@ export default function ScratchPad({
       </div>
       <div className="scratch-meta">文档目录中的 Markdown 文件 · 自动保存</div>
       {ready ? (
-        <Editor documentFile="自由草稿.md" annotationTool={annotationTool} searchActive={searchActive} onFind={onFind} onReady={onReady} onUpdate={onUpdate} onMarkSelection={onMarkSelection} onUnmarkSelection={onUnmarkSelection} onShowAnnotations={onShowAnnotations} onError={onError} onFocus={onEditorFocus}/>
-      ) : (
+        <Editor keepAlive={keepAlive} initialState={state.current} documentFile="自由草稿.md" annotationTool={annotationTool} searchActive={searchActive} onFind={onFind} onReady={onReady} onUpdate={onUpdate} onMarkSelection={onMarkSelection} onUnmarkSelection={onUnmarkSelection} onShowAnnotations={onShowAnnotations} onError={onError} onFocus={onEditorFocus}/>
+      ) : !ready && active ? (
         <div className="scratch-loading">
           <p>{status}</p>
           {status === "草稿载入失败" && (
@@ -230,7 +247,7 @@ export default function ScratchPad({
             </button>
           )}
         </div>
-      )}
+      ) : null}
       <div className="scratch-status panel-status-footer" aria-label="草稿底栏">
         <span role="status">{status}</span>
         <span>{count} 字</span>

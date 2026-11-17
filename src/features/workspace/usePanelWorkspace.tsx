@@ -1,16 +1,23 @@
 import { createRef, useEffect, useRef, useState, type CSSProperties, type PointerEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { dockedPanels, dockResizeEdges, measureDockTree, resizeDockSplit, PANEL_HEADER_HEIGHT, type DockEdge, type DockPlacementEdge, type Rect } from "./panelLayout";
+import { dockedPanels, dockResizeEdges, measureDockTree, resizeDockSplit, PANEL_HEADER_HEIGHT, type DockEdge, type DockPlacementEdge, type Rect,type PanelGroup } from "./panelLayout";
 import { completeWorkspace, defaultWorkspace, detachWorkspacePanel, hideWorkspacePanel, openWorkspacePanel, placeWorkspacePanel, placeWorkspacePanelAtEdge, floatWorkspaceGroup, placeWorkspaceGroup, closeWorkspacePanelPreservingAutoHide, type WorkspaceLayout } from "./workspaceState";
 import {autoHidePanelRect,collapseAutoHidePanel,nearestPanelEdge,panelAutoHidePlacement,releaseAutoHidePanel,withAutoHideMetadata,repositionAutoHidePanel} from "./autoHide";
 import DockGuides from "./DockGuides";
-import {DockIntent,type DockScene,type DockPointer,type DockFeedback} from "./dockInteraction";
+import {DockIntent,type DockScene,type DockPointer,type DockFeedback,type DockGuide} from "./dockInteraction";
 import type { DragControl } from "./PanelControl";
 import { fitFloatingRect, resizeFloatingRect } from "./panelUiGeometry";
 import {canMovePanel,canPlacePanel,isEditorPanel,PRIMARY_EDITOR,rankedFloatingLayers,retainPrimaryEditor,panelLayers,openDockedPanel,openContentsPanel,fitPanelInStage,isFreelyMovableTool} from './workspacePolicy';
 import {isPanelPositionLocked,togglePanelPositionLock,canResizeSplit,openTrashPanel,dockAutoHideRail,canDockAutoHideRail} from './workspacePolicy';
 import {PanelLockGestureTracker,type PanelLockGesture} from './panelLockGesture';
+import {latestGestureFrame,gestureFrameClock} from './gestureFrame';
+import {useDesktopPanels} from './DesktopPanels';
+import {isolateWorkspacePanel} from './workspaceState';
+import {visibleDockTree,visibleFloatingGroups,railDropAt} from './nativeDocking';
+import {useNativePanelDocking} from './useNativePanelDocking';
+import {NativeDragHandoff,minimizeNativePanel,openNativePanel,canDetachDocumentTab,returnNativeGroup,type NativePanelHome} from './nativePanelState';
 export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActivate?:(id:string)=>void,headerHeight=PANEL_HEADER_HEIGHT,lockGesture:PanelLockGesture='doubleClick') {
+  const desktop=useDesktopPanels();
   const [rawLayout,setLayout]=useState<WorkspaceLayout>(defaultWorkspace),[bounds,setBounds]=useState<Rect>({x:0,y:160,width:window.innerWidth,height:window.innerHeight-185}),
     [dragging,setDragging]=useState<string|null>(null),[dockFeedback,setDockFeedback]=useState<DockFeedback|null>(null);
   const normalize=(value:WorkspaceLayout,area:Rect)=>{const next=retainPrimaryEditor(withAutoHideMetadata(completeWorkspace(value),area));return {...next,layers:rankedFloatingLayers(next.layers)};};
@@ -20,6 +27,10 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
   const boundsRef=useRef(bounds);boundsRef.current=bounds;
   const dragIntent=useRef<{id:string;point:DockPointer;intent:DockIntent;timer:ReturnType<typeof setInterval>;keys:(event:KeyboardEvent)=>void;signature:string}|null>(null);
   const iconAnchors=useRef(new Map<string,Rect>());
+  const nativeHomes=useRef(new Map<string,NativePanelHome>()),pendingNativeOpen=useRef(new Set<string>());
+  const nativeGroups=useRef(new Map<string,PanelGroup>()),pendingNativeGroups=useRef(new Set<string>());
+  const nativeHandoffs=useRef(new Set<string>());
+  const previousNativeWindows=useRef(new Set<string>());
   const update=(change:(old:WorkspaceLayout)=>WorkspaceLayout)=>setLayout(old=>{const next=normalize(change(normalize(old,boundsRef.current)),boundsRef.current);latest.current=next;return next;});
   function togglePositionLock(id:string){
     if(id===PRIMARY_EDITOR)return;
@@ -58,35 +69,74 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
     const observer=new ResizeObserver(measure);if(stage.current)observer.observe(stage.current);measure();window.addEventListener('resize',measure);
     return()=>{observer.disconnect();window.removeEventListener('resize',measure);cleanup.current?.();};
   },[stage]);
-  const measurements=measureDockTree(layout.tree,{x:0,y:0,width:bounds.width,height:bounds.height});
+  const nativeProjection=desktop.enabled?layout.open.filter(id=>nativeHomes.current.has(id)||!dockedPanels(layout.tree).includes(id)||!!layout.autoHide?.[id]):[];
+  const detachedIds=new Set([...desktop.windows.keys(),...nativeProjection]);
+  const visibleTree=visibleDockTree(layout.tree,detachedIds);
+  const measurements=measureDockTree(visibleTree,{x:0,y:0,width:bounds.width,height:bounds.height});
   function suggestedRect(id:string):Rect{
     if(id==='search')return fit({x:bounds.x+bounds.width*.48,y:bounds.y+24,width:Math.min(450,bounds.width),height:Math.min(295,bounds.height)},id);
     const editor=refFor('editor').current?.getBoundingClientRect(),width=Math.min(id==='scratch'?(editor?.width||640):id.startsWith('editor')?650:380,window.innerWidth-24),height=Math.min(id==='scratch'?(editor?.height||520):520,window.innerHeight-60);
     const offset=latest.current.open.length%5*22;return fit({x:bounds.x+bounds.width*.28+offset,y:bounds.y+30+offset,width,height},id);
   }
-  const floatingGroups=layout.floatingGroups.map(group=>({...group,rect:fit(layout.rects[group.id]||suggestedRect(group.active),group.id),floating:true}));
+  const floatingGroups=visibleFloatingGroups(layout.floatingGroups,detachedIds).map(group=>({...group,rect:fit(layout.rects[group.id]||suggestedRect(group.active),group.id),floating:true}));
   const tabGroups=[...measurements.groups.map(group=>({...group,floating:false})),...floatingGroups];
   function groupFor(id:string){return tabGroups.find(group=>group.panels.includes(id));}
   function currentRect(id:string,wholeGroup=false):Rect{
     const group=groupFor(id);
     if(group&&wholeGroup)return {...group.rect,x:group.rect.x+(group.floating?0:bounds.x),y:group.rect.y+(group.floating?0:bounds.y)};
-    const box=refFor(id).current?.getBoundingClientRect();if(box&&box.width>0)return {x:box.x,y:box.y,width:box.width,height:box.height};
+    const element=refFor(id).current;
+    const box=element?.ownerDocument===document?element.getBoundingClientRect():undefined;if(box&&box.width>0)return {x:box.x,y:box.y,width:box.width,height:box.height};
     const rect=measurements.panels[id];if(rect)return {x:rect.x+bounds.x,y:rect.y+bounds.y,width:rect.width,height:rect.height};
     if(group)return group.rect;return fit(latest.current.rects[id]||suggestedRect(id),id);
   }
   function raise(id:string){if(dockedPanels(latest.current.tree).includes(id)&&!latest.current.autoHide?.[id])return;const group=latest.current.floatingGroups.find(value=>value.panels.includes(id));const key=group?.id||id;update(old=>({...old,layers:rankedFloatingLayers(old.layers,key)}));}
-  function open(id:string){const rect=fit(latest.current.rects[id]||suggestedRect(id),id);update(old=>{
+  function open(id:string){const rect=fit(latest.current.rects[id]||suggestedRect(id),id);
+    const placement=latest.current.autoHide?.[id];if(desktop.enabled&&placement&&!nativeHomes.current.has(id))nativeHomes.current.set(id,{rect:autoHidePanelRect(placement,boundsRef.current,iconAnchors.current.get(id)),placement});
+    update(old=>{
     let next:WorkspaceLayout;
-    if(id==='toc')next=openContentsPanel(old,rect);
+    if(desktop.enabled&&nativeHomes.current.has(id))next=openNativePanel(old,id);
+    else if(id==='toc')next=openContentsPanel(old,rect);
     else if(id==='trash')next=openTrashPanel(old,rect);
     else if(isEditorPanel(id)&&!old.open.includes(id)&&!old.restore[id]&&!old.autoHide?.[id]&&canPlacePanel({...old,open:[...old.open,id]},id,PRIMARY_EDITOR,'right'))next=placeWorkspacePanel(old,id,PRIMARY_EDITOR,'right',rect);
     else next=openWorkspacePanel(old,id,rect);
     if(!dockedPanels(next.tree).includes(id)||next.autoHide?.[id]){const key=next.floatingGroups.find(group=>group.panels.includes(id))?.id||id;next={...next,layers:rankedFloatingLayers(next.layers,key)};}
     return next;
-  });onActivate?.(id);}
+  });if(desktop.enabled&&nativeHomes.current.has(id)){for(const [owner,group] of nativeGroups.current)if(group.panels.includes(id))nativeGroups.current.set(owner,{...group,active:id});pendingNativeOpen.current.add(id);}onActivate?.(id);}
+  useEffect(()=>{
+    if(!desktop.enabled)return;
+    // Every desktop floating state, including restored views and newly opened tools,
+    // is projected straight into a native host rather than shown inside the main page.
+    for(const group of layout.floatingGroups){
+      const members=group.panels.filter(id=>layout.open.includes(id));
+      if(members.length>1&&!members.some(id=>desktop.windows.has(id)||nativeHomes.current.has(id))){prepareNativeGroup({...group,panels:members},layout.rects[group.id]||suggestedRect(group.active));pendingNativeGroups.current.add(group.id);}
+    }
+    for(const id of nativeProjection)if(!nativeHomes.current.has(id)){const placement=layout.autoHide?.[id];nativeHomes.current.set(id,{rect:placement?autoHidePanelRect(placement,boundsRef.current,iconAnchors.current.get(id)):layout.rects[id]||suggestedRect(id),placement});pendingNativeOpen.current.add(id);if(placement&&layout.autoHideActive===id)update(old=>openNativePanel(old,id));}
+    for(const id of pendingNativeGroups.current){
+      pendingNativeGroups.current.delete(id);const group=nativeGroups.current.get(id),home=group&&nativeHomes.current.get(group.active);
+      if(group&&home)desktop.detachGroup(group.active,group.panels,open,{rect:()=>home.rect,onFailure:()=>nativeFailure(group.active,group),tabDrag:beginTabDrag});
+      group?.panels.forEach(member=>pendingNativeOpen.current.delete(member));
+    }
+    for(const id of pendingNativeOpen.current){
+      if(nativeHandoffs.current.has(id))continue;
+      if(!layout.open.includes(id))continue;
+      pendingNativeOpen.current.delete(id);
+      const home=nativeHomes.current.get(id);
+      if(home)desktop.detach(id,{rect:()=>home.rect,onFailure:()=>nativeFailure(id)});
+    }
+  },[rawLayout,desktop]);
+  useEffect(()=>{
+    const returned=[...previousNativeWindows.current].filter(id=>id!=='global-toolbar'&&!desktop.windows.has(id)&&latest.current.open.includes(id)&&nativeHomes.current.has(id)&&!pendingNativeOpen.current.has(id)&&!nativeHandoffs.current.has(id));
+    previousNativeWindows.current=new Set(desktop.windows.keys());
+    if(returned.length){
+      const groups=[...nativeGroups.current.entries()].filter(([,group])=>group.panels.some(id=>returned.includes(id)));
+      for(const id of returned)nativeHomes.current.delete(id);for(const [owner] of groups)nativeGroups.current.delete(owner);
+      const grouped=new Set(groups.flatMap(([,group])=>group.panels));
+      update(old=>{let next=old;for(const [,group] of groups)next=returnNativeGroup(next,group,desktop.lastRect(group.active)||suggestedRect(group.active));for(const id of returned)if(!grouped.has(id))next=openDockedPanel(next,id,next.rects[id]||suggestedRect(id));return next;});
+    }
+  },[desktop.windows]);
   function toggleAutoHide(id:string,anchor?:Rect){
     if(anchor)iconAnchors.current.set(id,anchor);
-    if(latest.current.autoHideActive===id){update(old=>collapseAutoHidePanel(old,id));return;}
+    if(latest.current.autoHideActive===id||desktop.windows.has(id)&&latest.current.autoHide?.[id]){if(desktop.windows.has(id))hide(id,true);else update(old=>collapseAutoHidePanel(old,id));return;}
     open(id);
   }
   function repositionAutoHide(id:string,offset:number,edge?:'left'|'right'){
@@ -97,18 +147,25 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
   useEffect(()=>{
     const id=layout.autoHideActive;if(!id)return;
     const outside=(event:globalThis.PointerEvent)=>{
+      if(desktop.windows.has(id)||pendingNativeOpen.current.has(id)||nativeHomes.current.has(id))return;
       const target=event.target as Element;
       if(refs.current.get(id)?.current?.contains(target)||target.closest('.nearby-panel-rail,.writing-dock,[role="menu"],[role="dialog"],.panel-action-rail,.modal-backdrop,.settings-page'))return;
       update(old=>old.autoHideActive===id?collapseAutoHidePanel(old,id):old);
     };
     document.addEventListener('pointerdown',outside);return()=>document.removeEventListener('pointerdown',outside);
-  },[layout.autoHideActive]);
+  },[layout.autoHideActive,desktop.windows]);
   function hide(id:string,minimize:boolean){
-    if(id===PRIMARY_EDITOR)return;
-    const rect=currentRect(id,true),group=groupFor(id),next=group?.panels.find(value=>value!==id);
-    update(old=>hideWorkspacePanel(old,id,rect,minimize,minimize?panelAutoHidePlacement(rect,boundsRef.current,dockedPanels(old.tree).includes(id)):undefined));if(next)onActivate?.(next);
+    if(id===PRIMARY_EDITOR&&!minimize)return;
+    const nativeRect=desktop.rect(id)||(nativeHomes.current.has(id)?desktop.lastRect(id):null);
+    if(!desktop.attach(id))return;
+    for(const [owner,group] of nativeGroups.current)if(group.panels.includes(id))nativeGroups.current.delete(owner);
+    const rect=nativeRect||currentRect(id,true),group=groupFor(id),next=group?.panels.find(value=>value!==id);
+    const home=nativeHomes.current.get(id),placement=latest.current.autoHide?.[id]||home?.placement||panelAutoHidePlacement(rect,boundsRef.current,!nativeRect&&dockedPanels(latest.current.tree).includes(id));
+    if(minimize&&(nativeRect||home))nativeHomes.current.set(id,{rect,placement:{...placement,rect}});else if(!minimize)nativeHomes.current.delete(id);
+    pendingNativeOpen.current.delete(id);
+    update(old=>{const result=minimize&&(nativeRect||home)?minimizeNativePanel(old,id,rect,placement):hideWorkspacePanel(old,id,rect,minimize,minimize?placement:undefined);return id===PRIMARY_EDITOR?{...result,nativePrimaryHidden:true}:result;});if(next)onActivate?.(next);
   }
-  function floatAt(id:string,rect:Rect){if(!canMovePanel(latest.current,id))return;const fitted=fit(rect,id);update(old=>{const next=releaseAutoHidePanel(detachWorkspacePanel(old,id),id);return {...next,open:next.open.includes(id)?next.open:[...next.open,id],minimized:next.minimized.filter(value=>value!==id),rects:{...next.rects,[id]:fitted}};});raise(id);}
+  function floatAt(id:string,rect:Rect){if(!canMovePanel(latest.current,id))return;if(desktop.enabled){if(desktop.isComposing())return;prepareNativeFloat(id,rect);pendingNativeOpen.current.add(id);return;}const fitted=fit(rect,id);update(old=>{const next=releaseAutoHidePanel(detachWorkspacePanel(old,id),id);return {...next,open:next.open.includes(id)?next.open:[...next.open,id],minimized:next.minimized.filter(value=>value!==id),rects:{...next.rects,[id]:fitted}};});raise(id);}
   function dock(id:string,target?:string,edge:DockPlacementEdge='right'){
     if(!canPlacePanel(latest.current,id,target||'',edge))return;
     const fallback=currentRect(target||id,true);update(old=>placeWorkspacePanel(old,id,target||'',edge,fallback));
@@ -124,11 +181,22 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
     update(old=>placeWorkspacePanel(old,id,target,'center',suggestedRect(id)));onActivate?.(id);
   }
   function dockingScene(id:string):DockScene {
-    const state=latest.current,docked=dockedPanels(state.tree),grouped=new Set(state.floatingGroups.flatMap(group=>group.panels));
-    const floating=state.floatingGroups.map(group=>({id:group.active,rect:fit(state.rects[group.id]||suggestedRect(group.active),group.id),layer:state.layers[group.id]||30}));
-    for(const target of state.open)if(target!==id&&!docked.includes(target)&&!grouped.has(target))floating.push({id:target,rect:state.autoHide?.[target]?autoHidePanelRect(state.autoHide[target],boundsRef.current,iconAnchors.current.get(target)):fit(state.rects[target]||suggestedRect(target),target),layer:state.layers[target]||panelLayers.floating});
-    return {panel:id,tree:state.tree,bounds:boundsRef.current,viewport:{x:0,y:0,width:window.innerWidth,height:window.innerHeight},floating,scale:headerHeight/PANEL_HEADER_HEIGHT,locked:!!state.locked,positionLockedPanels:state.open.filter(panel=>isPanelPositionLocked(state,panel)),protectedPanels:isEditorPanel(id)?[]:[PRIMARY_EDITOR,...(tabGroups.find(group=>group.panels.includes(PRIMARY_EDITOR))?.panels||[])]};
+    const state=latest.current,nativeIds=new Set([...desktop.windows.keys(),...state.open.filter(panel=>nativeHomes.current.has(panel))]),tree=visibleDockTree(state.tree,nativeIds),docked=dockedPanels(tree),groups=visibleFloatingGroups(state.floatingGroups,nativeIds),grouped=new Set(groups.flatMap(group=>group.panels));
+    const floating=groups.map(group=>({id:group.active,rect:fit(state.rects[group.id]||suggestedRect(group.active),group.id),layer:state.layers[group.id]||30}));
+    for(const target of state.open)if(target!==id&&!nativeIds.has(target)&&!docked.includes(target)&&!grouped.has(target))floating.push({id:target,rect:state.autoHide?.[target]?autoHidePanelRect(state.autoHide[target],boundsRef.current,iconAnchors.current.get(target)):fit(state.rects[target]||suggestedRect(target),target),layer:state.layers[target]||panelLayers.floating});
+    return {panel:id,tree,bounds:boundsRef.current,viewport:{x:0,y:0,width:window.innerWidth,height:window.innerHeight},floating,scale:headerHeight/PANEL_HEADER_HEIGHT,locked:!!state.locked,positionLockedPanels:state.open.filter(panel=>isPanelPositionLocked(state,panel)),protectedPanels:isEditorPanel(id)?[]:[PRIMARY_EDITOR,...(tabGroups.find(group=>group.panels.includes(PRIMARY_EDITOR))?.panels||[])],dedupeEquivalent:desktop.enabled};
   }
+  function commitNativeDrop(id:string,guide:DockGuide|null,rail:ReturnType<typeof railDropAt>){
+    const state=latest.current;
+    const entry=nativeGroupEntry(id),owner=entry?.[0]||id,nativeGroup=entry?.[1],members=nativeGroup?.panels||[id];
+    if(rail){if(state.locked||members.some(member=>isPanelPositionLocked(state,member)))return;const rect=desktop.rect(id)||currentRect(id);if(!desktop.attach(id))return;nativeGroups.current.delete(owner);const placement={edge:rail.edge,offset:rail.offset,rect};members.forEach(member=>nativeHomes.current.set(member,{rect,placement}));update(old=>{let result=old;for(const member of members)result=minimizeNativePanel(result,member,rect,placement);return members.includes(PRIMARY_EDITOR)?{...result,nativePrimaryHidden:true}:result;});return;}
+    if(!guide)return;
+    const allowed=id===PRIMARY_EDITOR?!state.locked&&!isPanelPositionLocked(state,guide.target)&&(guide.edge!=='center'||isEditorPanel(guide.target)):canPlacePanel(state,id,guide.target,guide.edge);
+    if(!allowed||members.some(member=>member!==PRIMARY_EDITOR&&!canPlacePanel(state,member,guide.target,guide.edge))||!desktop.attach(id))return;
+    members.forEach(member=>{nativeHomes.current.delete(member);pendingNativeOpen.current.delete(member);});nativeGroups.current.delete(owner);
+    update(old=>nativeGroup?placeWorkspaceGroup(old,nativeGroup,guide.target,guide.edge,currentRect(guide.target,true),guide.scope==='workspace'):guide.scope==='workspace'?placeWorkspacePanelAtEdge(old,id,guide.edge as DockEdge):placeWorkspacePanel(old,id,guide.target,guide.edge,currentRect(guide.target,true)));onActivate?.(id);
+  }
+  useNativePanelDocking({scene:dockingScene,resolveId:desktop.panelForHost,allowed:id=>desktop.windows.has(id)&&id!=='global-toolbar'&&!desktop.isComposing(),drop:commitNativeDrop});
   function tickDocking(){
     const active=dragIntent.current;if(!active)return;
     const feedback=active.intent.step(active.point,dockingScene(active.id));
@@ -145,25 +213,29 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
     dragIntent.current={id,point,intent:new DockIntent(),keys,timer:setInterval(tickDocking,32),signature:''};
     window.addEventListener('keydown',keys,true);window.addEventListener('keyup',keys,true);tickDocking();
   }
-  function track(event:PointerEvent<HTMLElement>,move:(dx:number,dy:number,event:globalThis.PointerEvent)=>void,finish?:(event:globalThis.PointerEvent)=>void,onCancel?:()=>void){
-    event.preventDefault();cleanup.current?.();const x=event.clientX,y=event.clientY,element=stage.current||event.currentTarget,win=element.ownerDocument.defaultView!;
+  function track(event:PointerEvent<HTMLElement>,move:(dx:number,dy:number,event:globalThis.PointerEvent)=>void,finish?:(event:globalThis.PointerEvent)=>void,onCancel?:()=>void,onKey?:(event:KeyboardEvent)=>void){
+    event.preventDefault();cleanup.current?.();const x=event.clientX,y=event.clientY,source=event.currentTarget.ownerDocument,element=source===document?(stage.current||event.currentTarget):(source.querySelector<HTMLElement>('.desktop-panel-workbench')||event.currentTarget),win=source.defaultView!;
     // Capture only a real drag: capturing a simple tab press on the stage would
     // redirect its click away from the tab. The stable stage survives tab removal.
     let captured=false;
+    const movement=latestGestureFrame<globalThis.PointerEvent>(gestureFrameClock(win),e=>move(e.clientX-x,e.clientY-y,e));
     const onMove=(e:globalThis.PointerEvent)=>{
+      if(e.pointerId!==event.pointerId)return;
       const dx=e.clientX-x,dy=e.clientY-y;
       if(!captured&&Math.hypot(dx,dy)>=5){element.setPointerCapture(event.pointerId);captured=true;}
-      move(dx,dy,e);
+      movement.push(e);
     };
-    const clear=()=>{win.removeEventListener('pointermove',onMove);win.removeEventListener('pointerup',end);win.removeEventListener('pointercancel',cancel);win.removeEventListener('keydown',key,true);win.removeEventListener('blur',cancel);element.removeEventListener('lostpointercapture',cancel);cleanup.current=null;if(element.hasPointerCapture(event.pointerId))element.releasePointerCapture(event.pointerId);};
+    const clear=()=>{movement.cancel();win.removeEventListener('pointermove',onMove);win.removeEventListener('pointerup',end);win.removeEventListener('pointercancel',cancel);win.removeEventListener('keydown',key,true);win.removeEventListener('keyup',key,true);win.removeEventListener('blur',cancel);element.removeEventListener('lostpointercapture',cancel);cleanup.current=null;if(element.hasPointerCapture(event.pointerId))element.releasePointerCapture(event.pointerId);};
     const cancel=()=>{clear();onCancel?.();setDragging(null);stopDocking();};
-    const key=(e:KeyboardEvent)=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();cancel();}};
-    const end=(e:globalThis.PointerEvent)=>{clear();finish?.(e);};cleanup.current=cancel;
-    win.addEventListener('pointermove',onMove);win.addEventListener('pointerup',end);win.addEventListener('pointercancel',cancel);win.addEventListener('keydown',key,true);win.addEventListener('blur',cancel);element.addEventListener('lostpointercapture',cancel);
+    const key=(e:KeyboardEvent)=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();cancel();}else{movement.flush();onKey?.(e);}};
+    const end=(e:globalThis.PointerEvent)=>{if(e.pointerId!==event.pointerId)return;try{movement.flush();}finally{clear();}finish?.(e);};cleanup.current=cancel;
+    win.addEventListener('pointermove',onMove);win.addEventListener('pointerup',end);win.addEventListener('pointercancel',cancel);win.addEventListener('keydown',key,true);win.addEventListener('keyup',key,true);win.addEventListener('blur',cancel);element.addEventListener('lostpointercapture',cancel);
   }
   function beginDrag(id:string,event:PointerEvent<HTMLElement>,control?:DragControl){
+    if(event.currentTarget.ownerDocument!==document){desktop.beginDrag(id,event);return;}
     if(!canMovePanel(latest.current,id))return;
     if(event.button!==0||(!control&&(event.target as Element).closest('button,input,textarea,a,select,[data-no-drag]')))return;
+    if(desktop.enabled){beginNativeDrag(id,event,control);return;}
     const start=currentRect(id,control?.fromTab),original=latest.current;let began=false;raise(id);
     track(event,(dx,dy,e)=>{
       if(!began&&Math.hypot(dx,dy)<5)return;if(!began){began=true;control?.onStart?.();setDragging(id);}
@@ -178,12 +250,97 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
       setDragging(null);stopDocking();control?.onFinish(began||event.type==='pointercancel');
     },()=>{if(began)update(old=>({...old,tree:original.tree,rects:original.rects,floatingGroups:original.floatingGroups,autoHide:original.autoHide,autoHideActive:original.autoHideActive}));control?.onFinish(true);});
   }
-  function groupFloat(id:string){const group=groupFor(id);if(!group||group.panels.some(member=>!canMovePanel(latest.current,member)))return;const rect=currentRect(id,true);update(old=>floatWorkspaceGroup(old,group,rect));raise(id);}
+  function prepareNativeFloat(id:string,rect=currentRect(id)){
+    if(!nativeHomes.current.has(id))nativeHomes.current.set(id,{rect,placement:latest.current.autoHide?.[id]});
+    update(old=>openNativePanel(isolateWorkspacePanel(old,id),id));
+  }
+  function nativeFailure(id:string,group?:PanelGroup){
+    const members=group?.panels||[id];for(const member of members){nativeHomes.current.delete(member);pendingNativeOpen.current.delete(member);}nativeGroups.current.delete(group?.id||id);
+    update(old=>group?placeWorkspaceGroup(old,group,PRIMARY_EDITOR,'right',currentRect(id)):openDockedPanel(old,id,currentRect(id)));
+  }
+  function floatNativePanel(id:string){if(desktop.isComposing())return;prepareNativeFloat(id);pendingNativeOpen.current.add(id);}
+  function closePreservingAutoHide(id:string){
+    if(id===PRIMARY_EDITOR)return;
+    const home=nativeHomes.current.get(id);
+    if(home&&latest.current.autoHide?.[id]){hide(id,true);return;}
+    const rect=desktop.rect(id)||home?.rect||currentRect(id,true);
+    if(!desktop.attach(id))return;
+    if(home)nativeHomes.current.set(id,{...home,rect});
+    update(old=>closeWorkspacePanelPreservingAutoHide(old,id,rect));
+  }
+  function returnNativePanel(id:string){
+    const entry=nativeGroupEntry(id),owner=entry?.[0]||id,group=entry?.[1],members=group?.panels||desktop.members(id)||[id];
+    if(!desktop.attach(id))return false;
+    for(const member of members){nativeHomes.current.delete(member);pendingNativeOpen.current.delete(member);}nativeGroups.current.delete(owner);
+    update(old=>group?returnNativeGroup(old,group,desktop.lastRect(id)||currentRect(id)):members.reduce((next,member)=>openDockedPanel(next,member,currentRect(member)),old));
+    return true;
+  }
+  function beginTabDrag(id:string,event:PointerEvent<HTMLElement>,control?:DragControl){
+    if(event.button!==0||!event.isPrimary)return;
+    if(event.currentTarget.ownerDocument!==document&&(!isEditorPanel(id)||(desktop.members(id)?.length||0)<2)){desktop.beginDrag(id,event);return;}
+    if(!canDetachDocumentTab(latest.current,id)||desktop.isComposing()||event.button!==0)return;
+    if(desktop.enabled)beginNativeDrag(id,event,control);else beginDrag(id,event,control);
+  }
+  function prepareNativeGroup(group:PanelGroup,rect:Rect){
+    nativeGroups.current.set(group.id,group);
+    for(const id of group.panels)nativeHomes.current.set(id,{rect,placement:latest.current.autoHide?.[id]});
+  }
+  function nativeGroupEntry(id:string){
+    const members=desktop.members(id);
+    const entry=[...nativeGroups.current.entries()].find(([,group])=>group.panels.includes(id)||members?.some(member=>group.panels.includes(member)));
+    if(!entry)return;
+    return [entry[0],members?{...entry[1],panels:entry[1].panels.filter(member=>members.includes(member)),active:members.includes(entry[1].active)?entry[1].active:members[0]}:entry[1]] as const;
+  }
+  function beginNativeDrag(id:string,event:PointerEvent<HTMLElement>,control?:DragControl,nativeGroup?:PanelGroup){
+    if(desktop.isComposing())return;
+    const sourceWindow=event.currentTarget.ownerDocument.defaultView!,fromNative=sourceWindow!==window;
+    const offset={x:sourceWindow.screenX-window.screenX,y:sourceWindow.screenY-window.screenY},origin={x:event.clientX+offset.x,y:event.clientY+offset.y};
+    const original=latest.current,start=fromNative?(desktop.rect(id)||currentRect(id)):currentRect(id,control?.fromTab),home=nativeHomes.current.get(id),sourceGroup=fromNative?nativeGroupEntry(id):undefined,sourceHost=fromNative?desktop.owner(id):'';
+    const intent=new DockIntent();let last={...origin,free:event.altKey},movingHost=id;
+    const handoff=new NativeDragHandoff(start,origin);let began=false,transfer:ReturnType<typeof desktop.extract>=null;
+    const restore=()=>{
+      nativeHandoffs.current.delete(id);pendingNativeOpen.current.delete(id);
+      const restored=transfer?transfer.restore():(desktop.attach(id),true);
+      for(const member of nativeGroup?.panels||[id])nativeHomes.current.delete(member);if(nativeGroup)nativeGroups.current.delete(nativeGroup.id);
+      if(sourceGroup){
+        if(restored){nativeGroups.current.set(sourceGroup[0],sourceGroup[1]);if(home)nativeHomes.current.set(id,home);}
+        else{nativeGroups.current.delete(sourceGroup[0]);sourceGroup[1].panels.forEach(member=>nativeHomes.current.delete(member));}
+      }else if(home)nativeHomes.current.set(id,home);
+      update(()=>sourceGroup&&!restored?returnNativeGroup(original,sourceGroup[1],start):original);
+    };
+    track(event,(dx,dy,e)=>{
+      last={x:origin.x+dx,y:origin.y+dy,free:e.altKey};handoff.move(last);
+      if(!began&&Math.hypot(dx,dy)<5)return;
+      if(!began){
+        if(fromNative){nativeHandoffs.current.add(id);transfer=desktop.extract(id);if(!transfer){nativeHandoffs.current.delete(id);cleanup.current?.();return;}
+          if(sourceGroup){const panels=sourceGroup[1].panels.filter(member=>member!==id),active=desktop.panelForHost(sourceHost);if(panels.length>1)nativeGroups.current.set(sourceGroup[0],{...sourceGroup[1],panels,active:panels.includes(active)?active:panels[0]});else nativeGroups.current.delete(sourceGroup[0]);}
+        }
+        began=true;control?.onStart?.();if(nativeGroup){prepareNativeGroup(nativeGroup,start);update(old=>({...old}));}else prepareNativeFloat(id,start);
+        const options={rect:()=>handoff.placement(),inactive:true,tabDrag:beginTabDrag,onReady:()=>{
+          nativeHandoffs.current.delete(id);movingHost=desktop.owner(id);
+          if(handoff.phase==='cancelled')return;
+          if(handoff.phase==='ended'){onActivate?.(id);const scene=dockingScene(id),rail=last.free||scene.locked?null:railDropAt(last,scene.bounds,scene.viewport.width),guide=rail?null:intent.step(last,scene).ready;commitNativeDrop(id,guide,rail);return;}
+          if(handoff.ready()&&!window.hiveDesktop?.panelDrag(movingHost,'start',undefined,last.free)){handoff.cancel();const cancel=cleanup.current;if(cancel)cancel();else restore();}
+        },onFailure:()=>{handoff.cancel();const cancel=cleanup.current;if(cancel)cancel();else restore();}};
+        if(nativeGroup)desktop.detachGroup(id,nativeGroup.panels,open,options);else desktop.detach(id,options);
+      }else if(handoff.phase==='dragging')window.hiveDesktop?.panelDrag(movingHost,'move',undefined,last.free);
+    },e=>{
+      last={x:e.clientX+offset.x,y:e.clientY+offset.y,free:e.altKey};handoff.move(last);const active=handoff.phase==='dragging';handoff.end();
+      if(active){window.hiveDesktop?.panelDrag(movingHost,'end',undefined,last.free);onActivate?.(id);}
+      control?.onFinish(began);
+    },()=>{
+      const active=handoff.phase==='dragging';handoff.cancel();
+      if(active)window.hiveDesktop?.panelDrag(movingHost,'cancel');
+      if(began)restore();control?.onFinish(true);
+    },e=>{if(e.key==='Alt'){last.free=e.altKey;if(handoff.phase==='dragging')window.hiveDesktop?.panelDrag(movingHost,'move',undefined,last.free);}});
+  }
+  function groupFloat(id:string){if(desktop.enabled&&desktop.isComposing())return;const group=groupFor(id);if(!group||group.panels.some(member=>!canMovePanel(latest.current,member)))return;const rect=currentRect(id,true);update(old=>floatWorkspaceGroup(old,group,rect));raise(id);}
   function groupDock(id:string){const group=groupFor(id);if(!group||group.panels.includes(PRIMARY_EDITOR)||group.panels.some(member=>!canPlacePanel(latest.current,member,PRIMARY_EDITOR,'right')))return;const rect=currentRect(id,true);update(old=>placeWorkspaceGroup(old,group,PRIMARY_EDITOR,'right',rect));}
   function beginGroupDrag(id:string,event:PointerEvent<HTMLElement>,control?:DragControl){
     const group=groupFor(id);if(!group||event.button!==0)return;
     const original=latest.current;
     if(group.panels.some(member=>!canMovePanel(original,member)))return;
+    if(desktop.enabled){beginNativeDrag(id,event,control,{...group,active:id});return;}
     const start=currentRect(id,true);let began=false;raise(id);
     track(event,(dx,dy,e)=>{
       if(!began&&Math.hypot(dx,dy)<5)return;
@@ -203,6 +360,7 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
     },()=>{if(began)update(()=>original);control?.onFinish(true);});
   }
   function resize(id:string,event:PointerEvent<HTMLElement>,edge:string){
+    if(event.currentTarget.ownerDocument!==document){desktop.beginDrag(id,event,edge);return;}
     if(event.button!==0)return;
     event.stopPropagation();const start=currentRect(id,true),original=latest.current,startTree=original.tree,docked=dockedPanels(startTree).includes(id),edgeMap=dockResizeEdges(startTree,id);
     const autoHide=original.autoHide?.[id];
@@ -228,13 +386,13 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
       update(old=>({...old,rects:{...old.rects,[key]:rect}}));
     },undefined,()=>update(old=>({...old,tree:original.tree,rects:original.rects,floatingGroups:original.floatingGroups})));
   }
-  function handles(id:string){if(!isFreelyMovableTool(layout,id)&&(isPanelPositionLocked(layout,id)||layout.locked&&dockedPanels(layout.tree).includes(id)))return null;const hidden=layout.autoHide?.[id];const edges=hidden?[({left:'e',right:'w',top:'s',bottom:'n'} as const)[hidden.edge]]:['n','s','e','w','ne','nw','se','sw'];return <>{edges.map(edge=><div key={edge} data-resize-edge={edge} className={'panel-resize panel-resize-'+edge} aria-label={`调整面板大小 ${edge}`} onPointerDown={event=>resize(id,event,edge)}/>)}</>;}
+  function handles(id:string){if(!desktop.windows.has(id)&&!isFreelyMovableTool(layout,id)&&(isPanelPositionLocked(layout,id)||layout.locked&&dockedPanels(layout.tree).includes(id)))return null;const hidden=desktop.windows.has(id)?undefined:layout.autoHide?.[id];const edges=hidden?[({left:'e',right:'w',top:'s',bottom:'n'} as const)[hidden.edge]]:['n','s','e','w','ne','nw','se','sw'];return <>{edges.map(edge=><div key={edge} data-resize-edge={edge} className={'panel-resize panel-resize-'+edge} aria-label={`调整面板大小 ${edge}`} onPointerDown={event=>resize(id,event,edge)}/>)}</>;}
   function panel(id:string){
     const autoHide=layout.autoHide?.[id],peek=!!autoHide&&layout.autoHideActive===id;
     const group=groupFor(id),floating=!measurements.panels[id]&&!autoHide,frame=peek?autoHidePanelRect(autoHide!,bounds,iconAnchors.current.get(id)):group?.rect||measurements.panels[id]||fit(layout.rects[id]||suggestedRect(id),id);
     const rect=group?{...frame,y:frame.y+headerHeight,height:Math.max(0,frame.height-headerHeight)}:frame;
-    const style:CSSProperties={position:floating||peek?'fixed':'absolute',left:rect.x,top:rect.y,width:rect.width,height:rect.height,minWidth:0,minHeight:0,flex:'none',display:layout.open.includes(id)&&(!group||group.active===id)?undefined:'none',zIndex:peek||floating?layout.layers[group?.id||id]||panelLayers.floating:panelLayers.docked,boxShadow:peek?'0 8px 28px #0008':undefined,borderTopLeftRadius:group?0:undefined,borderTopRightRadius:group?0:undefined};
-    return {ref:refFor(id),floating,movable:canMovePanel(layout,id),primary:id===PRIMARY_EDITOR,positionLocked:isPanelPositionLocked(layout,id),lockHint:isPanelPositionLocked(layout,id)?((isFreelyMovableTool(layout,id)?"停靠位置已锁定，浮窗可移动和缩放 · ":"位置已锁定 · ")+(lockGesture==="longPress"?"长按":"双击")+"标题栏解锁"):(lockGesture==="longPress"?"长按标题栏锁定位置":"双击标题栏锁定位置"),canDock:!layout.locked&&!isPanelPositionLocked(layout,id)&&id!==PRIMARY_EDITOR,autoHidden:!!autoHide,collapseEdge:autoHide?.edge||nearestPanelEdge({...frame,x:frame.x+(floating?0:bounds.x),y:frame.y+(floating?0:bounds.y)},bounds,!floating),grouped:!!group,style,raise:()=>raise(id),beginDrag:(event:PointerEvent<HTMLElement>,control?:DragControl)=>beginDrag(id,event,control),toggleFloat:()=>toggleFloat(id),floatAt:(rect:Rect)=>floatAt(id,rect),openDocked:()=>openDocked(id),openFloating:()=>floatAt(id,fit(latest.current.rects[id]||suggestedRect(id),id)),dock:()=>dock(id),dockAtEdge:(edge:DockEdge)=>dockAtEdge(id,edge),close:()=>hide(id,false),minimize:()=>hide(id,true),handles:group?null:handles(id),groupHandles:group?handles(id):null};
+    const style:CSSProperties={position:floating||peek?'fixed':'absolute',left:rect.x,top:rect.y,width:rect.width,height:rect.height,minWidth:0,minHeight:0,flex:'none',display:layout.open.includes(id)&&(!group||group.active===id)&&!detachedIds.has(id)?undefined:'none',zIndex:peek||floating?layout.layers[group?.id||id]||panelLayers.floating:panelLayers.docked,boxShadow:peek?'0 8px 28px #0008':undefined,borderTopLeftRadius:group?0:undefined,borderTopRightRadius:group?0:undefined};
+    return {ref:refFor(id),visible:style.display!=='none',floating,movable:canMovePanel(layout,id),primary:id===PRIMARY_EDITOR,positionLocked:isPanelPositionLocked(layout,id),lockHint:isPanelPositionLocked(layout,id)?((isFreelyMovableTool(layout,id)?"停靠位置已锁定，浮窗可移动和缩放 · ":"位置已锁定 · ")+(lockGesture==="longPress"?"长按":"双击")+"标题栏解锁"):(lockGesture==="longPress"?"长按标题栏锁定位置":"双击标题栏锁定位置"),canDock:!layout.locked&&!isPanelPositionLocked(layout,id)&&id!==PRIMARY_EDITOR,autoHidden:!!autoHide,collapseEdge:autoHide?.edge||nearestPanelEdge({...frame,x:frame.x+(floating?0:bounds.x),y:frame.y+(floating?0:bounds.y)},bounds,!floating),grouped:!!group,style,raise:()=>raise(id),beginDrag:(event:PointerEvent<HTMLElement>,control?:DragControl)=>beginDrag(id,event,control),toggleFloat:()=>toggleFloat(id),floatAt:(rect:Rect)=>floatAt(id,rect),openDocked:()=>openDocked(id),openFloating:()=>floatAt(id,fit(latest.current.rects[id]||suggestedRect(id),id)),dock:()=>dock(id),dockAtEdge:(edge:DockEdge)=>dockAtEdge(id,edge),close:()=>hide(id,false),minimize:()=>hide(id,true),handles:group?null:handles(id),groupHandles:group?handles(id):null};
   }
   const chrome=<>
     {measurements.dividers.map(divider=><div key={divider.id} className={'workspace-divider axis-'+divider.axis+(!canResizeSplit(layout,divider.id)?' layout-locked':'')} role="separator" aria-disabled={!canResizeSplit(layout,divider.id)} tabIndex={canResizeSplit(layout,divider.id)?0:-1} aria-label={divider.axis==='x'?'调整左右面板比例':'调整上下面板比例'} aria-orientation={divider.axis==='x'?'vertical':'horizontal'} aria-valuenow={Math.round(divider.ratio*100)} aria-valuemin={12} aria-valuemax={88} style={{left:divider.rect.x,top:divider.rect.y,width:divider.rect.width,height:divider.rect.height}}
@@ -245,7 +403,7 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
       draggedLabel={refFor(dragging).current?.getAttribute('aria-label')||'面板'}
       tabs={(tabGroups.find(group=>group.panels.includes(dockFeedback?.target?.id||''))?.panels.filter(id=>id!==dragging)||[dockFeedback?.target?.id||'']).map(id=>refFor(id).current?.getAttribute('aria-label')||'目标面板')}/>,document.body)}
   </>;
-  return {panel,beginGroupDrag,groupFloat,groupDock,canPullRail:(edge:'left'|'right')=>canDockAutoHideRail(layout,edge),dockAutoHideRail:(edge:'left'|'right',width:number)=>update(old=>dockAutoHideRail(old,edge,width,boundsRef.current.width)),closePreservingAutoHide:(id:string)=>{if(id===PRIMARY_EDITOR)return;const rect=currentRect(id,true);update(old=>closeWorkspacePanelPreservingAutoHide(old,id,rect));},open,splitEditor,openDocumentTab,isPositionLocked:(id:string)=>isPanelPositionLocked(layout,id),togglePositionLock,locked:!!layout.locked,toggleLocked:()=>{cleanup.current?.();stopDocking();update(old=>({...old,locked:!old.locked}));},close:(id:string)=>hide(id,false),minimize:(id:string)=>hide(id,true),toggle:(id:string)=>layout.open.includes(id)?hide(id,false):open(id),isOpen:(id:string)=>layout.open.includes(id),chrome,
+  return {panel,beginTabDrag,beginGroupDrag,groupFloat,groupDock,prepareNativeFloat,floatNativePanel,returnNativePanel,canPullRail:(edge:'left'|'right')=>canDockAutoHideRail(layout,edge),dockAutoHideRail:(edge:'left'|'right',width:number)=>update(old=>dockAutoHideRail(old,edge,width,boundsRef.current.width)),closePreservingAutoHide,open,splitEditor,openDocumentTab,isPositionLocked:(id:string)=>isPanelPositionLocked(layout,id),togglePositionLock,locked:!!layout.locked,toggleLocked:()=>{cleanup.current?.();stopDocking();update(old=>({...old,locked:!old.locked}));},close:(id:string)=>hide(id,false),minimize:(id:string)=>hide(id,true),toggle:(id:string)=>layout.open.includes(id)?hide(id,false):open(id),isOpen:(id:string)=>layout.open.includes(id),chrome,
     capture:()=>structuredClone(latest.current),
     restoreLayout:(saved:WorkspaceLayout)=>{
       if(latest.current.locked)throw new Error('请先解锁工作区位置，再应用其他视图。');
@@ -253,5 +411,5 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
       const next=structuredClone(saved);next.rects=Object.fromEntries(Object.entries(next.rects).map(([id,rect])=>[id,fit(rect,id,next)]));
       const normalized=normalize(next,boundsRef.current);latest.current=normalized;setLayout(normalized);
     },
-    reset:()=>{if(latest.current.locked)return;const next=defaultWorkspace();latest.current=next;setLayout(next);},openIds:layout.open,minimizedIds:layout.minimized,toggleAutoHide,repositionAutoHide,openDocked,autoHideItems:Object.entries(layout.autoHide||{}).map(([id,placement])=>({id,edge:placement.edge,offset:placement.offset,active:layout.autoHideActive===id})),tabGroups:tabGroups.map(group=>({...group,style:{position:group.floating?'fixed':'absolute',left:group.rect.x,top:group.rect.y,width:group.rect.width,height:group.rect.height,zIndex:group.floating?(layout.layers[group.id]||panelLayers.floating)+1:panelLayers.tabs} as CSSProperties}))};
+    reset:()=>{if(latest.current.locked)return;const next=defaultWorkspace();latest.current=next;setLayout(next);},openIds:layout.open,minimizedIds:layout.minimized,toggleAutoHide,repositionAutoHide,openDocked,autoHideItems:Object.entries(layout.autoHide||{}).map(([id,placement])=>({id,edge:placement.edge,offset:placement.offset,active:layout.autoHideActive===id||desktop.enabled&&nativeHomes.current.has(id)&&layout.open.includes(id)})),tabGroups:tabGroups.map(group=>({...group,style:{position:group.floating?'fixed':'absolute',left:group.rect.x,top:group.rect.y,width:group.rect.width,height:group.rect.height,zIndex:group.floating?(layout.layers[group.id]||panelLayers.floating)+1:panelLayers.tabs} as CSSProperties}))};
 }

@@ -1,6 +1,6 @@
 import { activateDockPanel, dockedPanels, initialDockTree, insertDockPanel, insertDockPanelAtRoot, mergeDockPanel, removeDockPanel, restoreDockAnchor, restoreDockPanel, type DockEdge, type DockPlacementEdge, type DockRestoreAnchor, type DockTree, type PanelGroup, type Rect } from "./panelLayout";
 import {collapseAutoHidePanel,expandAutoHidePanel,releaseAutoHidePanel,type AutoHidePlacement} from './autoHide';
-export type WorkspaceLayout={tree:DockTree|null;open:string[];minimized:string[];rects:Record<string,Rect>;layers:Record<string,number>;floatingGroups:PanelGroup[];restore:Record<string,DockRestoreAnchor>;autoHide?:Record<string,AutoHidePlacement>;autoHideActive?:string|null;locked?:boolean;lockedPanels?:string[]};
+export type WorkspaceLayout={tree:DockTree|null;open:string[];minimized:string[];rects:Record<string,Rect>;layers:Record<string,number>;floatingGroups:PanelGroup[];restore:Record<string,DockRestoreAnchor>;autoHide?:Record<string,AutoHidePlacement>;autoHideActive?:string|null;locked?:boolean;lockedPanels?:string[];nativePrimaryHidden?:boolean};
 export const defaultWorkspace=():WorkspaceLayout=>({tree:initialDockTree(),open:['files','editor','conversation'],minimized:[],rects:{},layers:{},floatingGroups:[],restore:{}});
 export function completeWorkspace(value:WorkspaceLayout):WorkspaceLayout{return {...value,minimized:value.minimized||[],floatingGroups:value.floatingGroups||[],restore:value.restore||{}};}
 export function findPanelGroup(tree:DockTree|null,panel:string):PanelGroup|undefined{
@@ -17,6 +17,22 @@ export function detachWorkspacePanel(layout:WorkspaceLayout,id:string):Workspace
     else if(panels.length>1)floatingGroups.push({...group,panels,active:panels.includes(group.active)?group.active:panels[0]});
   }
   return {...layout,tree:removeDockPanel(layout.tree,id),rects,floatingGroups};
+}
+/** Keep a standalone home for one native window instead of leaving it in a tab group. */
+export function isolateWorkspacePanel(layout:WorkspaceLayout,id:string):WorkspaceLayout {
+  const split=(node:DockTree|null):DockTree|null=>{
+    if(!node||node.type==='panel')return node;
+    if(node.type==='split')return {...node,a:split(node.a)!,b:split(node.b)!};
+    if(!node.panels.includes(id))return node;
+    const rest=node.panels.filter(panel=>panel!==id);
+    if(!rest.length)return {type:'panel',panel:id};
+    const remaining:DockTree=rest.length===1?{type:'panel',panel:rest[0]}:{...node,panels:rest,active:rest.includes(node.active)?node.active:rest[0]};
+    return {type:'split',id:`native-home:${id}`,axis:'x',ratio:.5,a:{type:'panel',panel:id},b:remaining};
+  };
+  const group=layout.floatingGroups.find(value=>value.panels.includes(id));
+  if(!group)return {...layout,tree:split(layout.tree)};
+  const rect=layout.rects[group.id],next=detachWorkspacePanel(layout,id);
+  return {...next,rects:rect?{...next.rects,[id]:{...rect,x:rect.x+20,y:rect.y+20}}:next.rects};
 }
 export function floatWorkspaceGroup(layout:WorkspaceLayout,group:PanelGroup,rect:Rect):WorkspaceLayout {
   let next=layout;

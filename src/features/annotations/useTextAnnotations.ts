@@ -20,6 +20,9 @@ import {
 } from "./annotations";
 import { canApply } from "../../shared/core";
 import { setAnnotationMarks } from "./annotationDecorations";
+import { pruneAnnotationCache } from "./annotationCache";
+import type {Transaction} from '@codemirror/state';
+import {mapStoredAnnotationRecord} from './storedAnnotationChanges';
 type Dataset = {
   key: string;
   source: AnnotationSource;
@@ -69,9 +72,10 @@ export function useTextAnnotations(
   activeFile.current = file;
   errorRef.current = onError;
   const lastMarkedIds = useRef<string[]>([]);
+  const mounted = useRef(true);
   const [tick, setTick] = useState(0),
     [selected, setSelected] = useState<Set<string>>(new Set());
-  const redraw = useCallback(() => setTick((value) => value + 1), []);
+  const redraw = useCallback(() => {if(mounted.current)setTick((value) => value + 1);}, []);
   const persist = useRef<(record: Dataset) => Promise<void>>(async () => {});
   persist.current = async (record) => {
     if (
@@ -135,11 +139,26 @@ export function useTextAnnotations(
       errorRef.current(record.error + " 当前标注仍保留在界面，可导出备份。");
     } finally {
       record.busy = false;
-      redraw();
-      if (record.seq !== record.savedSeq && !record.error)
-        record.timer = setTimeout(() => void persist.current(record), 300);
+      if(record.cache)pruneAnnotationCache(record.cache,data.current.document);
+      if(mounted.current)redraw();
+      if (record.seq !== record.savedSeq && !record.error) {
+        if(mounted.current)record.timer = setTimeout(() => {record.timer=undefined;void persist.current(record);}, 300);
+        else void persist.current(record);
+      }
     }
   };
+  useEffect(()=>{
+    mounted.current=true;
+    return ()=>{
+      mounted.current=false;
+      const records=new Set(Object.values(data.current).filter((record):record is Dataset=>!!record));
+      for(const record of [...records])for(const cached of record.cache?.values()||[])records.add(cached);
+      for(const record of records){
+        if(record.timer){clearTimeout(record.timer);record.timer=undefined;}
+        if(record.seq!==record.savedSeq&&!record.busy&&!record.error)void persist.current(record);
+      }
+    };
+  },[]);
   useEffect(()=>fileWorkspace.register(async()=>{
     const records=new Set(Object.values(data.current).filter((record):record is Dataset=>!!record));
     for(const record of [...records])for(const cached of record.cache?.values()||[])records.add(cached);
@@ -155,7 +174,8 @@ export function useTextAnnotations(
     (record: Dataset) => {
       record.seq++;
       if (record.timer) clearTimeout(record.timer);
-      record.timer = setTimeout(() => void persist.current(record), 500);
+      if(mounted.current)record.timer = setTimeout(() => {record.timer=undefined;void persist.current(record);}, 500);
+      else void persist.current(record);
       redraw();
     },
     [redraw],
@@ -193,7 +213,7 @@ export function useTextAnnotations(
         ...item,
       }));
       record.ready = true;
-      syncEditor(record.source,record.source === "document" ? main.current : scratch.current,record.file);
+      if(mounted.current)syncEditor(record.source,record.source === "document" ? main.current : scratch.current,record.file);
       if (
         result.fingerprint &&
         result.fingerprint !== fingerprint &&
@@ -205,7 +225,7 @@ export function useTextAnnotations(
       record.error = (error as Error).message;
       errorRef.current("标注载入失败：" + record.error);
       redraw();
-    } finally { record.loading=false; }
+    } finally { record.loading=false;if(record.cache)pruneAnnotationCache(record.cache,data.current.document); }
   }
   useEffect(() => {
     if (!file || !main.current) return;
@@ -224,6 +244,7 @@ export function useTextAnnotations(
     }
     const cached = cache.get(file);
     if (cached) {
+      cache.delete(file);cache.set(file,cached);
       const currentText = main.current.state.doc.toString();
       if (cached.text !== currentText) {
         cached.text = currentText;
@@ -231,6 +252,7 @@ export function useTextAnnotations(
         touch(cached);
       }
       data.current.document = cached;
+      pruneAnnotationCache(cache,cached);
       if(!cached.ready&&!cached.error)void load(cached);
       redraw();
       return;
@@ -239,6 +261,7 @@ export function useTextAnnotations(
     record.cache = cache;
     cache.set(file, record);
     data.current.document = record;
+    pruneAnnotationCache(cache,record);
     void load(record);
     redraw();
   }, [file, scratchReady]);
@@ -253,6 +276,11 @@ export function useTextAnnotations(
     void load(record);
     redraw();
   }, [scratchReady]);
+  const mapStoredDocument=useCallback((file:string,transaction:Transaction)=>{
+    if(!transaction.docChanged)return;
+    const active=data.current.document,record=active?.file===file?active:active?.cache?.get(file);
+    if(record&&mapStoredAnnotationRecord(record,transaction)&&record.items.length)touch(record);
+  },[touch]);
   const map = useCallback(
     (source: AnnotationSource, update: ViewUpdate) => {
       const record = data.current[source];
@@ -262,7 +290,7 @@ export function useTextAnnotations(
         (source === "document" && record.file !== activeFile.current)
       )
         return;
-      record.text = update.state.doc.toString();
+      if(update.docChanged)record.text = update.state.doc.toString();
       if (update.docChanged && record.items.length) {
         record.items = mapAnnotations(record.items, update.changes);
         touch(record);
@@ -400,7 +428,7 @@ export function useTextAnnotations(
     selected,
     mark,
     lastMarkedIds,
-    syncEditor,
+    syncEditor,mapStoredDocument,
     unmark,
     map,
     locate,

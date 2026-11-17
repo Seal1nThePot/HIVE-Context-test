@@ -4,6 +4,7 @@ import type { EditorView } from "@codemirror/view";
 import { Check, Send } from "lucide-react";
 import "./annotation-bubble.css";
 import type { AnnotationSource, TextAnnotation } from "./annotations";
+import {sameSourceTable} from '../editor/tableViewport';
 export function clampAnnotationPosition(value:{x:number;y:number},width:number,height:number,viewportWidth:number,viewportHeight:number){
   return {x:Math.max(8,Math.min(value.x,Math.max(8,viewportWidth-width-8))),y:Math.max(8,Math.min(value.y,Math.max(8,viewportHeight-height-8)))};
 }
@@ -27,7 +28,7 @@ export function tableBatchIds(item:TextAnnotation,items:TextAnnotation[],editor:
   const cells=[...editor.dom.querySelectorAll<HTMLElement>('[data-table-annotation-ids]')];
   const table=cells.find(cell=>tableAnnotationIds(cell).includes(item.id))?.closest('[data-table-widget]');
   if(!table)return [item.id];
-  const present=new Set(cells.filter(cell=>cell.closest('[data-table-widget]')===table).flatMap(tableAnnotationIds));
+  const present=new Set(cells.filter(cell=>sameSourceTable(cell.closest('[data-table-widget]'),table)).flatMap(tableAnnotationIds));
   const group=groups.get(item.id)||items.filter(value=>value.source===item.source&&value.file===item.file&&value.createdAt===item.createdAt).map(value=>value.id);
   return group.filter(id=>present.has(id)&&items.some(value=>value.id===id));
 }
@@ -38,6 +39,7 @@ export type InlineAnnotationRequest = {
   focus?: boolean;
 };
 export default function InlineAnnotationEditor({
+  ownerDocument = document,
   items,
   request,
   editorFor,
@@ -49,6 +51,7 @@ export default function InlineAnnotationEditor({
   toolActive=false,
   bubblePlacement="right",
 }: {
+  ownerDocument?: Document;
   items: TextAnnotation[];
   request: InlineAnnotationRequest | null;
   editorFor: (source: AnnotationSource) => EditorView | null;
@@ -60,6 +63,7 @@ export default function InlineAnnotationEditor({
   toolActive?:boolean;
   bubblePlacement?:"left"|"right"|"above"|"below";
 }) {
+  const document=ownerDocument, window=document.defaultView!;
   const [shown, setShown] = useState<{
       id: string;
       ids: string[];
@@ -105,7 +109,7 @@ export default function InlineAnnotationEditor({
       const cells=[...editor.dom.querySelectorAll<HTMLElement>('[data-table-annotation-ids]')],ownCell=cells.find(cell=>tableAnnotationIds(cell).includes(item.id));
       const ids=ownCell?tableBatchIds(item,items,editor,groups.current):[item.id],key=ids.slice().sort().join('\0');if(!ids.length||seen.has(key))continue;seen.add(key);
       const table=ownCell?.closest('[data-table-widget]');
-      const rects=ownCell?cells.filter(cell=>cell.closest('[data-table-widget]')===table&&tableAnnotationIds(cell).some(id=>ids.includes(id))).flatMap(cell=>[...cell.getClientRects()]):[...editor.dom.querySelectorAll<HTMLElement>('[data-annotation-id]')].filter(mark=>mark.dataset.annotationId===item.id).flatMap(mark=>[...mark.getClientRects()]);
+      const rects=ownCell?cells.filter(cell=>sameSourceTable(cell.closest('[data-table-widget]'),table)&&tableAnnotationIds(cell).some(id=>ids.includes(id))).flatMap(cell=>[...cell.getClientRects()]):[...editor.dom.querySelectorAll<HTMLElement>('[data-annotation-id]')].filter(mark=>mark.dataset.annotationId===item.id).flatMap(mark=>[...mark.getClientRects()]);
       const clip=editor.scrollDOM.getBoundingClientRect();const visible=rects.filter(r=>r.width>0&&r.height>0&&r.right>Math.max(0,clip.left)&&r.left<Math.min(window.innerWidth,clip.right)&&r.bottom>Math.max(0,clip.top)&&r.top<Math.min(window.innerHeight,clip.bottom));if(!visible.length)continue;
       const target={left:Math.min(...visible.map(r=>r.left)),top:Math.min(...visible.map(r=>r.top)),right:Math.max(...visible.map(r=>r.right)),bottom:Math.max(...visible.map(r=>r.bottom))};
       let x=target.right+4,y=(target.top+target.bottom-24)/2;if(bubblePlacement==='left')x=target.left-28;if(bubblePlacement==='above'){x=(target.left+target.right-24)/2;y=target.top-28;}if(bubblePlacement==='below'){x=(target.left+target.right-24)/2;y=target.bottom+4;}
@@ -126,7 +130,7 @@ export default function InlineAnnotationEditor({
     const allTableCells=[...editor.dom.querySelectorAll<HTMLElement>('[data-table-annotation-ids]')];
     const anchorCell=allTableCells.find(cell=>tableAnnotationIds(cell).includes(bubbleItem.id));
     const anchorTable=anchorCell?.closest('[data-table-widget]');
-    const idsInTable=new Set(allTableCells.filter(cell=>cell.closest('[data-table-widget]')===anchorTable).flatMap(tableAnnotationIds));
+    const idsInTable=new Set(allTableCells.filter(cell=>sameSourceTable(cell.closest('[data-table-widget]'),anchorTable)).flatMap(tableAnnotationIds));
     const group=anchorTable?(groups.current.get(bubbleItem.id)||items.filter(value=>value.source===bubbleItem.source&&value.file===bubbleItem.file&&value.createdAt===bubbleItem.createdAt&&idsInTable.has(value.id)).map(value=>value.id)):[bubbleItem.id];
     const tableCells=[...editor.dom.querySelectorAll<HTMLElement>('[data-table-annotation-ids]')].filter(el=>tableAnnotationIds(el).some(id=>group.includes(id)));
     const marks=[...editor.dom.querySelectorAll<HTMLElement>('[data-annotation-id]')].filter(el=>el.dataset.annotationId===bubbleItem.id);
@@ -134,7 +138,7 @@ export default function InlineAnnotationEditor({
     const table=mark.closest<HTMLElement>('[data-table-widget]');
     let rect:DOMRect;
     if(table){
-      const cells=tableCells.filter(cell=>table.contains(cell)&&cell.getClientRects().length);
+      const cells=tableCells.filter(cell=>sameSourceTable(cell.closest('[data-table-widget]'),table)&&cell.getClientRects().length);
       const rects=cells.map(cell=>cell.getBoundingClientRect());
       const left=Math.min(...rects.map(r=>r.left)),top=Math.min(...rects.map(r=>r.top)),right=Math.max(...rects.map(r=>r.right)),bottom=Math.max(...rects.map(r=>r.bottom));
       rect=rects.length?new DOMRect(left,top,right-left,bottom-top):table.getBoundingClientRect();

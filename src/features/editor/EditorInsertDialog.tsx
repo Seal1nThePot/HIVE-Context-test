@@ -8,9 +8,10 @@ import './editor-tools.css';
 
 export type InsertTarget={editor:EditorView;file:string;valid:()=>boolean;prepare?:()=>Promise<boolean>};
 export default function EditorInsertDialog({kind,target,onClose,onInserted}:{kind:'image'|'table';target:InsertTarget;onClose:()=>void;onInserted:()=>void}){
+  const document=target.editor.dom.ownerDocument,window=document.defaultView!;
   const dialog=useRef<HTMLDialogElement>(null),snapshot=useRef(target.editor.state),uploading=useRef(false),space=useFileWorkspace();
   const [rows,setRows]=useState('3'),[columns,setColumns]=useState('3'),[file,setFile]=useState<File|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[reference,setReference]=useState('');
-  useEffect(()=>{const previous=document.activeElement as HTMLElement|null;dialog.current?.showModal();return()=>{dialog.current?.close();if(previous?.isConnected)previous.focus({preventScroll:true});};},[]);
+  useEffect(()=>{const previous=document.activeElement as HTMLElement|null,element=dialog.current;element?.showModal();return()=>{element?.close();if(previous?.isConnected)previous.focus({preventScroll:true});};},[document]);
   async function insert(){if(uploading.current)return;setError('');
     if(!target.valid()||target.editor.state.doc!==snapshot.current.doc){setError('文档内容或位置已变化，请关闭后重新插入。');return;}
     const state=target.editor.state.update({selection:snapshot.current.selection}).state;

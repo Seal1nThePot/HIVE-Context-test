@@ -1,21 +1,70 @@
-import {frontmatterBlock,maskFrontmatter} from '../../shared/frontmatter';
-import {parser,GFM} from '@lezer/markdown';
-import type {EditorState,Text} from '@codemirror/state';
+import {documentFrontmatter} from '../../shared/frontmatter';
+import type {SyntaxNode} from '@lezer/common';
+import {StateField,type ChangeDesc,type EditorState,type Text,type Transaction} from '@codemirror/state';
 import {inspectFormatting} from './formatting';
+import {markdownTree} from './markdownParse';
+import {scanMath,mergeSourceSpans,outsideMath,type SourceSpan} from './mathSyntax';
 
 type Span={from:number;to:number};
-type Node=ReturnType<typeof parser.parse>['topNode'];
+type Node=SyntaxNode;
 export type PreviewCell=Span&{text:string;virtual?:number;trailing?:boolean};
-export type PreviewReplacement=Span&{reveal:Span;block?:boolean;kind?:'bullet'|'task'|'image'|'rule'|'table'|'properties';text?:string;src?:string;rows?:PreviewCell[][];tableOrdinal?:number};
+export type PreviewReplacement=Span&{reveal:Span;block?:boolean;kind?:'bullet'|'task'|'image'|'rule'|'table'|'properties'|'math';text?:string;src?:string;rows?:PreviewCell[][];columns?:number;rowEnds?:{to:number;trailing:boolean}[];tableOrdinal?:number};
 export type PreviewStyle=Span&{className?:string;line?:boolean;align?:'left'|'center'|'right';title?:string};
 export type PreviewPlan={replacements:PreviewReplacement[];styles:PreviewStyle[]};
-const markdownParser=parser.configure(GFM),cache=new WeakMap<Text,PreviewPlan>();
+const cache=new WeakMap<Text,PreviewPlan>();
 function children(node:Node,name?:string){const items:Node[]=[];for(let item=node.firstChild;item;item=item.nextSibling)if(!name||item.name===name)items.push(item);return items;}
+
+type LocalPreviewUpdate={previousDoc:Text;changes:ChangeDesc};
+/** A canonical pipe-wrapped cell can change without changing its containing GFM block. */
+export const localPreviewUpdate=StateField.define<LocalPreviewUpdate|null>({
+  create:()=>null,
+  update(_value,tr){return tr.docChanged&&patchTableCell(tr)?{previousDoc:tr.startState.doc,changes:tr.changes}:null;},
+});
+function safeCellText(text:string){
+  if(/[\r\n]/.test(text))return false;
+  for(let i=0;i<text.length;i++){
+    if(text[i]==='|')return false;
+    if(text[i]==='\\'&&++i===text.length)return false;
+  }
+  return true;
+}
+function patchTableCell(tr:Transaction){
+  const old=cache.get(tr.startState.doc);if(!old)return false;
+  let count=0,from=0,to=0;
+  tr.changes.iterChangedRanges((fromA,toA)=>{count++;from=fromA;to=toA;});
+  if(count!==1)return false;
+  const table=old.replacements.find(item=>item.kind==='table'&&from>=item.from&&to<=item.to);
+  if(!table?.rows?.length||!table.rowEnds)return false;
+  let low=0,high=table.rowEnds.length-1;
+  while(low<high){const middle=(low+high)>>1;if(table.rowEnds[middle].to<from)low=middle+1;else high=middle;}
+  const cell=table.rows[low]?.find(cell=>cell.virtual===undefined&&from>=cell.from&&to<=cell.to);
+  if(!cell)return false;
+  const line=tr.startState.doc.lineAt(cell.from),rowText=line.text.trim();
+  // Other row shapes, delimiter changes, line breaks, escapes across cell boundaries,
+  // virtual-cell insertions and all structural changes use the full incremental parser.
+  if(!rowText.startsWith('|')||!rowText.endsWith('|')||to>line.to)return false;
+  const cellFrom=tr.changes.mapPos(cell.from,-1),cellTo=tr.changes.mapPos(cell.to,1),raw=tr.state.doc.sliceString(cellFrom,cellTo);
+  if(!safeCellText(raw)||/<\/?u>/.test(raw)||/<\/?u>/.test(tr.startState.doc.sliceString(cell.from,cell.to)))return false;
+  const position=(value:number,side:-1|1)=>tr.changes.mapPos(value,side);
+  const span=<T extends Span>(item:T):T=>{const from=position(item.from,-1),to=position(item.to,1);return from===item.from&&to===item.to?item:{...item,from,to};};
+  const replacements=old.replacements.map(item=>{
+    const mapped=span(item),reveal=span(item.reveal);
+    if(!item.rows)return mapped===item&&reveal===item.reveal?item:{...mapped,reveal};
+    const rows=item.rows.map(row=>{
+      const first=row[0],last=row.at(-1);if(item!==table&&first&&last&&last.to<from)return row;
+      if(first&&last&&last.to<from)return row;
+      return row.map(current=>{const mapped=span(current);return current===cell?{...mapped,text:raw.trim()}:mapped;});
+    });
+    const rowEnds=item.rowEnds?.map(end=>{const to=position(end.to,1);return to===end.to?end:{...end,to};});
+    return {...mapped,reveal,rows,rowEnds};
+  });
+  cache.set(tr.state.doc,{replacements,styles:old.styles.map(span)});return true;
+}
 
 export function previewPlan(state:EditorState):PreviewPlan{
   const existing=cache.get(state.doc);if(existing)return existing;
   let tableOrdinal=0;
-  const doc=state.doc,text=doc.toString(),replacements:PreviewReplacement[]=[],styles:PreviewStyle[]=[];
+  const doc=state.doc,text=doc.toString(),hasMath=text.includes('$'),replacements:PreviewReplacement[]=[],styles:PreviewStyle[]=[],mathExcluded:SourceSpan[]=[];
   const hide=(from:number,to:number,reveal:Span={from,to},extra:Partial<PreviewReplacement>={})=>{if(to>from)replacements.push({from,to,reveal:{from:reveal.from,to:reveal.to},...extra});};
   const lineStyles=(from:number,to:number,className:string,align?:PreviewStyle['align'])=>{
     for(let number=doc.lineAt(from).number;number<=doc.lineAt(Math.max(from,to-1)).number;number++){const line=doc.line(number);styles.push({from:line.from,to:line.from,line:true,className,align});}
@@ -23,6 +72,8 @@ export function previewPlan(state:EditorState):PreviewPlan{
   const hideLine=(pos:number,reveal?:Span)=>{const line=doc.lineAt(pos);hide(line.from,Math.min(doc.length,line.to+1),reveal||{from:line.from,to:line.to},{block:true});};
   function walk(node:Node){
     const parts=children(node),span={from:node.from,to:node.to};
+    if(hasMath&&['FencedCode','CodeBlock','InlineCode','Table','Image','HTMLBlock','HTMLTag','Autolink','LinkReference','URL','LinkTitle'].includes(node.name))mathExcluded.push(span);
+    if(hasMath&&node.name==='Link')for(const part of parts)if(part.name==='URL'||part.name==='LinkTitle')mathExcluded.push({from:part.from,to:part.to});
     const heading=/^(?:ATX|Setext)Heading([1-6])$/.exec(node.name);
     if(heading){
       lineStyles(node.from,node.to,`cm-preview-h${heading[1]}`);
@@ -41,14 +92,17 @@ export function previewPlan(state:EditorState):PreviewPlan{
       const marks=children(node,'CodeMark');if(marks.length===2){styles.push({from:marks[0].to,to:marks[1].from,className:'cm-preview-inline-code'});for(const mark of marks)hide(mark.from,mark.to,span);}return;
     }
     if(node.name==='Table'){
-      const rows=parts.filter(item=>item.name==='TableHeader'||item.name==='TableRow').map(row=>{
+      const rowNodes=parts.filter(item=>item.name==='TableHeader'||item.name==='TableRow');
+      const rows=rowNodes.map(row=>{
         const cells:PreviewCell[]=[],delimiters=children(row,'TableDelimiter');let start=row.from;
         for(let index=0;index<delimiters.length;index++){const delimiter=delimiters[index];if(index||text.slice(start,delimiter.from).trim())cells.push({from:start,to:delimiter.from,text:text.slice(start,delimiter.from).trim()});start=delimiter.to;}
         if(start<row.to||!delimiters.length)cells.push({from:start,to:row.to,text:text.slice(start,row.to).trim()});
         return cells;
       });
-      const columns=rows[0]?.length||0;for(const row of rows){while(row.length<columns){const rowNode=parts.filter(item=>item.name==='TableHeader'||item.name==='TableRow')[rows.indexOf(row)];row.push({from:rowNode.to,to:rowNode.to,text:'',virtual:row.length,trailing:text.slice(rowNode.from,rowNode.to).trimEnd().endsWith('|')});}if(row.length>columns)row.length=columns;}
-      hide(node.from,node.to,span,{kind:'table',block:true,rows,tableOrdinal:tableOrdinal++});return;
+      const columns=rows[0]?.length||0,rowEnds=rowNodes.map(row=>({to:row.to,trailing:text.slice(row.from,row.to).trimEnd().endsWith('|')}));
+      // Keep pathological sparse tables proportional to their source, not rows × columns.
+      rows.forEach((row,index)=>{if(rows.length*columns<=65536)while(row.length<columns)row.push({from:rowEnds[index].to,to:rowEnds[index].to,text:'',virtual:row.length,trailing:rowEnds[index].trailing});if(row.length>columns)row.length=columns;});
+      hide(node.from,node.to,span,{kind:'table',block:true,rows,columns,rowEnds,tableOrdinal:tableOrdinal++});return;
     }
     if(node.name==='HorizontalRule'){hide(node.from,node.to,span,{kind:'rule',block:true});return;}
     if(node.name==='Blockquote')lineStyles(node.from,node.to,'cm-preview-quote');
@@ -88,8 +142,8 @@ export function previewPlan(state:EditorState):PreviewPlan{
     if(node.name==='LinkReference'){hide(node.from,node.to,span,{block:true});return;}
     for(const part of parts)walk(part);
   }
-  const metadata=frontmatterBlock(text);if(metadata)hide(metadata.from,metadata.to,{from:metadata.from,to:metadata.to},{kind:'properties',block:true,text:'笔记属性'});
-  walk(markdownParser.parse(maskFrontmatter(text)).topNode);
+  const metadata=documentFrontmatter(doc);if(metadata)hide(metadata.from,metadata.to,{from:metadata.from,to:metadata.to},{kind:'properties',block:true,text:'笔记属性'});
+  walk(markdownTree(state).topNode);
   if(text.includes('<u>')||text.includes('<div style="text-align: ')){
     const {blocks,underlines}=inspectFormatting(state);
     for(const span of underlines)if(span.contentTo>span.contentFrom)styles.push({from:span.contentFrom,to:span.contentTo,className:'cm-format-underline'});
@@ -100,7 +154,17 @@ export function previewPlan(state:EditorState):PreviewPlan{
       hide(previous.text.trim()?closing.from:previous.from,Math.min(doc.length,closing.to+1),{from:closing.from,to:closing.to},{block:true});
     }
   }
-  const plan={replacements:replacements.filter(item=>!metadata||item.kind==='properties'||item.from>=metadata.to),styles:styles.filter(item=>!metadata||item.from>=metadata.to)};cache.set(doc,plan);return plan;
+  if(metadata)mathExcluded.push({from:metadata.from,to:metadata.to});
+  const math=hasMath?scanMath(text,mathExcluded):{math:[],literal:[]},protectedSpans=mergeSourceSpans([...math.math,...math.literal]);
+  const mathReplacements:PreviewReplacement[]=math.math.map(item=>({from:item.from,to:item.to,reveal:{from:item.from,to:item.to},block:item.block,kind:'math',text:item.status}));
+  const plan={
+    replacements:[...replacements.filter(item=>{
+      if(metadata&&item.kind!=='properties'&&item.from<metadata.to)return false;
+      if(!protectedSpans.length)return true;
+      const pieces=outsideMath(item,protectedSpans);return pieces.length===1&&pieces[0].from===item.from&&pieces[0].to===item.to;
+    }),...mathReplacements],
+    styles:styles.filter(item=>!metadata||item.from>=metadata.to).flatMap(item=>item.line?[item]:outsideMath(item,protectedSpans)),
+  };cache.set(doc,plan);return plan;
 }
 
 export function visibleReplacements(state:EditorState,focused:boolean){

@@ -1,3 +1,4 @@
+import {usePanelDocument} from '../../shared/panelDocument';
 import {useEffect,useRef,useState,type Dispatch,type SetStateAction} from 'react';
 import {createPortal} from 'react-dom';
 import {ArrowDownWideNarrow,ChevronDown,ChevronRight,FileText,Folder,FolderPlus,Plus,Search,Sparkles} from 'lucide-react';
@@ -13,6 +14,7 @@ type Props={entries:Entry[];workspaceId:string;root:string;file:string;dirty:boo
 type Menu={x:number;y:number;entry?:Entry;sort?:boolean};
 type Drop={path:string;where:'before'|'after'|'inside'};
 export default function FileExplorer({entries,workspaceId,root,file,dirty,filter,setFilter,collapsed,setCollapsed,onOpen,onAction,onAI,renameRequest,onReferenceDrop}:Props){
+  const document=usePanelDocument(),window=document.defaultView!;
   const storage='hive.explorer.v1:'+workspaceId;
   const space=useFileWorkspace();
   const [searchResult,setSearchResult]=useState<{scope:string;query:string;matches:{path:string;line:number|null;excerpt:string}[];truncated:boolean}|null>(null),[searching,setSearching]=useState(false);
@@ -28,7 +30,7 @@ export default function FileExplorer({entries,workspaceId,root,file,dirty,filter
   },[scope,filter,space.request,entries]);
   const container=useRef<HTMLDivElement>(null),menuRef=useRef<HTMLDivElement>(null),search=useRef<HTMLInputElement>(null),drag=useRef<string|null>(null),renaming=useRef(false),cancelRename=useRef(false);
   const skipClick=useRef(false),dragCleanup=useRef<(()=>void)|null>(null);
-  useEffect(()=>()=>dragCleanup.current?.(),[]);
+  useEffect(()=>()=>dragCleanup.current?.(),[document]);
   const all=flattenEntries(entries),focused=all.find(item=>item.path===selected);
   function store(next:ExplorerOrder){setOrder(next);try{localStorage.setItem(storage,JSON.stringify(next));}catch{setError('排序已生效，但无法保存在此浏览器中。');}}
   function expand(path:string){setCollapsed(old=>new Set([...old].filter(value=>path!==value&&!path.startsWith(value+'/'))));}
@@ -39,7 +41,7 @@ export default function FileExplorer({entries,workspaceId,root,file,dirty,filter
     if(!current.value.trim()){setError('名称不能为空。');renaming.current=false;return;}
     if(current.value===all.find(item=>item.path===current.path)?.name){setRename(null);renaming.current=false;return;}
     const result=await run(()=>onAction({action:'rename',path:current.path,name:current.value.trim()}));
-    if(result){store(remapOrder(order,current.path,result.path));setSelected(result.path);setRename(null);if(scope) setScope(mapEntryPath(scope,current.path,result.path));requestAnimationFrame(()=>container.current?.querySelector<HTMLElement>('[data-selected="true"]')?.focus());}
+    if(result){store(remapOrder(order,current.path,result.path));setSelected(result.path);setRename(null);if(scope) setScope(mapEntryPath(scope,current.path,result.path));window.requestAnimationFrame(()=>container.current?.querySelector<HTMLElement>('[data-selected="true"]')?.focus());}
     renaming.current=false;
   }
   async function create(type:'file'|'folder',parent=focused?.type==='folder'?focused.path:focused?parentPath(focused.path):scope){
@@ -61,8 +63,8 @@ export default function FileExplorer({entries,workspaceId,root,file,dirty,filter
   useEffect(()=>{
     if(!menu)return;const box=menuRef.current;if(box){const rect=box.getBoundingClientRect();box.style.left=Math.max(6,Math.min(menu.x,window.innerWidth-rect.width-6))+'px';box.style.top=Math.max(6,Math.min(menu.y,window.innerHeight-rect.height-6))+'px';box.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();}
     const outside=(event:PointerEvent)=>{if(!menuRef.current?.contains(event.target as Node))setMenu(null);};document.addEventListener('pointerdown',outside);return()=>document.removeEventListener('pointerdown',outside);
-  },[menu]);
-  function closeMenu(){setMenu(null);requestAnimationFrame(()=>container.current?.querySelector<HTMLElement>('[data-selected="true"]')?.focus());}
+  },[menu,document,window]);
+  function closeMenu(){setMenu(null);window.requestAnimationFrame(()=>container.current?.querySelector<HTMLElement>('[data-selected="true"]')?.focus());}
   const currentResults=searchResult?.scope===scope&&searchResult.query===filter?searchResult:null;
   function matches(entry:Entry):boolean{return (currentResults?currentResults.matches.some(item=>item.path===entry.path)||!!entry.children?.some(matches):entry.path.toLowerCase().includes(filter.toLowerCase())||!!entry.children?.some(matches))&&(!scope||entry.path===scope||entry.path.startsWith(scope+'/')||scope.startsWith(entry.path+'/'));}
   async function dropAt(target:Drop){const source=drag.current;drag.current=null;setDrop(null);if(!source||source===target.path)return;

@@ -1,4 +1,4 @@
-import {describe,it,expect} from 'vitest';
+import {describe,it,expect,vi} from 'vitest';
 import {EditorState} from '@codemirror/state';
 import {previewPlan} from './markdownPresentation';
 import {cellContent,decodeCell,encodeCell,tableSizeKey,tableRectangle} from './tableWidget';
@@ -12,6 +12,16 @@ describe('table source editing',()=>{
   });
   it('locates only content, preserving padding, separators, and alignment',()=>{
     const doc='| 甲 | 乙 |\n| :--- | ---: |\n|  A  | B |';const state=EditorState.create({doc});const table=previewPlan(state).replacements.find(x=>x.kind==='table')!;const part=cellContent(table.rows![1][0],doc);const next=state.update({changes:{from:part.from,to:part.to,insert:encodeCell('X|Y')}}).state.doc.toString();expect(next).toBe('| 甲 | 乙 |\n| :--- | ---: |\n|  X\\|Y  | B |');
+  });
+  it('reads only the cell range from a large document, including blank and virtual cells',()=>{
+    const prefix='正文'.repeat(50000)+'\n',doc=prefix+'|  A  |   |\n| --- | --- |',state=EditorState.create({doc});
+    const table=previewPlan(state).replacements.find(x=>x.kind==='table')!,slice=vi.spyOn(state.doc,'sliceString'),full=vi.spyOn(state.doc,'toString');
+    const first=table.rows![0][0],blank=table.rows![0][1];
+    expect(cellContent(first,state.doc)).toEqual(cellContent(first,doc));
+    expect(cellContent(blank,state.doc)).toEqual(cellContent(blank,doc));
+    expect(slice.mock.calls).toEqual([[first.from,first.to],[blank.from,blank.to]]);
+    expect(full).not.toHaveBeenCalled();
+    slice.mockClear();expect(cellContent({...blank,virtual:1},state.doc).raw).toBe('');expect(slice).not.toHaveBeenCalled();
   });
   it('uses actual parsed table order, independent of horizontal rules',()=>{
     const tables=previewPlan(EditorState.create({doc:'***\n\n| A |\n| --- |\n\n---\n\n| B |\n| --- |'})).replacements.filter(x=>x.kind==='table');

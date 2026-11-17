@@ -1,5 +1,5 @@
 import type {Text} from '@codemirror/state';
-import {markdownContent} from '../../shared/core';
+import {markdownContent} from '../../shared/markdownContent';
 
 export const statusItems=[['save','保存状态'],['count','总字数'],['selection','选中字数'],['position','行与列'],['lines','总行数'],['paragraphs','段落数量'],['eol','换行符'],['encoding','编码'],['format','文件格式']] as const;
 export type StatusKey=typeof statusItems[number][0];
@@ -34,9 +34,14 @@ export function placeStatusItem(items:StatusKey[],key:StatusKey,index=items.leng
 }
 export function textStatistics(source:string){
   const {text,paragraphs}=markdownContent(source);
-  return {characters:Array.from(text.replace(/\s/g,'')).length,pureCount:(text.match(/[\p{L}\p{N}]/gu)||[]).length,paragraphs};
+  let characters=0,pureCount=0;
+  const whitespace=/\s/u,letterOrNumber=/[\p{L}\p{N}]/u;
+  for(const character of text){if(!whitespace.test(character))characters++;if(letterOrNumber.test(character))pureCount++;}
+  return {characters,pureCount,paragraphs};
 }
 const statisticsCache=new WeakMap<Text,ReturnType<typeof textStatistics>>();
+export const cachedDocumentStatistics=(doc:Text)=>statisticsCache.get(doc);
+export function cacheDocumentStatistics(doc:Text,value:ReturnType<typeof textStatistics>){statisticsCache.set(doc,value);}
 export function documentStatistics(doc:Text){
   let value=statisticsCache.get(doc);if(!value){value=textStatistics(doc.toString());statisticsCache.set(doc,value);}return value;
 }
