@@ -3,11 +3,11 @@ import {defaultTheme,normalizeTheme,readTheme,readDefaultTheme,switchThemeBase,r
 import {editorColors,editorColorFields,editorTokens,normalizeEditorProfiles} from './editorAppearance';
 import {applyThemeTokens} from './applyTheme';
 import {applyUserProfile,createTemplateBinding,templateBaseDefaults,userProfileFor} from './templateBinding';
-import blue from '../../../templates/mediterranean-blue/colors.json';
+import blue from '../../../templates/claude-mediterranean-blue/colors.json';
 
 describe('independent text editor colors',()=>{
   it('keeps old templates valid and derives editor defaults from their own base',()=>{
-    const binding=createTemplateBinding({id:'mediterranean-blue',name:'blue',bases:['black','white']},blue);
+    const binding=createTemplateBinding({id:'claude-mediterranean-blue',name:'blue',bases:['black','white']},blue);
     for(const base of binding.bases){const theme=templateBaseDefaults(binding,base),s=themeTokens(theme).surfaces,c=editorColors(theme);expect(c.selectionBackground).toBe(s.selection);expect(c.selectionText).toBe(s.documentText);expect(c.annotationUnderline).toBe(theme.colors.accent);}
   });
   it('validates alpha backgrounds separately from text and rejects unknown or injected fields',()=>{
@@ -21,7 +21,7 @@ describe('independent text editor colors',()=>{
     const reset=resetThemeBase(theme);expect(reset.editorProfiles.black).toBeUndefined();expect(reset.editorProfiles.white).toEqual(theme.editorProfiles.white);
   });
   it('freezes personal defaults while inheriting later template fields for current preferences',()=>{
-    const identity={id:'mediterranean-blue',name:'blue',bases:['black','white'] as ('black'|'white')[]},binding=createTemplateBinding(identity,blue),saved=templateBaseDefaults(binding,'black'),profile=userProfileFor(binding,saved,saved);
+    const identity={id:'claude-mediterranean-blue',name:'blue',bases:['black','white'] as ('black'|'white')[]},binding=createTemplateBinding(identity,blue),saved=templateBaseDefaults(binding,'black'),profile=userProfileFor(binding,saved,saved);
     const changed=createTemplateBinding(identity,{...blue,editorProfiles:{black:{selectionBackground:'#12345688'}}}),result=applyUserProfile(changed,profile);
     expect(editorColors(result.preferences).selectionBackground).toBe('#12345688');expect(editorColors(result.defaultScheme).selectionBackground).toBe(editorColors(saved).selectionBackground);expect(result.defaultScheme.editorProfiles).toEqual({});
     const edited=normalizeTheme({...saved,editorProfiles:{black:{cursor:'#abcdef'}}}),restored=applyUserProfile(changed,userProfileFor(binding,edited,edited));expect(editorColors(restored.preferences).cursor).toBe('#abcdef');

@@ -27,3 +27,4 @@ html .cm-editor .cm-table-select-right {border-right-color:var(--hive-editor-tab
 .editor-color-settings > p {color:var(--muted);font-size:12px;line-height:1.7;}
 
 html body .cm-editor .cm-preview-link, html body .cm-editor [data-hive-link] {color:var(--hive-editor-link-text) !important;text-decoration:underline;}
+

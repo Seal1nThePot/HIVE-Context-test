@@ -48,3 +48,5 @@ describe('about metadata and IPC', () => {
     }
   });
 });
+
+

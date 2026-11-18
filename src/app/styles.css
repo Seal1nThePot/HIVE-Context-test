@@ -12,6 +12,9 @@
   --gold-bg: #d4ba7812;
   --text: #d9dcd3;
   --green: #98ac89;
+  --outline-font-xs: max(10px, calc(10.5px * var(--text-scale, 1)));
+  --outline-font-sm: max(10px, calc(11.5px * var(--text-scale, 1)));
+  --outline-font-md: max(10px, calc(14px * var(--text-scale, 1)));
 }
 [hidden] {
   display: none !important;
@@ -90,9 +93,11 @@ p {
 .app-header {
   --header-divider-width: 2px;
   --header-divider-height: calc(20px * var(--ui-scale, 1));
+  --header-gap: calc(6px * var(--ui-scale, 1));
+  --header-inline-padding: calc(22px * var(--ui-scale, 1));
   height: 64px;
   min-height: 64px;
-  padding: 0 24px 0 22px;
+  padding-inline: var(--header-inline-padding);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -124,12 +129,6 @@ p {
   font-weight: 600;
   color: var(--hive-titlebar-text);
 }
-.brand-divider {
-  height: 18px;
-  width: 1px;
-  background: var(--hive-accent);
-  margin: 0 5px 0 10px;
-}
 .workspace-label {
   font-size: calc(13px * var(--text-scale, 1));
   color: var(--hive-titlebar-text);
@@ -147,7 +146,7 @@ p {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 13px;
+  gap: var(--header-gap);
 }
 .connection {
   font-size: calc(11px * var(--text-scale, 1));
@@ -169,7 +168,6 @@ p {
 }
 .header-divider {
   flex: 0 0 var(--header-divider-width);
-  margin: 0 2px;
 }
 .app-header .header-divider,
 .app-header .header-workspace .user-avatar::after,
@@ -430,7 +428,7 @@ p {
   justify-content: flex-start;
   gap: 9px;
   text-align: left;
-  font-size: calc(10px * var(--text-scale, 1));
+  font-size: var(--outline-font-md);
   line-height: 1.6;
   min-height: 35px;
   border-left: 1px solid transparent;
@@ -449,7 +447,7 @@ p {
 }
 .outline-list button.outline-document {
   color: var(--text);
-  font-size: calc(10px * var(--text-scale, 1));
+  font-size: var(--outline-font-sm);
   margin-bottom: 5px;
 }
 .outline-dot {
@@ -655,11 +653,6 @@ p {
   place-items: center;
   color: var(--text);
 }
-.chat-header > div:nth-child(2) {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
 .chat-header b {
   font-size: calc(12px * var(--text-scale, 1));
   font-weight: 500;
@@ -702,10 +695,30 @@ p {
 }
 .chat-context > button {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--hive-surface-border);
+  border-radius: 6px;
+  background: var(--hive-raised-bg);
   color: var(--text);
-  gap: 2px;
   font-size: calc(9px * var(--text-scale, 1));
-  padding: 4px 0;
+  line-height: 1;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.chat-context > button:hover {
+  border-color: var(--hive-accent);
+  background: var(--gold-bg);
+  color: var(--hive-accent);
+}
+.chat-context > button:focus-visible {
+  outline: 2px solid var(--hive-accent);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-context > button { transition: none; }
 }
 .messages {
   flex: 1;
@@ -734,7 +747,8 @@ p {
   line-height: 1.95;
   overflow-wrap: anywhere;
 }
-.message p {
+.message > p {
+  margin: 0;
   white-space: pre-wrap;
 }
 .message-author {
@@ -754,17 +768,19 @@ p {
   color: var(--muted);
   letter-spacing: 0;
 }
-.message.assistant p {
+.message:is(.assistant, .user) {
+  border: 1px solid var(--line);
+  padding: var(--chat-bubble-padding, calc(12px * var(--ui-scale, 1)) calc(14px * var(--ui-scale, 1)));
+  border-radius: calc(9px * var(--ui-scale, 1)) calc(2px * var(--ui-scale, 1)) calc(9px * var(--ui-scale, 1)) calc(9px * var(--ui-scale, 1));
   color: var(--text);
-  padding-left: 0;
+}
+.message.assistant {
+  margin-inline-end: var(--chat-bubble-indent, calc(30px * var(--ui-scale, 1)));
+  background: var(--hive-raised-bg);
 }
 .message.user {
-  margin: 0 0 22px 30px;
+  margin-inline-start: var(--chat-bubble-indent, calc(30px * var(--ui-scale, 1)));
   background: color-mix(in srgb,var(--hive-accent) 15%,var(--hive-panel-bg));
-  border: 1px solid var(--hive-surface-border);
-  padding: 12px 14px;
-  border-radius: 9px 2px 9px 9px;
-  color: var(--text);
 }
 .user-label {
   font-size: calc(8px * var(--text-scale, 1));
@@ -834,7 +850,7 @@ p {
   background: var(--hive-input-bg);
   border-radius: 9px;
   padding: 11px 11px 8px;
-  box-shadow: 0 4px 14px var(--hive-shadow-color);
+  box-shadow: var(--hive-composer-shadow, 0 4px 14px var(--hive-shadow-color));
 }
 .composer:focus-within {
   border-color: var(--hive-accent);
@@ -1161,13 +1177,16 @@ p {
   letter-spacing: 4px;
   animation: pulse 1s infinite;
 }
-.thinking pre {
+.thinking > pre {
+  margin: 0;
   white-space: pre-wrap;
-  font: 10px/1.8 inherit;
+  font: inherit;
+  overflow-wrap: anywhere;
   max-height: 180px;
   overflow: auto;
-  color: var(--text);
 }
+.thinking > .chat-reply-status { display: block; }
+.thinking:has(> pre) > .chat-reply-status { display: none; }
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1738,6 +1757,7 @@ p {
 }
 .outline-view-switch {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 0 17px 12px;
   flex: none;
@@ -1746,8 +1766,9 @@ p {
   padding: 5px 0;
   border-bottom: 1px solid transparent;
   color: var(--text);
-  font-size: calc(9px * var(--text-scale, 1));
+  font-size: var(--outline-font-sm);
   gap: 5px;
+  white-space: nowrap;
 }
 .outline-view-switch button.active {
   color: var(--hive-selection-text);
@@ -1759,7 +1780,7 @@ p {
   flex: 1;
 }
 .outline-explainer {
-  font-size: calc(9px * var(--text-scale, 1));
+  font-size: var(--outline-font-sm);
   color: var(--text);
   margin: 0 3px 12px;
 }
@@ -1782,16 +1803,18 @@ p {
   gap: 7px;
 }
 .node-title > span {
-  font-size: calc(9px * var(--text-scale, 1));
+  font-size: var(--outline-font-xs);
   color: var(--hive-header-text);
 }
 .node-title > button:not(.icon-button) {
-  font-size: calc(10px * var(--text-scale, 1));
+  font-size: var(--outline-font-md);
   line-height: 1.7;
   padding: 0;
   text-align: left;
   justify-content: flex-start;
   flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--hive-header-text);
 }
 .node-title .icon-button {
@@ -1800,11 +1823,12 @@ p {
   color: var(--hive-header-text);
 }
 .writing-node > p {
-  font-size: calc(9px * var(--text-scale, 1));
+  font-size: var(--outline-font-sm);
   line-height: 1.8;
   color: var(--text);
   margin: 8px 0 11px;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -1812,6 +1836,7 @@ p {
 }
 .node-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 5px;
   justify-content: space-between;
@@ -1819,12 +1844,12 @@ p {
   padding-top: 7px;
 }
 .node-footer > span {
-  font-size: calc(8px * var(--text-scale, 1));
+  font-size: var(--outline-font-xs);
   color: var(--hive-header-text);
 }
 .node-footer > button {
   padding: 0;
-  font-size: calc(8px * var(--text-scale, 1));
+  font-size: var(--outline-font-xs);
   color: var(--hive-header-text);
   gap: 1px;
 }
@@ -1839,7 +1864,7 @@ p {
   border-radius: 4px;
   background: var(--hive-input-bg);
   resize: vertical;
-  font-size: calc(10px * var(--text-scale, 1));
+  font-size: var(--outline-font-sm);
   line-height: 1.8;
 }
 .node-description-form > div {
@@ -1849,7 +1874,7 @@ p {
   margin-top: 5px;
 }
 .node-description-form button {
-  font-size: calc(9px * var(--text-scale, 1));
+  font-size: var(--outline-font-sm);
   color: var(--text);
   padding: 3px 2px;
   gap: 4px;
@@ -1869,21 +1894,21 @@ p {
 }
 .outline-description-tooltip > small {
   display: block;
-  font-size: calc(8px * var(--text-scale, 1));
+  font-size: var(--outline-font-xs);
   color: var(--muted);
   letter-spacing: 0.5px;
   margin-bottom: 7px;
 }
 .outline-description-tooltip > strong {
   display: block;
-  font-size: calc(12px * var(--text-scale, 1));
+  font-size: var(--outline-font-md);
   color: var(--hive-popup-text, var(--text));
   font-weight: 500;
   margin-bottom: 8px;
 }
 .outline-description-tooltip > p {
   white-space: pre-wrap;
-  font-size: calc(11px * var(--text-scale, 1));
+  font-size: var(--outline-font-sm);
   color: var(--hive-popup-text, var(--text));
   line-height: 1.9;
 }
@@ -2115,10 +2140,6 @@ p {
   .page-meta {
     margin-top: 15px;
   }
-  .app-header {
-    padding-left: 16px;
-    padding-right: 15px;
-  }
   .document-toolbar {
     height: 35px;
     min-height: 35px;
@@ -2162,21 +2183,18 @@ p {
     z-index: 24;
     box-shadow: -15px 0 40px var(--hive-shadow-color);
   }
-  .workspace-label,
-  .brand-divider {
+  .workspace-label {
     display: none;
   }
   .app-header {
-    padding: 0 14px;
+    --header-inline-padding: calc(14px * var(--ui-scale, 1));
+    --header-gap: calc(4px * var(--ui-scale, 1));
   }
   .brand {
     gap: 6px;
   }
   .brand strong {
     font-size: calc(18px * var(--text-scale, 1));
-  }
-  .header-actions {
-    gap: 6px;
   }
   .user-avatar {
     display: none;
@@ -2250,3 +2268,40 @@ p {
     gap: 0;
   }
 }
+
+/* Make document emphasis legible even when a chosen CJK font lacks italic faces. */
+.cm-editor .cm-content .cm-preview-strong,.cm-editor .cm-table-cell-preview strong {font-synthesis:weight style;font-weight:800;}
+.cm-editor .cm-content .cm-preview-emphasis,.cm-editor .cm-table-cell-preview em {font-synthesis:weight style;font-style:italic;}
+.workspace-panel:is(.outline-workspace, .toc-workspace) > .independent-panel-header > b {font-size:var(--outline-font-sm);}
+
+/* At very narrow panel widths, wrap controls instead of cutting them off. */
+.outline-workspace,.scratch-workspace,.find-replace-workspace,.repositories-workspace,.basis-workspace {container-type:inline-size;container-name:compact-panel;min-width:0;}
+@container compact-panel (max-width:180px) {
+  .outline-workspace .outline-view-switch {gap:4px;padding:4px;}
+  .outline-workspace .outline-view-switch > .new-outline-node {margin-left:0;}
+  .scratch-workspace .scratch-toolbar {height:auto;min-height:44px;padding:4px;flex-wrap:wrap;}
+  .scratch-workspace .scratch-toolbar > span {flex-basis:100%;}
+  .find-replace-workspace .find-replace-content {padding:5px;}
+  .find-replace-workspace .find-input-row {flex-wrap:wrap;}
+  .find-replace-workspace .find-input-row input {flex-basis:100%;}
+  .repositories-workspace .repository-page {padding:5px;}
+  .repositories-workspace .repository-card,.repositories-workspace .repository-add {padding:5px;}
+  .repositories-workspace .repository-card-heading {flex-wrap:wrap;gap:3px;}
+  .repositories-workspace .repository-card h3 {flex-basis:calc(100% - 40px);}
+  .repositories-workspace .repository-page button {white-space:normal;overflow-wrap:anywhere;max-width:100%;}
+}
+
+@container compact-panel (max-width:240px) {
+  .basis-workspace .input-basis-content {padding:8px;}
+  .basis-workspace .reference-heading,.basis-workspace .reference-list li {flex-wrap:wrap;}
+  .basis-workspace .reference-name {flex:1 0 100%;min-width:0;}
+  .basis-workspace .reference-heading button {white-space:nowrap;}
+}
+.workspace-panel.find-replace-workspace {min-width:0;}
+
+/* Preserve a reachable scroll area when a panel is compressed vertically. */
+.workspace-panel.chat-panel,.workspace-panel.outline-workspace,.workspace-panel.properties-workspace {overflow-y:auto!important;}
+.chat-panel .conversation-view {flex:1 0 140px;min-height:140px;}
+.outline-workspace .sidebar-content {flex:1 0 120px;min-height:120px;}
+.properties-workspace .note-properties-panel {flex:1 0 180px;min-height:180px;}
+.properties-workspace .properties-scroll {flex:1 0 80px;min-height:80px;}

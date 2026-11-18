@@ -20,9 +20,9 @@ function setup(){
   let file='',confirm:any,dialog:any=null;
   const noop=()=>{};
   const opts:any={sessions:{current:new Map<string,EditorSession>([['editor',{id:'editor',disk:null,state:null,view:null,dirty:false}]])},activeSession:{current:'editor'},activeTextSource:{current:'document'},editorState:{current:null},view:{current:null},disk:{current:null},proposal:{current:null},undo:{current:[]},appAlive:{current:true},promptRef:{current:{value:''}},dialogRef:{current:null},prompt:'',dialog:null,file:'',dirty:false,
-    running:{current:false},structuring:{current:false},switching:{current:false},viewApplying:{current:false},creatingNote:{current:false},savingPaths:{current:new Set()},fileWorkspace:{info:{id:'space',root:'synthetic'},flush:async()=>{},update:async()=>{}},annotations:{syncEditor:noop},references:{remap:noop},uid:(()=>{let value=0;return()=>String(++value);})(),stop:noop,redraw:noop,inform:noop,
+    running:{current:false},requestAnchor:{current:null},structuring:{current:false},switching:{current:false},viewApplying:{current:false},creatingNote:{current:false},savingPaths:{current:new Set()},fileWorkspace:{info:{id:'space',root:'synthetic'},flush:async()=>{},update:async()=>{}},annotations:{syncEditor:noop},references:{remap:noop},uid:(()=>{let value=0;return()=>String(++value);})(),stop:noop,redraw:noop,inform:noop,
     setFile:(value:string)=>{file=value;},setFileBusy:(value:boolean)=>busy.push(value),setError:(value:string)=>errors.push(value),setConfirm:(value:any)=>{confirm=value;},setDialog:(value:any)=>{dialog=value;opts.dialogRef.current=value;},bindings:(id:string)=>{if(!callbacks.has(id))callbacks.set(id,vi.fn());return {onUpdate:callbacks.get(id)!};}};
-  for(const name of ['setDirty','setNewNoteBusy','setEntries','setRoot','setFilter','setRenameRequest','setCollapsed','setTrashRevision','setInlineRequest','setOutline','setSelection','setMessages','setLastRequest','setPrompt','setStream','setWritingNodeId'])opts[name]=noop;
+  for(const name of ['setDirty','setNewNoteBusy','setEntries','setRoot','setFilter','setRenameRequest','setCollapsed','setTrashRevision','setInlineRequest','setOutline','setSelection','setWritingNodeId'])opts[name]=noop;
   const activate=(id:string)=>{opts.activeSession.current=id;const session=opts.sessions.current.get(id);opts.disk.current=session?.disk;opts.editorState.current=session?.state;opts.view.current=session?.view;file=session?.disk?.path||'';};
   opts.workspace={isOpen:(id:string)=>open.has(id),open:(id:string)=>{open.add(id);activate(id);},openDocumentTab:(id:string)=>{open.add(id);activate(id);},close:(id:string)=>open.delete(id),openIds:['editor']};
   opts.finalizeTrashedSessions=(sessions:EditorSession[],safe:(session:EditorSession)=>boolean)=>{let kept=0;for(const session of sessions){const ok=safe(session);session.disk=null;if(ok){session.state=null;session.dirty=false;session.landing=true;if(session.id!=='editor')open.delete(session.id);}else{session.dirty=true;kept++;}}return kept;};
@@ -40,6 +40,19 @@ function setup(){
 }
 
 describe('forced tree refresh lifecycle',()=>{
+  it('opens an image in a separate read-only tab without saving or replacing an unsaved manuscript',async()=>{
+    const t=setup(),draft=t.add('editor','draft.md');t.edit(draft);const state=draft.state,history=undoDepth(state!);
+    t.opts.saveSession=vi.fn();await t.actions().openExplorerFile('资料/图.png');
+    const image=[...t.opts.sessions.current.values()].find((session:any)=>session.imagePath==='资料/图.png') as EditorSession;
+    expect(image).toMatchObject({disk:null,state:null,view:null,dirty:false});expect(draft.state).toBe(state);expect(draft.dirty).toBe(true);expect(undoDepth(draft.state!)).toBe(history);
+    expect(t.opts.saveSession).not.toHaveBeenCalled();expect(t.opts.api.mock.calls.map((call:any[])=>call[0])).toEqual(['/image-file/info?path='+encodeURIComponent('资料/图.png')]);
+    expect(await t.persistence.saveSession(image.id)).toBe(true);expect(t.opts.api).toHaveBeenCalledTimes(1);
+    t.activate('editor');expect(t.opts.editorState.current).toBe(state);
+  });
+  it('does not commit a pending image open after the workspace changes',async()=>{
+    const t=setup(),pending=deferred();t.setHandler(()=>pending.promise);const opening=t.actions().openExplorerFile('图.png');await tick();t.opts.switching.current=true;pending.resolve({});await opening;
+    expect([...t.opts.sessions.current.values()].some((session:any)=>session.imagePath)).toBe(false);
+  });
   it('forces a scan, retains its cursor, and supports repeated refreshes without a render',async()=>{
     const t=setup();t.opts.setEntries=vi.fn();t.opts.setRoot=vi.fn();
     const entries=[{path:'one.md',name:'one.md',type:'file'}];
@@ -105,14 +118,13 @@ describe('shared file preflight and mutation outcomes',()=>{
     expect(t.opts.api).not.toHaveBeenCalled();expect(t.opts.structuring.current).toBe(false);
   });
   it('rechecks workspace, AI, context and text after a flush without issuing a mutation',async()=>{
-    for(const change of ['workspace','unmount','generation','proposal','prompt','text','session','switching','saving']){
+    for(const change of ['workspace','unmount','generation','proposal','text','session','switching','saving']){
       const t=setup(),session=t.add('editor','one.md'),flush=deferred();t.opts.fileWorkspace.flush=()=>flush.promise;
       const pending=t.actions().manageFile({action:'move',path:'one.md',parent:'destination'});
       if(change==='workspace')t.opts.fileWorkspace.info={id:'another',root:'other'};
       else if(change==='unmount')t.opts.appAlive.current=false;
       else if(change==='generation')t.opts.running.current=true;
       else if(change==='proposal')t.opts.proposal.current={id:'new'};
-      else if(change==='prompt')t.opts.promptRef.current.value='new message';
       else if(change==='text')t.edit(session);
       else if(change==='session')t.add('editor','one.md','replacement');
       else if(change==='switching')t.opts.switching.current=true;
@@ -249,7 +261,7 @@ describe('file read authority and local history',()=>{
     write.resolve({hash:'saved'});await saving;expect(t.busy.at(-1)).toBe(true);read.resolve(data('next.md'));await opening;expect(t.busy.at(-1)).toBe(false);
   });
   it('maps inactive pending AI anchors through disk changes instead of discarding them',()=>{
-    const t=setup(),session=t.add('editor','same.md','one target three');session.context={proposal:{id:'proposal',from:4,to:10,original:'target',file:'same.md',stale:false,text:'new',reason:'reason',mode:'edit',count:3,node:'node'},undo:[],messages:[],prompt:'',writingNodeId:null,lastRequest:null};
+    const t=setup(),session=t.add('editor','same.md','one target three');session.context={proposal:{id:'proposal',from:4,to:10,original:'target',file:'same.md',stale:false,text:'new',reason:'reason',mode:'edit',count:3,node:'node'},undo:[],writingNodeId:null};
     t.persistence.applyDiskFile(data('same.md','one changed three','new'));
     expect(session.context.proposal?.id).toBe('proposal');expect(session.context.proposal?.stale).toBe(true);expect(session.state!.doc.toString()).toBe('one changed three');
   });

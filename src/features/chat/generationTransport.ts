@@ -44,10 +44,7 @@ export async function generateDemoText({ requestMode, requestLimit, node, target
                 : target.replace(/很清楚/g, "足够清楚").replace(/只是/g, "仅是");
         if (text === target)
             throw new Error("演示模式未找到可替换内容。可输入：把“原词”改成“新词”；自由修改请接入真实模型。");
-        raw = JSON.stringify({
-            text,
-            reason: "演示：只替换指定选区内匹配的措辞。",
-        });
+        raw = "[1]\n" + text;
     }
     else {
         let text = requestMode === "outline"
@@ -62,10 +59,7 @@ export async function generateDemoText({ requestMode, requestLimit, node, target
                 "好",
             ].find((value) => visibleCount(value) <= requestLimit)!;
         }
-        raw = JSON.stringify({
-            text,
-            reason: "演示：验证单段生成、待审、采纳与撤回流程。实际内容由接入的模型生成。",
-        });
+        raw = "[1]\n" + text;
     }
     return raw;
 }

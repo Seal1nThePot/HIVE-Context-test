@@ -38,3 +38,6 @@ if(process.argv.includes('--split-test-worker')){
  await fs.writeFile(path.join(out,'split-fixture.html'),'<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="split-fixture.css"><style>.editor-host{flex:1;min-height:0;overflow:hidden}</style><div id="root"></div><script src="split-fixture.js"></script>');
  const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;const electron=(await import('electron')).default;const child=spawn(electron,[fileURLToPath(import.meta.url),'--split-test-worker'],{cwd:root,windowsHide:true,env,stdio:'pipe'});let log='';child.stdout.on('data',v=>log+=v);child.stderr.on('data',v=>log+=v);const code=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{child.kill();reject(new Error('timeout'));},40000);child.once('exit',code=>{clearTimeout(timer);resolve(code);});child.once('error',reject);});await fs.writeFile(path.join(out,'split-ui.log'),log);console.log(log);assert.equal(code,0);
 }
+
+
+

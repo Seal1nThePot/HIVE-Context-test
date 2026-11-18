@@ -5,13 +5,17 @@
 .explorer-tools>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.explorer-tools>div{display:flex;flex:none;gap:1px}
 .explorer-tools button{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:3px;border:0;border-radius:3px;background:none;color:var(--muted)}
 .explorer-tools button:hover,.explorer-row:hover{background:var(--gold-bg)}
-.explorer-tree{overflow:auto;flex:1;min-height:40px;padding:1px 0 20px;position:relative}
+.explorer-tree{--explorer-root-drop-height:calc(28px * var(--ui-scale,1));overflow:auto;flex:1;min-height:40px;padding:1px 0 20px;position:relative}
+.explorer-tree:has(.explorer-empty){display:grid;grid-template-rows:minmax(0,1fr) var(--explorer-root-drop-height);padding:0}
+.explorer-tree:has(.explorer-empty)>[role=tree],.explorer-empty{grid-area:1/1}
+.explorer-empty{display:grid;place-items:center;padding-inline:calc(6px * var(--ui-scale,1));text-align:center}
+.explorer-empty button{max-width:100%;padding:calc(7px * var(--ui-scale,1)) calc(12px * var(--ui-scale,1));border:1px solid var(--line);border-radius:5px;background:var(--gold-bg);color:var(--gold);font:inherit;cursor:pointer}.explorer-empty button:hover,.explorer-empty button:focus-visible{border-color:var(--gold);outline:1px solid var(--gold);outline-offset:1px}.explorer-empty button:disabled{opacity:.5;cursor:default}
 .explorer-row{display:flex;align-items:center;gap:6px;min-height:calc(27px * var(--ui-scale,1));height:calc(27px * var(--ui-scale,1));margin:1px 1px;border:1px solid transparent;border-radius:4px;cursor:default;user-select:none;position:relative;box-sizing:border-box;padding-right:7px}
 .explorer-row>svg{flex:none;color:var(--muted)}.explorer-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}.explorer-spacer{width:12px;flex:none}
 .explorer-row.active-file{background:var(--gold-bg);border-color:var(--line);color:var(--gold)}.explorer-row:focus-visible{outline:1px solid var(--gold);outline-offset:-1px}
 .explorer-row input{width:0;flex:1;min-width:20px;padding:1px 3px;height:22px;font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--gold);outline:0}
 .explorer-row.drop-before:before,.explorer-row.drop-after:after{content:'';position:absolute;height:2px;background:var(--gold);left:5px;right:5px;z-index:1}.explorer-row.drop-before:before{top:-2px}.explorer-row.drop-after:after{bottom:-2px}
-.drop-inside{outline:1px solid var(--gold);outline-offset:-1px;background:var(--gold-bg)}.explorer-root-drop{height:28px;font-size:10px;color:var(--muted);opacity:0;pointer-events:none;padding:7px}.explorer-tree.drop-inside>.explorer-root-drop{opacity:1}
+.drop-inside{outline:1px solid var(--gold);outline-offset:-1px;background:var(--gold-bg)}.explorer-root-drop{height:var(--explorer-root-drop-height);font-size:calc(10px * var(--text-scale,1));color:var(--muted);opacity:0;pointer-events:none;padding:calc(7px * var(--ui-scale,1))}.explorer-tree.drop-inside>.explorer-root-drop{opacity:1}
 .explorer-trash{align-self:flex-start;display:flex;gap:5px;align-items:center;background:none;border:0;color:var(--muted);padding:3px 5px;font:inherit;font-size:11px}.explorer-error{margin:0;padding:5px;display:flex;gap:5px;color:var(--gold);font-size:11px}.explorer-error button{margin-left:auto;background:none;border:0;color:inherit}
 .explorer-menu{position:fixed;z-index:18000;display:flex;flex-direction:column;padding:5px;min-width:240px;background:var(--hive-popup-bg,var(--panel));border:1px solid var(--hive-popup-border,var(--line));box-shadow:var(--hive-popup-shadow);border-radius:6px;color:var(--hive-popup-text,var(--text));font-size:12px}
 .explorer-menu button{display:flex;gap:20px;justify-content:space-between;align-items:center;padding:7px 9px;border:0;border-radius:3px;background:none;color:inherit;text-align:left;font:inherit}.explorer-menu button:hover,.explorer-menu button:focus{background:var(--gold-bg);outline:0}.explorer-menu kbd{font-size:10px;color:var(--muted);background:none;white-space:nowrap}
@@ -41,3 +45,19 @@
 .explorer-menu hr{width:calc(100% - 12px);height:0;border:0;border-top:1px solid var(--hive-popup-border,var(--line));margin:5px 6px}.explorer-menu-caption{padding:6px 9px;color:var(--muted);font-size:11px}
 .explorer-batch-result button{font:inherit;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:4px;padding:3px 5px}
 .explorer-batch-result{max-height:120px;overflow:auto;padding:5px;overflow-wrap:anywhere}.explorer-dialog li{overflow-wrap:anywhere;margin:4px 0}
+
+/* Keep every file action reachable in a very narrow dock. */
+.explorer-tools{overflow-x:auto;min-width:0;flex-shrink:0}.explorer-tools>.explorer-heading{flex:1 0 50px}.file-explorer{min-width:0}
+
+/* Keep the empty action visible when the document panel is compressed vertically. */
+#sidebar-panel-files:has(.explorer-empty){container:empty-file-list / size}
+@container empty-file-list (max-height:145px) {
+  .file-explorer{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto minmax(0,1fr);gap:calc(3px * var(--ui-scale,1));padding-block:calc(2px * var(--ui-scale,1));overflow-y:auto}
+  .file-explorer>:not(.explorer-search,.explorer-tools){grid-column:1/-1}
+  .explorer-search{padding-block:calc(2px * var(--ui-scale,1));margin:0}
+  .explorer-tools>.explorer-heading{display:none}
+  .explorer-tree:has(.explorer-empty){grid-template-rows:minmax(0,1fr);min-height:0}
+  .explorer-empty button{padding-block:calc(3px * var(--ui-scale,1))}
+  .explorer-empty + .explorer-root-drop{position:absolute;inset:auto 0 0}
+  .explorer-tree.drop-inside>.explorer-empty{opacity:0}
+}

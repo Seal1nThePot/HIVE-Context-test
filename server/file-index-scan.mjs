@@ -2,6 +2,7 @@ import {promises as fs} from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {indexPolicy} from './index-policy.mjs';
+import {isDocumentPath} from './file-kinds.mjs';
 
 const vanished = error => error.code === 'ENOENT' || error.code === 'ENOTDIR';
 const order = (a, b) => a.type === b.type
@@ -32,7 +33,7 @@ export async function scanFileTree({root, dir = root, prefix = '', times, option
       if (failure) throw failure.reason;
       for (const item of settled) {
         const value = item.value;
-        if (!value || value.stat.isSymbolicLink() || (!value.stat.isDirectory() && (!value.stat.isFile() || !/\.md$/i.test(value.name)))) continue;
+        if (!value || value.stat.isSymbolicLink() || (!value.stat.isDirectory() && (!value.stat.isFile() || !isDocumentPath(value.name)))) continue;
         const {name, relative, stat} = value;
         const entry = {name, path:relative, type:stat.isDirectory() ? 'folder' : 'file', modifiedAt:stat.mtimeMs};
         if (stat.isDirectory()) {
@@ -49,7 +50,7 @@ export async function scanFileTree({root, dir = root, prefix = '', times, option
     let batch = [];
     try {
       for await (const entry of stream) {
-        if (policy.ignored(relativePrefix + entry.name) || entry.isSymbolicLink() || (!entry.isDirectory() && !/\.md$/i.test(entry.name))) continue;
+        if (policy.ignored(relativePrefix + entry.name) || entry.isSymbolicLink() || (!entry.isDirectory() && !isDocumentPath(entry.name))) continue;
         batch.push(entry);
         if (batch.length === batchSize) {await consume(batch); batch = [];}
       }

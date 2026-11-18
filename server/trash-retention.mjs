@@ -2,6 +2,7 @@ import {promises as fs,createReadStream} from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {removeMetadata} from './metadata-paths.mjs';
+import {isDocumentPath} from './file-kinds.mjs';
 
 const conflict=()=>Object.assign(new Error('回收站内容已变化或预览已过期，请重新预览并确认。'),{status:409});
 const invalid=()=>Object.assign(new Error('回收站记录或数据不可用。'),{status:409});
@@ -43,7 +44,7 @@ export function trashRetention({root,state,files},now=Date.now) {
     if(!uuid.test(id))throw invalid();await rootCheck();const manifest=path.join(trash,id+'.json'),data=path.join(trash,id);inside(manifest);inside(data);
     const stat=await fs.lstat(manifest);if(stat.isSymbolicLink()||!stat.isFile())throw invalid();
     const raw=await fs.readFile(manifest,'utf8');let record;try{record=JSON.parse(raw);}catch{throw invalid();}
-    if(record.id!==id||!['file','folder'].includes(record.type)||typeof record.path!=='string'||!record.path||record.path.includes('\\')||record.path.split('/').some(p=>!p||p==='..'||p.startsWith('.')||/[:*?"<>|\0]/.test(p))||!Number.isFinite(Date.parse(record.deletedAt))||typeof record.deletedAt!=='string'||(record.type==='file'&&!/\.md$/i.test(record.path)))throw invalid();
+    if(record.id!==id||!['file','folder'].includes(record.type)||typeof record.path!=='string'||!record.path||record.path.includes('\\')||record.path.split('/').some(p=>!p||p==='..'||p.startsWith('.')||/[:*?"<>|\0]/.test(p))||!Number.isFinite(Date.parse(record.deletedAt))||typeof record.deletedAt!=='string'||(record.type==='file'&&!isDocumentPath(record.path)))throw invalid();
     const dataStat=await absent(data);
     if(dataStat&&(dataStat.isSymbolicLink()||(record.type==='file'&&!dataStat.isFile())||(record.type==='folder'&&!dataStat.isDirectory())))throw invalid();
     return {item:{id,path:record.path,type:record.type,deletedAt:record.deletedAt,...(!dataStat?{missing:true}:{})},manifestFingerprint:JSON.stringify([stat.dev,stat.ino,stat.mode,stat.size,stat.mtimeMs,stat.ctimeMs,raw]),data};
@@ -55,12 +56,40 @@ export function trashRetention({root,state,files},now=Date.now) {
   }
   async function records(){await rootCheck();const result=[];for(const name of await fs.readdir(trash)){if(!/\.json$/i.test(name))continue;const id=name.slice(0,-5);if(!uuid.test(id))continue;result.push(await manifestInfo(id));}return result;}
   async function list(){return (await records()).map(x=>x.item).sort((a,b)=>b.deletedAt.localeCompare(a.deletedAt));}
-  async function preview(days){return files.transaction(async()=>{if(![7,15,30,90].includes(days))throw Object.assign(new Error('清理天数无效。'),{status:400});const time=now(),cutoff=time-days*86400000, candidates=(await records()).filter(x=>Date.parse(x.item.deletedAt)<cutoff),selected=[];for(const candidate of candidates){const entry=await snapshot(candidate.item.id);if(Date.parse(entry.item.deletedAt)>=cutoff||JSON.stringify(entry.item)!==JSON.stringify(candidate.item))throw conflict();selected.push(entry);}for(const [key,value] of tokens)if(time>=value.expiresAt)tokens.delete(key);while(tokens.size>=32)tokens.delete(tokens.keys().next().value);const token=randomUUID(),expiresAt=time+300000;tokens.set(token,{selected,expiresAt});return {token,days,cutoff:new Date(cutoff).toISOString(),expiresAt:new Date(expiresAt).toISOString(),items:selected.map(x=>x.item),count:selected.length};});}
+  async function preview(days){return files.transaction(async()=>{if(![0,7,15,30,90].includes(days))throw Object.assign(new Error('清理天数无效。'),{status:400});const time=now(),cutoff=days===0?Infinity:time-days*86400000, candidates=(await records()).filter(x=>Date.parse(x.item.deletedAt)<cutoff),selected=[];for(const candidate of candidates){const entry=await snapshot(candidate.item.id);if(Date.parse(entry.item.deletedAt)>=cutoff||JSON.stringify(entry.item)!==JSON.stringify(candidate.item))throw conflict();selected.push(entry);}for(const [key,value] of tokens)if(time>=value.expiresAt)tokens.delete(key);while(tokens.size>=32)tokens.delete(tokens.keys().next().value);const token=randomUUID(),expiresAt=time+300000;tokens.set(token,{selected,expiresAt});return {token,days,cutoff:days===0?new Date(time).toISOString():new Date(cutoff).toISOString(),expiresAt:new Date(expiresAt).toISOString(),items:selected.map(x=>x.item),count:selected.length};});}
   async function purge(token){return files.transaction(async()=>{const saved=tokens.get(token);tokens.delete(token);if(!saved||now()>=saved.expiresAt)throw conflict();
     try{for(const entry of saved.selected){const latest=await snapshot(entry.item.id);if(latest.fingerprint!==entry.fingerprint)throw conflict();}}catch{throw conflict();}
     const deletedIds=[],failed=[];
     for(const entry of saved.selected){const {id}=entry.item;let dataDeleted=false;try{const latest=await snapshot(id);if(latest.fingerprint!==entry.fingerprint)throw conflict();if(!entry.item.missing)await deletePlan(entry);dataDeleted=true;await removeMetadata(state,'@trash/'+id);await fs.unlink(path.join(trash,id+'.json'));deletedIds.push(id);}catch(error){const detail=dataDeleted?'内容已永久删除，但记录或元数据清理失败：'+error.message:error.partialDataDeleted?'文件夹内容可能已部分永久删除，剩余内容和记录已保留：'+error.message:error.message;failed.push({id,path:entry.item.path,error:detail,...(dataDeleted?{dataDeleted:true}:{}),...(error.partialDataDeleted?{partialDataDeleted:true}:{})});}}
 
     return {deletedIds,failed};});}
-  return {list,preview,purge};
+  // Deletes confirmed entries by id (no preview token). Unknown ids are skipped;
+  // a request where nothing exists at all is reported as 404 so the panel can refresh.
+  async function remove(input){return files.transaction(async()=>{
+    if(!Array.isArray(input)||!input.length||input.length>100)throw Object.assign(new Error('请选择要删除的回收站条目。'),{status:400});
+    const ids=[...new Set(input)];
+    if(ids.some(id=>typeof id!=='string'||!uuid.test(id)))throw Object.assign(new Error('回收站记录无效。'),{status:400});
+    await rootCheck();
+    const deletedIds=[],failed=[];
+    for(const id of ids){
+      const manifest=path.join(trash,id+'.json');
+      if(!(await absent(manifest)))continue;
+      let entry,dataDeleted=false;
+      try{
+        entry=await snapshot(id);
+        if(!entry.item.missing)await deletePlan(entry);
+        dataDeleted=true;
+        await removeMetadata(state,'@trash/'+id);
+        await fs.unlink(manifest);
+        deletedIds.push(id);
+      }catch(error){
+        if(!dataDeleted&&error.code==='ENOENT')continue;
+        const detail=dataDeleted?'内容已永久删除，但记录或元数据清理失败：'+error.message:error.partialDataDeleted?'文件夹内容可能已部分永久删除，剩余内容和记录已保留：'+error.message:error.message;
+        failed.push({id,path:entry?.item.path||'',error:detail,...(dataDeleted?{dataDeleted:true}:{}),...(error.partialDataDeleted?{partialDataDeleted:true}:{})});
+      }
+    }
+    if(!deletedIds.length&&!failed.length)throw Object.assign(new Error('这些条目已不在回收站中。'),{status:404});
+    return {deletedIds,failed};
+  });}
+  return {list,preview,purge,remove};
 }

@@ -22,6 +22,8 @@ type PersistenceOptions = {
     fileBusy: boolean;
     tick: number;
     autoSave: boolean;
+    /** 这个会话里还有没被用户确认的 AI 建议（预览已在正文里），此时不允许写盘。 */
+    pendingProposal?: (id: string) => boolean;
     setDirty: (dirty: boolean) => void;
     setFileBusy: (busy: boolean) => void;
     setEntries: Dispatch<SetStateAction<Entry[]>>;
@@ -31,7 +33,7 @@ type PersistenceOptions = {
     appAlive?:RefObject<boolean>;
     onStoredChange?:(id:string,transaction:Transaction)=>void;
 };
-export function useDocumentPersistence({ api, workspace, sessions, activeSession, disk, switching, structuring, fileBusy, tick, autoSave, setDirty, setFileBusy, setEntries, setError, inform, redraw,appAlive,onStoredChange }: PersistenceOptions) {
+export function useDocumentPersistence({ api, workspace, sessions, activeSession, disk, switching, structuring, fileBusy, tick, autoSave, pendingProposal, setDirty, setFileBusy, setEntries, setError, inform, redraw,appAlive,onStoredChange }: PersistenceOptions) {
     const savingPaths = useRef(new Set<string>()), syncRunning = useRef(false);
     const treeSync=workspaceTreeSync(setEntries,workspace),lifecycle=useRef(0);
     const [fileConflicts, setFileConflicts] = useState<Record<string, string>>({});
@@ -55,6 +57,12 @@ export function useDocumentPersistence({ api, workspace, sessions, activeSession
             return true;
         if (!source)
             return !session.dirty;
+        // 预览建议还没被确认，写盘就等于替用户采纳了它。
+        if (pendingProposal?.(id)) {
+            if (!quiet)
+                setError('这段 AI 建议还没确认：请先点 ✓ 保留或 ✗ 撤掉，再保存。');
+            return false;
+        }
         if (savingPaths.current.has(source.path))
             return false;
         const snapshot = state.doc.toString();

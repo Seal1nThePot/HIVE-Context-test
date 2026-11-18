@@ -6,7 +6,7 @@ if (initialPreferences !== null) {
   const exact = new Set(['hive.modelPicker.recent','hive.ai.references.v1','hive.editor-status.v1','hive.editor-status.v2','hive.editor-status.v3','hive.table.sizes.v1','hive.explorer.v1','hive.annotationPreferences.v1','hive.appearance.v1','hive.theme.v1','hive.frontmatter-visible.v1','hive.typography.v1','hive.panelIconDragPreferences.v1','hive.views.v1']);
   const allowed = key => {
     if (exact.has(key)) return true;
-    if (key.length <= 4096 && ['hive.explorer.v1:', 'hive.views.v1:', 'hive.ai.references.v1:'].some(prefix => key.startsWith(prefix) && key.length > prefix.length)) return true;
+    if (key.length <= 4096 && ['hive.explorer.v1:', 'hive.views.v1:', 'hive.ai.references.v1:', 'hive.recentDocuments.v1:'].some(prefix => key.startsWith(prefix) && key.length > prefix.length)) return true;
     if (!key.startsWith('hive.reasoning.') || key.length > 512) return false;
     try { const parts = JSON.parse(key.slice('hive.reasoning.'.length)); return Array.isArray(parts) && parts.length === 2 && parts.every(value => typeof value === 'string'); } catch { return false; }
   };
@@ -31,6 +31,7 @@ if (initialPreferences !== null) {
 contextBridge.exposeInMainWorld('hiveDesktop', Object.freeze({
   isDesktop: true,
   platform: process.platform,
+  startupThemeReady: background => { if (initialPreferences !== null && typeof background === 'string' && /^#[a-f0-9]{6}$/i.test(background)) ipcRenderer.send('hive:startup-theme-ready', background); },
   chooseRepositoryDirectory: () => ipcRenderer.invoke('hive:repository-directory'),
   getAboutInfo: () => ipcRenderer.invoke('hive:about-info'),
   openAppDataDirectory: () => ipcRenderer.invoke('hive:open-app-data-directory'),
@@ -68,3 +69,4 @@ contextBridge.exposeInMainWorld('hiveDesktop', Object.freeze({
     return () => ipcRenderer.removeListener('hive:service-error', listener);
   },
 }));
+

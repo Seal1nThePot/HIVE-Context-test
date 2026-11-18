@@ -3,6 +3,7 @@ import {checkFileOperations} from './fileOperationChecks';
 import {documentMatchesText} from '../editor/documentText';
 import {diskSyncDecision} from './fileSync';
 import {workspaceTreeSync} from './workspaceSync';
+import {isImagePath} from './fileKinds';
 import type { Dispatch, FormEvent, RefObject, SetStateAction } from 'react';
 import type { ApiClient } from '../../shared/api';
 import type { DiskFile } from '../../shared/fileTypes';
@@ -10,9 +11,7 @@ import type { EditorSession } from '../editor/editorSessionTypes';
 import type { Dialog } from '../editor/editorDialogTypes';
 import type { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import type { Message } from '../chat/chatTypes';
-import { hello } from '../chat/chatTypes';
-import type { Proposal, UndoEdit } from '../../shared/core';
+import type { Anchor, Proposal, UndoEdit } from '../../shared/core';
 import { headings } from '../../shared/core';
 import { makeState } from '../editor/Editor';
 import { mapEntryPath, type Entry } from './explorerState';
@@ -42,6 +41,7 @@ type FileActionsOptions = {
     file: string;
     dirty: boolean;
     running: RefObject<boolean>;
+    requestAnchor: RefObject<Anchor | null>;
     structuring: RefObject<boolean>;
     switching: RefObject<boolean>;
     viewApplying: RefObject<boolean>;
@@ -73,10 +73,6 @@ type FileActionsOptions = {
     setInlineRequest: (value: null) => void;
     setOutline: (value: ReturnType<typeof headings>) => void;
     setSelection: (value: { from: number; to: number; text: string }) => void;
-    setMessages: (value: Message[]) => void;
-    setLastRequest: (value: null) => void;
-    setPrompt: (value: string) => void;
-    setStream: (value: string) => void;
     setWritingNodeId: (value: null) => void;
 };
 
@@ -85,16 +81,25 @@ type FileActionsOptions = {
  * 固定目标与请求世代，保留同文件状态/历史；磁盘变化沿用冲突与事务规则。
  */
 export function useFileActions(options: FileActionsOptions) {
-    const { api, uid, workspace, sessions, activeSession, activeTextSource, editorState, view, disk, proposal, undo, prompt, dialog, file, dirty, running, structuring, switching, viewApplying, creatingNote, savingPaths, fileWorkspace, saveSession, applyDiskFile, annotations, references, bindings, stop, redraw, inform, setFile, setDirty, setError, setFileBusy, setNewNoteBusy, setEntries, setRoot, setConfirm, setDialog, setFilter, setRenameRequest, setCollapsed, setTrashRevision, setInlineRequest, setOutline, setSelection, setMessages, setLastRequest, setPrompt, setStream, setWritingNodeId } = options;
+    const { api, uid, workspace, sessions, activeSession, activeTextSource, editorState, view, disk, proposal, undo, prompt, dialog, file, dirty, running, requestAnchor, structuring, switching, viewApplying, creatingNote, savingPaths, fileWorkspace, saveSession, applyDiskFile, annotations, references, bindings, stop, redraw, inform, setFile, setDirty, setError, setFileBusy, setNewNoteBusy, setEntries, setRoot, setConfirm, setDialog, setFilter, setRenameRequest, setCollapsed, setTrashRevision, setInlineRequest, setOutline, setSelection, setWritingNodeId } = options;
     const treeSync=workspaceTreeSync(setEntries,fileWorkspace.info),treeOwner=treeSync.owner();
 
     const scope=()=>options.appAlive?.current!==false&&!switching.current;
     const loading=(value:boolean)=>{if(options.appAlive?.current!==false)setFileBusy(value);};
-    const textContext=(id:string)=>{const current=sessions.current.get(id);return id===activeSession.current?{proposal:proposal.current,prompt:options.promptRef?.current?.value??prompt}:{proposal:current?.context?.proposal??null,prompt:current?.context?.prompt||''};};
+    const proposalFor=(id:string)=>id===activeSession.current?proposal.current:sessions.current.get(id)?.context?.proposal??null;
+    const pendingReview=(path:string)=>[...sessions.current.values()].find(session=>session.disk?.path===path&&proposalFor(session.id));
+    const writing=()=>running.current&&!!requestAnchor.current;
+    function openPendingReview(path:string){
+        const pending=pendingReview(path);
+        if(!pending)return false;
+        if(workspace.isOpen(pending.id))workspace.open(pending.id);
+        else if(workspace.openDocumentTab(pending.id)!=='succeeded')throw new Error('无法打开待审建议，请完成输入法组词或当前窗口操作后重试。');
+        return true;
+    }
     const beginRead=(id=activeSession.current)=>{
-        const identity=fileWorkspace?.info?.id,root=fileWorkspace?.info?.root,context=textContext(id);
+        const identity=fileWorkspace?.info?.id,root=fileWorkspace?.info?.root,pending=proposalFor(id);
         const ticket=beginFileRead(sessions,id,()=>scope()&&fileWorkspace?.info?.id===identity&&fileWorkspace?.info?.root===root,loading,workspace.isOpen?.bind(workspace));
-        return {...ticket,valid:()=>{const now=textContext(id);return ticket.valid()&&now.proposal===context.proposal&&now.prompt===context.prompt;}};
+        return {...ticket,valid:()=>ticket.valid()&&proposalFor(id)===pending};
     };
     const requireRead=(ticket:ReturnType<typeof beginRead>)=>{if(ticket.valid())return true;if(ticket.current())setError('等待读取时标签或正文已变化，当前内容仍保留，请重新打开。');return false;};
     const refresh = async () => {
@@ -126,18 +131,20 @@ export function useFileActions(options: FileActionsOptions) {
             if(!workspace.isOpen?.(targetId))workspace.open(targetId);
             redraw();return;
         }
+        if(proposalFor(targetId)){setError('请先审阅当前文档的建议，或在新标签页打开其他文档。');return false;}
         const shared=[...sessions.current.values()].find(value=>value.id!==targetId&&value.disk?.path===data.path&&(value.view?.state||value.state));
         if(shared&&!reconcileKnownFile(data))return false;
         const nextDisk=shared?.disk?{...shared.disk}:data;
         const content=shared?(shared.view?.state||shared.state)!.doc:data.text;
         const nextState=makeState(content,bindings(targetId).onUpdate,undefined,session.displayMode);
-        session.landing=false;session.disk=nextDisk;session.state=nextState;session.dirty=!documentMatchesText(nextState.doc,nextDisk.text);session.context=undefined;session.contentVersion=(session.contentVersion||0)+1;
+        session.imagePath=undefined;session.landing=false;session.disk=nextDisk;session.state=nextState;session.dirty=!documentMatchesText(nextState.doc,nextDisk.text);session.context=undefined;session.contentVersion=(session.contentVersion||0)+1;
         session.view?.setState(nextState);
         if(targetId!==activeSession.current){if(!workspace.isOpen?.(targetId))workspace.open(targetId);redraw();return;}
-        stop();proposal.current=null;undo.current=[];disk.current=nextDisk;editorState.current=nextState;
+        if(writing())stop();
+        proposal.current=null;undo.current=[];disk.current=nextDisk;editorState.current=nextState;
         workspace.open(targetId);annotations.syncEditor('document',session.view,data.path);
         setFile(data.path);setWritingNodeId(null);setInlineRequest(null);setDirty(session.dirty);setOutline(headings(nextState));
-        setSelection({from:0,to:0,text:''});activeTextSource.current='document';setMessages([hello]);setLastRequest(null);setPrompt('');setError('');setStream('');redraw();
+        setSelection({from:0,to:0,text:''});activeTextSource.current='document';setError('');redraw();
     }
     async function readFile(path:string,targetId:string,ticket:ReturnType<typeof beginRead>){
         if(!requireRead(ticket))return;
@@ -167,7 +174,7 @@ export function useFileActions(options: FileActionsOptions) {
         await saveSession(activeSession.current);
     }
     function openBlankTab(sourceId: string) {
-        if (structuring.current || switching.current || viewApplying.current || creatingNote.current || running.current) {
+        if (structuring.current || switching.current || viewApplying.current || creatingNote.current || writing()) {
             setError('请等待当前操作完成后再新建标签页。');
             return;
         }
@@ -183,21 +190,28 @@ export function useFileActions(options: FileActionsOptions) {
     }
     async function openInLanding(path:string,id:string){
         if(!sessions.current.get(id)?.landing)throw new Error('这个新标签页已经打开文档，请重新选择标签页。');
-        if(structuring.current||switching.current||viewApplying.current||running.current)throw new Error('请等待当前操作完成后再打开文件。');
+        if(structuring.current||switching.current||viewApplying.current||writing())throw new Error('请等待当前操作完成后再打开文件。');
+        if(openPendingReview(path))return;
+        if(isImagePath(path)){await openExplorerFile(path);return;}
         const ticket=beginRead(id);
         try{await fileWorkspace.flush();if(!requireRead(ticket))return;await readFile(path,id,ticket);}
         catch(error){if(ticket.current())throw error;}
         finally{ticket.cancel();}
     }
-    async function createInLanding(id: string) {
-        if (creatingNote.current || !sessions.current.get(id)?.landing)
+    async function createQuickNote(id = activeSession.current) {
+        if (creatingNote.current) return;
+        const landing = sessions.current.get(id)?.landing && workspace.isOpen(id);
+        if (!landing && workspace.openIds.filter(id => sessions.current.has(id)).length >= 48) {
+            setError('打开的文档标签已达 48 个，请先关闭不再使用的标签页。');
             return;
+        }
         creatingNote.current = true;
         setNewNoteBusy(true);
         try {
             const result = await manageFile({ action: 'create', parent: '', type: 'file' });
             if(!scope())return;
-            await openInLanding(result.path, id);
+            if(landing&&sessions.current.get(id)?.landing&&workspace.isOpen(id))await openInLanding(result.path,id);
+            else await openExplorerFile(result.path,true);
             workspace.open('files');
             setFilter('');
             setRenameRequest({ path: result.path, key: uid() });
@@ -211,16 +225,32 @@ export function useFileActions(options: FileActionsOptions) {
         }
     }
     async function openExplorerFile(path:string,newTab=false){
-        if(structuring.current||running.current||switching.current||viewApplying.current)throw new Error('请等待文件操作完成或停止 AI 生成后再打开。');
+        if(structuring.current||writing()||switching.current||viewApplying.current)throw new Error('请等待文件操作完成或停止正文生成后再打开。');
+        if(openPendingReview(path))return;
+        if(isImagePath(path)){
+            const existing=[...sessions.current.values()].find(session=>session.imagePath===path);
+            if(existing&&!newTab){workspace.open(existing.id);return;}
+            // Images get a separate read-only tab. Opening one cannot replace an
+            // unsaved manuscript, its history, or an in-progress chat.
+            const current=sessions.current.get(activeSession.current)!,targetId=current.landing&&!newTab?current.id:'editor:'+uid(),ticket=beginRead(targetId);
+            try{
+                await fileWorkspace.flush();if(!requireRead(ticket))return;
+                await api('/image-file/info?path='+encodeURIComponent(path));if(!requireRead(ticket))return;
+                const session:EditorSession={id:targetId,imagePath:path,disk:null,state:null,view:null,dirty:false};
+                sessions.current.set(targetId,session);
+                if(targetId===activeSession.current){view.current=null;disk.current=null;editorState.current=null;setFile(path);setDirty(false);setOutline([]);setSelection({from:0,to:0,text:''});}
+                workspace.openDocumentTab(targetId);redraw();
+            }finally{ticket.cancel();}
+            return;
+        }
         const targetId=newTab?'editor:'+uid():activeSession.current,ticket=beginRead(targetId);
         try{
             await fileWorkspace.flush();if(!requireRead(ticket))return;
             if(!newTab){
                 const current=sessions.current.get(targetId)!;
+                if(proposalFor(targetId))throw new Error('请先审阅当前文档的建议，或在新标签页打开其他文档。');
                 if(current.dirty&&!await saveSession(targetId,true))throw new Error('当前文档尚未保存，请先处理保存冲突或另存未命名稿。');
                 if(!requireRead(ticket))return;
-                const context=targetId===activeSession.current?{proposal:proposal.current,prompt}:current.context;
-                if(context?.proposal||context?.prompt.trim())throw new Error('请先处理当前未发送的消息和待审建议，或在新标签页中打开文件。');
                 await readFile(path,targetId,ticket);return;
             }
             const data=await api<DiskFile>('/file?path='+encodeURIComponent(path));if(!requireRead(ticket))return;
@@ -235,7 +265,7 @@ export function useFileActions(options: FileActionsOptions) {
     }
     function prepareFileActions(actions:FileAction[]) {
         const identity=fileWorkspace.info.id,root=fileWorkspace.info.root,owner=sessions.current;
-        return checkFileOperations({actions,sessions:()=>sessions.current,context:textContext,flush:()=>fileWorkspace.flush(),saveSession,
+        return checkFileOperations({actions,sessions:()=>sessions.current,proposalFor,flush:()=>fileWorkspace.flush(),saveSession,
             assertAvailable:()=>{
                 if(options.appAlive?.current===false||sessions.current!==owner||fileWorkspace.info.id!==identity||fileWorkspace.info.root!==root)
                     throw new Error('写作空间已变化，文件操作已取消。');
@@ -262,12 +292,13 @@ export function useFileActions(options: FileActionsOptions) {
             checked.validate();
             const affected=checked.affected;
             if(action.action==='basis')return {path:action.path||'',type:action.type||'file'};
-            const snapshots=affected.map(session=>({session,path:session.disk?.path,doc:(session.view?.state||session.state)?.doc,version:session.contentVersion||0,context:textContext(session.id)}));
+            const snapshots=affected.map(session=>({session,path:session.imagePath||session.disk?.path,doc:(session.view?.state||session.state)?.doc,version:session.contentVersion||0,proposal:proposalFor(session.id)}));
             const result = await api<FileResult>('/explorer', action);
             if(!scope())return result;
             if (action.path && ['move', 'rename'].includes(action.action)) {
                 references.remap(action.path, result.path);
                 for (const session of affected) {
+                    if(session.imagePath){session.imagePath=mapEntryPath(session.imagePath,action.path,result.path);session.contentVersion=(session.contentVersion||0)+1;continue;}
                     session.disk = { ...session.disk!, path: mapEntryPath(session.disk!.path, action.path, result.path) };
                     if (session.context) {
                         session.context.proposal = null;
@@ -276,7 +307,7 @@ export function useFileActions(options: FileActionsOptions) {
                 }
                 const current = sessions.current.get(activeSession.current)!;
                 disk.current = current.disk;
-                setFile(current.disk?.path || '');
+                setFile(current.imagePath||current.disk?.path || '');
                 setCollapsed(old => new Set([...old].map(path => mapEntryPath(path, action.path!, result.path))));
                 if(affected.some(session=>session.id===activeSession.current)){
                     setInlineRequest(null);
@@ -285,12 +316,12 @@ export function useFileActions(options: FileActionsOptions) {
                 }
             }
             if (action.action === 'trash') {
-                const current=[...sessions.current.values()].filter(session=>session.disk&&action.path&&(session.disk.path===action.path||session.disk.path.startsWith(action.path+'/')));
+                const current=[...sessions.current.values()].filter(session=>action.path&&((session.imagePath||session.disk?.path)===action.path||(session.imagePath||session.disk?.path)?.startsWith(action.path+'/')));
                 const retained=options.finalizeTrashedSessions(current,session=>{
-                    const snapshot=snapshots.find(item=>item.session===session),context=textContext(session.id);
-                    return !!snapshot&&sessions.current.get(session.id)===session&&session.disk?.path===snapshot.path&&
+                    const snapshot=snapshots.find(item=>item.session===session);
+                    return !!snapshot&&sessions.current.get(session.id)===session&&(session.imagePath||session.disk?.path)===snapshot.path&&
                         (session.view?.state||session.state)?.doc===snapshot.doc&&(session.contentVersion||0)===snapshot.version&&
-                        context.proposal===snapshot.context.proposal&&context.prompt===snapshot.context.prompt;
+                        proposalFor(session.id)===snapshot.proposal;
                 });
                 setTrashRevision(value => value + 1);
                 if(retained)inform('已移到回收站。尚有正文需要保留，已转为未命名稿，请另存。');
@@ -338,7 +369,7 @@ export function useFileActions(options: FileActionsOptions) {
             return;
         switching.current = true;
         try {
-            if ([...sessions.current.values()].some(session => session.id === activeSession.current ? prompt.trim() || proposal.current : session.context?.prompt.trim() || session.context?.proposal))
+            if ((options.promptRef?.current?.value||prompt).trim()||[...sessions.current.values()].some(session=>proposalFor(session.id)))
                 throw new Error('请先处理未发送的消息和待审建议，再切换写作空间。');
             if (running.current)
                 throw new Error('请先停止当前 AI 生成，再切换写作空间。');
@@ -370,6 +401,7 @@ export function useFileActions(options: FileActionsOptions) {
         const allowed=()=>dialogUnchanged()&&requireRead(ticket!);
         setError('');
         try{
+            if((dialog.kind==='saveAs'||dialog.kind==='rename')&&source&&pendingReview(source.path))throw new Error('请先审阅这个文件的建议，再另存或重命名。');
             if(dialog.kind==='folder'){await api('/folder',{path});}
             else if(dialog.kind==='rename'){
                 if(!source)throw new Error('请先打开文档。');
@@ -413,5 +445,5 @@ export function useFileActions(options: FileActionsOptions) {
         }catch(error){if(ticket.current())setError((error as Error).message);}
         finally{ticket.cancel();}
     }
-    return { beginRead,refresh, showFile, openFile, safeSwitch, openSaveAs, save, openBlankTab, openInLanding, createInLanding, openExplorerFile, preflightFileActions, manageFile, reloadFromDisk, switchWorkspace, submitDialog, importFile };
+    return { beginRead,refresh, showFile, openFile, safeSwitch, openSaveAs, save, openBlankTab, openInLanding, createQuickNote, openExplorerFile, preflightFileActions, manageFile, reloadFromDisk, switchWorkspace, submitDialog, importFile };
 }

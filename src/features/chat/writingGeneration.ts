@@ -1,6 +1,7 @@
 import type { Dispatch, RefObject, SetStateAction } from 'react';
-import type { EditorView } from '@codemirror/view';
-import { makePrompt, minimalReplacement, parseSuggestion, visibleCount, type Anchor, type Heading, type Mode, type Proposal } from '../../shared/core';
+import { EditorView } from '@codemirror/view';
+import { Transaction } from '@codemirror/state';
+import { canApply, makePrompt, minimalReplacement, readAnswer, streamPreview, visibleCount, type Anchor, type Heading, type Mode, type Proposal } from '../../shared/core';
 import type { DiskFile } from '../../shared/fileTypes';
 import type { EditorSession } from '../editor/editorSessionTypes';
 import { annotationMessages, annotationSummary, type SubmittedAnnotation } from '../annotations/annotations';
@@ -12,8 +13,12 @@ import type { InputBasisRequest } from './InputBasisPanel';
 import type { ReasoningEffort } from './modelReasoning';
 import { generateDemoText, streamModelText } from './generationTransport';
 export type GenerationOptions = {
-    annotations: SubmittedAnnotation[];
-    instruction: string;
+    annotations?: SubmittedAnnotation[];
+    instruction?: string;
+    /** 快捷栏一步执行：本轮直接按指定模式生成，不再依赖面板里预先选好的模式。 */
+    mode?: Mode;
+    /** 配合上一条：输入框为空也允许发送，用该模式的默认要求。 */
+    allowEmptyPrompt?: boolean;
 };
 export type GenerationContext = {
     document: {
@@ -81,34 +86,43 @@ export async function generateWriting(context: GenerationContext, options?: Gene
     const { document: { view, disk, sessions, activeSession, file, outline, currentHeading, currentWritingNode }, model: { config, reasoningEffort }, conversation: { mode, prompt, messages, setPrompt, setLastRequest, add }, lifecycle: { running, generation, controller, requestAnchor, proposal }, references, writingOutline, request, annotationResponded, ui: { setError, setBusy, setStream, openPanel, inform, redraw } } = context;
     const uid = () => crypto.randomUUID();
     const submitted = options?.annotations;
-    const requestMode = submitted ? "discuss" : mode;
+    const requestMode = submitted ? "discuss" : (options?.mode ?? mode);
+    const v = view.current, requestDisk = disk.current;
     if (running.current ||
-        !view.current ||
-        (!submitted && (!disk.current || !prompt.trim())))
+        (requestMode !== 'discuss' && (!v || !requestDisk)) ||
+        (!submitted && !prompt.trim() && !options?.allowEmptyPrompt))
         return;
     if (proposal.current && requestMode !== "discuss") {
         setError("请先采纳或放弃当前建议；需要调整时点击「继续调整」。");
         return;
     }
     setError("");
-    const v = view.current, document = v.state.doc.toString(), userPrompt = submitted
-        ? options.instruction.trim() || "请逐条回应这些文本标注。"
-        : prompt.trim();
+    // 输入框留空时，用模式自己的默认要求，保证"点一下就能跑"。
+    const defaultPrompt = requestMode === "edit"
+        ? "请修改选中的内容。"
+        : requestMode === "outline"
+            ? "请按大纲写这一节。"
+            : requestMode === "discuss"
+                ? "请读一下正文，说说你的想法。"
+                : "接着往下写。";
+    const document = v?.state.doc.toString() ?? "", userPrompt = submitted
+        ? (options?.instruction?.trim() || "请逐条回应这些文本标注。")
+        : (prompt.trim() || defaultPrompt);
     if (!submitted && document.length > 80000) {
         setError("原型本轮最多发送 8 万字符的文档，请先缩小文档。");
         return;
     }
-    const s = v.state.selection.main;
-    let from = s.head, to = s.head, target = "", node = "当前光标位置";
-    let newNodeHeading = "";
+    const s = v?.state.selection.main;
+    let from = s?.head ?? 0, to = from, target = "", node = "当前光标位置";
+    let newNodeHeading = "", headingLine = "";
     if (!submitted && requestMode === "edit") {
-        if (s.empty) {
+        if (!s || s.empty) {
             setError("请先在正文中选中一个词、一句话或一小段，再提出修改要求。");
             return;
         }
         from = s.from;
         to = s.to;
-        target = v.state.sliceDoc(from, to);
+        target = document.slice(from, to);
         node = currentHeading?.title || "当前选区";
     }
     else if (!submitted && requestMode === "outline") {
@@ -132,9 +146,13 @@ export async function generateWriting(context: GenerationContext, options?: Gene
         if (!heading)
             newNodeHeading =
                 "#".repeat(currentWritingNode.level) + " " + currentWritingNode.title;
+        headingLine = heading ? document.slice(heading.from, heading.to) : newNodeHeading;
     }
     else {
-        target = document.slice(Math.max(0, s.head - 2500), s.head);
+        // 「往下续写」按字面意思落在文末：光标没进过正文（停在 0）时不把新段插到文首。
+        const head = requestMode === "continue" && from === 0 ? document.length : from;
+        from = to = head;
+        target = document.slice(Math.max(0, head - 2500), head);
         node = currentHeading?.title || "当前光标位置";
     }
     const requestLimit = config.continuationLimit;
@@ -143,9 +161,8 @@ export async function generateWriting(context: GenerationContext, options?: Gene
         to,
         original: document.slice(from, to),
         stale: false,
-        file: disk.current?.path || "自由草稿",
+        file: requestDisk?.path || "自由草稿",
     };
-    requestAnchor.current = anchor;
     const history = messages
         .filter((m) => m.id !== "welcome")
         .map((m) => ({
@@ -165,6 +182,8 @@ export async function generateWriting(context: GenerationContext, options?: Gene
                 writingOutline: writingOutline.nodes
                     .map((node) => "#".repeat(node.level) + " " + node.title)
                     .join("\n"),
+                heading: headingLine || undefined,
+                modelLabel: activeModelLabel(config),
             });
     }
     catch (error) {
@@ -172,6 +191,7 @@ export async function generateWriting(context: GenerationContext, options?: Gene
         return;
     }
     const id = ++generation.current, abort = new AbortController(), requestSessionId = activeSession.current;
+    requestAnchor.current = requestMode === 'discuss' ? null : anchor;
     controller.current = abort;
     running.current = true;
     setBusy(true);
@@ -204,8 +224,6 @@ export async function generateWriting(context: GenerationContext, options?: Gene
             if ((error as Error).name !== 'AbortError')
                 setError((error as Error).message);
         }
-        else if (!running.current && activeSession.current === requestSessionId && !submitted)
-            setPrompt(old => old || userPrompt);
         return;
     }
     const requestInfo = {
@@ -225,7 +243,7 @@ export async function generateWriting(context: GenerationContext, options?: Gene
                             ? "文末创建大纲节点并插入正文"
                             : "指定章节末尾插入"
                         : "当前光标处插入",
-        file: disk.current?.path || "自由草稿",
+        file: requestDisk?.path || (v ? "自由草稿" : "未打开文档"),
     };
     setLastRequest(requestInfo);
     add("user", submitted ? annotationSummary(submitted, userPrompt) : userPrompt);
@@ -239,7 +257,7 @@ export async function generateWriting(context: GenerationContext, options?: Gene
         const raw = config.demo
             ? await generateDemoText({ requestMode, requestLimit, node, target, userPrompt, submitted, signal: abort.signal })
             : await streamModelText(request, { messages: requestMessages, selection: config.selection, reasoningEffort, signal: abort.signal }, text => { if (generation.current === id)
-                setStream(text); });
+                setStream(streamPreview(text)); });
         if (generation.current !== id || abort.signal.aborted)
             return;
         if (requestMode === "discuss") {
@@ -248,9 +266,9 @@ export async function generateWriting(context: GenerationContext, options?: Gene
                 annotationResponded(submitted);
             return;
         }
-        const result = parseSuggestion(raw, requestMode, requestLimit);
+        const result = readAnswer(raw, requestMode, requestLimit);
         const latest = requestAnchor.current;
-        if (!latest || latest.file !== disk.current?.path)
+        if (!latest || !v || v!==view.current || requestSessionId!==activeSession.current || latest.file !== disk.current?.path)
             return;
         const now = v.state.doc.toString();
         let text = result.text;
@@ -266,23 +284,51 @@ export async function generateWriting(context: GenerationContext, options?: Gene
                     text.trim() +
                     (suffix ? "\n\n" : "\n");
         }
-        if (requestMode === "edit" && result.text === latest.original)
+        if (requestMode === "edit" && result.text.trim() === latest.original.trim())
             throw new Error("模型没有提出实际文字变化。请补充更具体的修改要求后重试。");
         const changed = requestMode === "edit"
             ? minimalReplacement(latest, text)
             : { ...latest, text };
+        // 只差首尾空白这类"零可见变化"不生成建议卡，直接报错，避免出现"0 字"的待审卡片。
+        if (requestMode === "edit" && !changed.text.trim())
+            throw new Error("模型没有提出实际文字变化。请补充更具体的修改要求后重试。");
+        const defaultReason =
+            requestMode === "edit"
+                ? "只改所选内容，其余保持不变。"
+                : requestMode === "outline"
+                    ? `按「${node}」的写作描述生成。`
+                    : "承接上文继续往下写。";
+        // 目标位置在生成过程中被手改过，就不再往正文里塞预览，避免把建议盖到别人的字上。
+        if (!canApply(latest, now, disk.current?.path || "自由草稿"))
+            throw new Error("目标位置在生成过程中被改动，本轮建议已作废，请重新生成。");
+        // 直接把建议写进正文（只在内存里，不落盘）：表格、公式、Markdown 全部交给正文渲染器显示，
+        // 用户看到的就是成稿的样子，再由 ✓ 保留 / ✗ 撤回决定去留。预览不计入撤销历史。
+        const previewFrom = changed.from, previewText = changed.text;
+        const caret = previewFrom + (previewText.length - previewText.trimStart().length);
+        v.dispatch({
+            changes: { from: previewFrom, to: changed.to, insert: previewText },
+            // 光标停在这段建议的开头：视口会滚到框顶（那里正好是操作条），也不会因为末尾多出的空行
+            // 被 "当前行" 高亮整块染成灰带。
+            selection: { anchor: caret },
+            // 建议可能追加在文末很远的位置：显式把这段滚进视野，别让用户以为没生成。
+            effects: EditorView.scrollIntoView(caret, { y: "center" }),
+            userEvent: "input.ai.preview",
+            annotations: Transaction.addToHistory.of(false),
+        });
         proposal.current = {
             ...changed,
+            from: previewFrom,
+            to: previewFrom + previewText.length,
             id: uid(),
-            reason: result.reason,
+            reason: result.reason || defaultReason,
             mode: requestMode,
-            count: visibleCount(changed.text),
+            count: visibleCount(previewText),
             node,
             writingNodeId: requestMode === "outline" ? currentWritingNode?.id : undefined,
             creatingHeading: !!newNodeHeading,
         };
         openPanel(activeSession.current);
-        add("assistant", `${config.demo ? "【交互演示】" : ""}已为「${node}」准备${requestMode === "edit" ? "一处局部修改" : requestMode === "outline" ? "节点正文" : "一段正文"}，共 ${visibleCount(changed.text)} 字。请在正文下方审阅，采纳后才会写入。`);
+        add("assistant", `${config.demo ? "【交互演示】" : ""}已把「${node}」的${requestMode === "edit" ? "局部修改" : requestMode === "outline" ? "节点正文" : "新一段"}放进正文预览，共 ${visibleCount(previewText)} 字，还没有写入磁盘。点这段上方的 ✓ 保留，✗ 撤掉。`);
         redraw();
     }
     catch (e) {

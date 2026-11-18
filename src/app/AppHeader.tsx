@@ -1,6 +1,6 @@
 import type { RefObject } from 'react';
 import type { EditorState } from '@codemirror/state';
-import { ChevronDown, CircleHelp, Download, Lock, LockOpen, Save, Settings2, Minus, Square, X } from 'lucide-react';
+import { ChevronDown, CircleHelp, Download, FolderOpen, Lock, LockOpen, Save, Settings2, Minus, Square, X } from 'lucide-react';
 import type { EditorSession } from '../features/editor/editorSessionTypes';
 import type { PanelWorkspaceApi } from '../features/workspace/PanelFrame';
 import type { useFileWorkspace } from '../features/files/WorkspaceContext';
@@ -35,6 +35,7 @@ type AppHeaderProps = {
 /** 顶栏：写作空间、保存/自动保存、模型、面板切换器、帮助/锁定/设置。 */
 export function AppHeader({ workspace, sessions, editorState, editorIds, panelLabel, activateEditor, closeEditor, openChat, openSettings, save, openSaveAs, fileWorkspace, config, file, fileBusy, chatOpen, leftOpen, setError, setHelp }: AppHeaderProps) {
     const desktop=useDesktopPanels();
+    const modelLabel=activeModelLabel(config);
     return (
         <header className="app-header" onPointerDown={event=>{if(desktop.enabled)desktop.beginDrag('$main',event);}}
           onDoubleClick={event=>{if(desktop.enabled&&!(event.target as Element).closest('button,input,label,a,select,[data-no-drag]'))window.hiveDesktop?.windowCommand('maximize');}}>
@@ -48,8 +49,9 @@ export function AppHeader({ workspace, sessions, editorState, editorIds, panelLa
             workspace.open('repositories');
           }}
         >
+          <FolderOpen className="workspace-switcher-icon" aria-hidden="true" />
           <b>{repositoryLabel(fileWorkspace.info.repositories.find(item=>item.id===fileWorkspace.info.id)||fileWorkspace.info)}</b>
-          <ChevronDown size={13} />
+          <ChevronDown className="workspace-switcher-chevron" aria-hidden="true" />
         </button>
         <div className="quick-file-actions" aria-label="文档保存操作">
           <div className="save-with-autosave">
@@ -63,12 +65,13 @@ export function AppHeader({ workspace, sessions, editorState, editorIds, panelLa
 
           <button
             className={"connection " + (!config.demo ? "live" : "")}
+            title={modelLabel}
             onClick={() => {
               openSettings('models');
             }}
           >
             <i />
-            {activeModelLabel(config)}
+            <span className="connection-label">{modelLabel}</span>
             <ChevronDown size={12} />
           </button>
           <span className="header-divider" />

@@ -1,7 +1,9 @@
+import {isImagePath} from './fileKinds';
+import {REFERENCE_DRAG_TYPE,referenceDragData,readReferenceDrag} from './referenceDrag';
 import {usePanelDocument} from '../../shared/panelDocument';
 import {Fragment,useEffect,useMemo,useRef,useState,type Dispatch,type SetStateAction} from 'react';
 import {createPortal} from 'react-dom';
-import {ArrowDownWideNarrow,ChevronDown,ChevronRight,FileText,Folder,FolderPlus,MoreHorizontal,Plus,Search,Sparkles,Upload} from 'lucide-react';
+import {ArrowDownWideNarrow,ChevronDown,ChevronRight,FileImage,FileText,Folder,FolderPlus,MoreHorizontal,Plus,Search,Sparkles,Upload} from 'lucide-react';
 import {explorerView,flattenEntries,mapEntryPath,parentPath,readOrder,remapOrder,reorderEntry,sortEntries,sortDirection,menuActions,independentEntries,selectRange,describeBatchResults,describePreflightFailure,type BatchItemResult,type Entry,type ExplorerOrder,type SortMode,type SortDirection} from './explorerState';
 import './file-explorer.css';
 import ImageLibrary from './ImageLibrary';
@@ -11,10 +13,10 @@ import {useFileWorkspace} from './WorkspaceContext';
 export type FileAction={action:string;path?:string;parent?:string;name?:string;type?:'file'|'folder';id?:string};
 export type FileResult={path:string;from?:string;type:'file'|'folder';id?:string;deletedAt?:string;warning?:string};
 type Props={entries:Entry[];workspaceId:string;root:string;file:string;dirty:boolean;filter:string;setFilter:(value:string)=>void;collapsed:Set<string>;setCollapsed:Dispatch<SetStateAction<Set<string>>>;
-  onRefresh?:()=>Promise<void>;onReferenceDrop?:(source:ReferenceSource)=>void;onOpen:(path:string,newTab?:boolean)=>Promise<void>;onAction:(action:FileAction,options?:{quiet?:boolean})=>Promise<FileResult>;onPreflight?:(actions:FileAction[])=>Promise<void>;onReferenceBatch?:(sources:ReferenceSource[])=>Promise<{path:string;ok:boolean;error?:string;warning?:string}[]>;onAI:(path:string)=>void;renameRequest?:{path:string;key:string}};
+  onRefresh?:()=>Promise<void>;onReferenceDrop?:(source:ReferenceSource)=>void;onOpen:(path:string,newTab?:boolean)=>Promise<void>;onAction:(action:FileAction,options?:{quiet?:boolean})=>Promise<FileResult>;onPreflight?:(actions:FileAction[])=>Promise<void>;onReferenceBatch?:(sources:ReferenceSource[])=>Promise<{path:string;ok:boolean;error?:string;warning?:string}[]>;onAI:(path:string)=>void;onOpenRepositories?:()=>void;treeReady?:boolean;renameRequest?:{path:string;key:string}};
 type Menu={x:number;y:number;entry?:Entry;sort?:boolean;more?:boolean};
 type Drop={path:string;where:'before'|'after'|'inside'};
-export default function FileExplorer({entries,workspaceId,root,file,dirty,filter,setFilter,collapsed,setCollapsed,onOpen,onAction,onAI,renameRequest,onReferenceDrop,onRefresh,onPreflight,onReferenceBatch}:Props){
+export default function FileExplorer({entries,workspaceId,root,file,dirty,filter,setFilter,collapsed,setCollapsed,onOpen,onAction,onAI,renameRequest,onReferenceDrop,onRefresh,onPreflight,onReferenceBatch,onOpenRepositories,treeReady=true}:Props){
   const document=usePanelDocument(),window=document.defaultView!;
   const storage='hive.explorer.v1:'+workspaceId;
   const space=useFileWorkspace();
@@ -42,7 +44,7 @@ export default function FileExplorer({entries,workspaceId,root,file,dirty,filter
     window.addEventListener('dragover',prevent);window.addEventListener('drop',prevent);window.addEventListener('drop',clear);window.addEventListener('blur',clear);
     return()=>{window.removeEventListener('dragover',prevent);window.removeEventListener('drop',prevent);window.removeEventListener('drop',clear);window.removeEventListener('blur',clear);};
   },[window]);
-  async function importDropped(sources:File[]){
+  async function importDropped(sources:File[],destination=focused?.type==='folder'?focused.path:focused?parentPath(focused.path):scope){
     if(importLease.current||busy){setImportStatus('文件操作进行中，请稍后重试。');return;}
     if(!sources.length){setImportStatus('未取得文件，请拖入文件而不是文件夹。');return;}
     const lease=new AbortController();importLease.current=lease;
@@ -53,7 +55,7 @@ export default function FileExplorer({entries,workspaceId,root,file,dirty,filter
         if(!valid())return;
         try{
           if(source.size>12*1024*1024)throw new Error('文件超过 12 MB。');
-          const response=await space.request('/api/import?name='+encodeURIComponent(source.name),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:source,signal:lease.signal});
+          const response=await space.request('/api/import?name='+encodeURIComponent(source.name)+'&parent='+encodeURIComponent(destination),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:source,signal:lease.signal});
           const result=await response.json();if(!valid())return;if(!response.ok)throw new Error(result.error||'导入失败。');ok.push(result.path);
         }catch(error){if(!valid())return;failed.push(source.name+'：'+(error as Error).message);}
       }
@@ -95,7 +97,7 @@ export default function FileExplorer({entries,workspaceId,root,file,dirty,filter
     if(action==='move'){if(selection.size>1&&selection.has(entry.path)){startBatch('move');return;}setMove(entry);setMoveParent(parentPath(entry.path));return;}
     if(action==='trash'){if(selection.size>1&&selection.has(entry.path)){startBatch('trash');return;}setDeleting(entry);return;}
     if(action==='search'){setScope(entry.path);setFilter('');expand(entry.path);search.current?.focus();return;}
-    if(action==='ai'){if(selection.size>1&&selection.has(entry.path))void referenceBatch();else onAI(entry.path);return;}
+    if(action==='ai'){if(isImagePath(entry.path)){setError('图片用于查看或插入正文，文字依据请选择 Markdown。');return;}if(selection.size>1&&selection.has(entry.path))void referenceBatch();else onAI(entry.path);return;}
     if(action==='copy'){await run(()=>navigator.clipboard.writeText(root.replace(/[\\/]$/,'')+'\\'+entry.path.replace(/\//g,'\\')));return;}
     if(action==='tab'){await run(()=>onOpen(entry.path,true));return;}
     const result=await run(()=>onAction({action,path:entry.path}));if(result&&action==='duplicate')beginRename({name:result.path.split('/').at(-1)!,path:result.path,type:result.type});
@@ -172,12 +174,15 @@ export default function FileExplorer({entries,workspaceId,root,file,dirty,filter
   function row(items:Entry[],depth=0){return (items.length?view.rowsByParent.get(depth?parentPath(items[0].path):'')||[]:[]).map(entry=>{
     const hit=resultByPath?.get(entry.path);
     const folder=entry.type==='folder',open=!effectiveCollapsed.has(entry.path)||!!filter||!!scope,editing=rename?.path===entry.path;
-    return <div key={entry.path} role="none"><div className={'explorer-row '+(file===entry.path?'active-file ':'')+(drop?.path===entry.path?'drop-'+drop.where:'')} role="treeitem" aria-level={depth+1} aria-selected={selection.has(entry.path)} aria-expanded={folder?open:undefined} data-path={entry.path} data-selected={selected===entry.path} title={entry.path+(hit?.line?'\n第 '+hit.line+' 行：'+hit.excerpt:'')} tabIndex={(view.visible.has(selected)?selected:visiblePaths[0])===entry.path?0:-1} onPointerDown={event=>beginDrag(entry.path,event)}
+    return <div key={entry.path} role="none"><div className={'explorer-row '+(file===entry.path?'active-file ':'')+(drop?.path===entry.path?'drop-'+drop.where:'')} role="treeitem" aria-level={depth+1} aria-selected={selection.has(entry.path)} aria-expanded={folder?open:undefined} data-path={entry.path} data-selected={selected===entry.path} title={entry.path+(hit?.line?'\n第 '+hit.line+' 行：'+hit.excerpt:'')} tabIndex={(view.visible.has(selected)?selected:visiblePaths[0])===entry.path?0:-1} draggable={!editing&&!busy&&!isImagePath(entry.path)} onDragStart={event=>{dragCleanup.current?.();drag.current=entry.path;event.dataTransfer.effectAllowed='copyMove';event.dataTransfer.setData(REFERENCE_DRAG_TYPE,referenceDragData(workspaceId,{path:entry.path,type:entry.type}));skipClick.current=true;}} onDragEnd={()=>{drag.current=null;setDrop(null);setTimeout(()=>{skipClick.current=false;},0);}}
+      onDragOver={event=>{if(!Array.from(event.dataTransfer.types).includes(REFERENCE_DRAG_TYPE))return;event.preventDefault();event.stopPropagation();const rect=event.currentTarget.getBoundingClientRect(),ratio=(event.clientY-rect.y)/rect.height;setDrop({path:entry.path,where:folder&&ratio>.25&&ratio<.75?'inside':ratio<.5?'before':'after'});}}
+      onDrop={event=>{if(!Array.from(event.dataTransfer.types).includes(REFERENCE_DRAG_TYPE))return;event.preventDefault();event.stopPropagation();const source=readReferenceDrag(event.dataTransfer.getData(REFERENCE_DRAG_TYPE),workspaceId);if(!source||!byPath.has(source.path))return;drag.current=source.path;const rect=event.currentTarget.getBoundingClientRect(),ratio=(event.clientY-rect.y)/rect.height;void dropAt({path:entry.path,where:folder&&ratio>.25&&ratio<.75?'inside':ratio<.5?'before':'after'});}}
+      onPointerDown={event=>beginDrag(entry.path,event)}
       style={{paddingLeft:8+depth*16}} onFocus={()=>{if(!busy)setSelected(entry.path);}}
       onClick={event=>{if(busy||skipClick.current)return;setSelected(entry.path);if(editing)return;if(event.shiftKey){const start=visiblePaths.indexOf(anchor.current),end=visiblePaths.indexOf(entry.path);if(start>=0&&end>=0)setSelection(new Set(selectRange(visiblePaths,anchor.current,entry.path)));else{anchor.current=entry.path;setSelection(new Set([entry.path]));}return;}if(event.ctrlKey||event.metaKey){anchor.current=entry.path;setSelection(old=>{const next=new Set(old);if(next.has(entry.path))next.delete(entry.path);else next.add(entry.path);return next;});return;}anchor.current=entry.path;setSelection(new Set([entry.path]));if(folder)setCollapsed(old=>{const next=new Set(old);if(next.has(entry.path))next.delete(entry.path);else next.add(entry.path);return next;});else void run(()=>onOpen(entry.path));}}
       onContextMenu={event=>{event.preventDefault();event.stopPropagation();if(busy)return;setSelected(entry.path);if(!selection.has(entry.path)){setSelection(new Set([entry.path]));anchor.current=entry.path;}setMenu({x:event.clientX,y:event.clientY,entry});}}
       onKeyDown={event=>{if(editing||busy)return;if(event.key==='Enter'&&!event.ctrlKey){event.preventDefault();event.currentTarget.click();}if(folder&&['ArrowLeft','ArrowRight'].includes(event.key)){event.preventDefault();setCollapsed(old=>{const next=new Set(old);if(event.key==='ArrowLeft')next.add(entry.path);else next.delete(entry.path);return next;});}if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();const nodes=Array.from(container.current?.querySelectorAll<HTMLElement>('[role="treeitem"]')||[]),index=nodes.indexOf(event.currentTarget),next=event.key==='Home'?0:event.key==='End'?nodes.length-1:Math.max(0,Math.min(nodes.length-1,index+(event.key==='ArrowDown'?1:-1)));if(event.shiftKey&&nodes[next]){if(!anchor.current||!visiblePaths.includes(anchor.current))anchor.current=entry.path;setSelection(new Set(selectRange(visiblePaths,anchor.current,nodes[next].dataset.path!)));}nodes[next]?.focus();}if(event.key==='ContextMenu'||event.shiftKey&&event.key==='F10'){event.preventDefault();const rect=event.currentTarget.getBoundingClientRect();setMenu({entry,x:rect.x+30,y:rect.bottom});}}}>
-      {folder?(open?<ChevronDown size={12}/>:<ChevronRight size={12}/>):<span className="explorer-spacer"/>}{folder?<Folder size={15}/>:<FileText size={15}/>}
+      {folder?(open?<ChevronDown size={12}/>:<ChevronRight size={12}/>):<span className="explorer-spacer"/>}{folder?<Folder size={15}/>:isImagePath(entry.path)?<FileImage size={15}/>:<FileText size={15}/>}
       {editing?<input aria-label="文件名称" autoFocus value={rename.value} disabled={busy} onClick={event=>event.stopPropagation()} onFocus={event=>{const end=entry.type==='file'?event.currentTarget.value.replace(/\.md$/i,'').length:event.currentTarget.value.length;event.currentTarget.setSelectionRange(0,end);}} onChange={event=>setRename({...rename,value:event.target.value})} onBlur={()=>void commitRename()} onKeyDown={event=>{event.stopPropagation();if(event.key==='Enter'){event.preventDefault();void commitRename();}if(event.key==='Escape'){cancelRename.current=true;setRename(null);}}}/>:<span className="explorer-name">{entry.name.replace(/\.md$/i,'')}</span>}
       {hit?.line&&<small className="explorer-hit-line">{hit.line} 行</small>}
       {!folder&&file===entry.path&&<i className={dirty?'dirty-dot':'file-dot'}/>}
@@ -197,7 +202,7 @@ export default function FileExplorer({entries,workspaceId,root,file,dirty,filter
     rename:{label:'重命名',key:'F2',run:()=>void operation('rename',menu!.entry!)},
     trash:{label:'删除到回收站',key:'Delete',run:()=>void operation('trash',menu!.entry!)},
   };
-  const actionOrder=menuActions(menu?.entry?.type);if(actionOrder.includes('ai')){actionOrder.splice(actionOrder.indexOf('ai'),1);const tab=actionOrder.indexOf('tab');actionOrder.splice(tab<0?0:tab+1,0,'ai');}
+  const actionOrder=menuActions(menu?.entry?.type);if(isImagePath(menu?.entry?.path||'')){const i=actionOrder.indexOf('ai');if(i>=0)actionOrder.splice(i,1);}if(actionOrder.includes('ai')){actionOrder.splice(actionOrder.indexOf('ai'),1);const tab=actionOrder.indexOf('tab');actionOrder.splice(tab<0?0:tab+1,0,'ai');}
   type MenuItem={id?:string;label:string;key?:string;run:()=>void;emphasis?:boolean;disabled?:boolean;separator?:boolean};
   const selectionItems:MenuItem[]=[
     {id:'select-visible',label:'全选可见结果',key:'Ctrl+A',disabled:!visiblePaths.length,run:()=>{setSelection(new Set(visiblePaths));anchor.current=visiblePaths[0]||'';closeMenu();}},
@@ -215,9 +220,9 @@ export default function FileExplorer({entries,workspaceId,root,file,dirty,filter
     [...(multipleMenu?selectedItems:actionOrder.map(action=>({...actions[action],id:action,emphasis:action==='ai'}))),...selectionItems.map((item,index)=>({...item,separator:index===0}))];
   return <div ref={container} className={'file-explorer '+(externalDrop?'external-drop-active':'')} aria-busy={busy}
     onDragEnter={event=>{if(Array.from(event.dataTransfer.types).includes('Files')){event.preventDefault();setExternalDrop(true);}}}
-    onDragOver={event=>{if(Array.from(event.dataTransfer.types).includes('Files')){event.preventDefault();event.dataTransfer.dropEffect='copy';}}}
+    onDragOver={event=>{if(Array.from(event.dataTransfer.types).includes(REFERENCE_DRAG_TYPE)){event.preventDefault();event.dataTransfer.dropEffect='move';setDrop({path:'',where:'inside'});return;}if(Array.from(event.dataTransfer.types).includes('Files')){event.preventDefault();event.dataTransfer.dropEffect='copy';}}}
     onDragLeave={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node))setExternalDrop(false);}}
-    onDrop={event=>{if(!Array.from(event.dataTransfer.types).includes('Files'))return;event.preventDefault();event.stopPropagation();setExternalDrop(false);if(busy){setImportStatus('文件操作进行中，请稍后重试。');return;}void importDropped(Array.from(event.dataTransfer.files));}}
+    onDrop={event=>{if(Array.from(event.dataTransfer.types).includes(REFERENCE_DRAG_TYPE)){event.preventDefault();event.stopPropagation();const source=readReferenceDrag(event.dataTransfer.getData(REFERENCE_DRAG_TYPE),workspaceId);if(source&&byPath.has(source.path)){drag.current=source.path;void dropAt({path:'',where:'inside'});}return;}if(!Array.from(event.dataTransfer.types).includes('Files'))return;event.preventDefault();event.stopPropagation();setExternalDrop(false);if(busy){setImportStatus('文件操作进行中，请稍后重试。');return;}const target=(event.target as Element).closest<HTMLElement>('.explorer-row'),entry=target&&byPath.get(target.dataset.path||'');void importDropped(Array.from(event.dataTransfer.files),entry?.type==='folder'?entry.path:entry?parentPath(entry.path):undefined);}}
     onKeyDown={event=>{
     if(busy||(event.target as HTMLElement).closest('input,textarea,button,a,select,[role="menu"]'))return;
     const ctrl=event.ctrlKey||event.metaKey,key=event.key.toLowerCase();
@@ -225,7 +230,7 @@ export default function FileExplorer({entries,workspaceId,root,file,dirty,filter
     else if(event.key==='Escape'&&selection.size){event.preventDefault();setSelection(new Set());anchor.current='';}
     else if(ctrl&&key==='n'){event.preventDefault();void create(event.shiftKey?'folder':'file');}
     else if(focused){if(event.key==='F2'){event.preventDefault();beginRename(focused);}if(event.key==='Delete'){event.preventDefault();if(selection.size>1)startBatch('trash');else if(selection.has(focused.path)&&visiblePaths.includes(focused.path))setDeleting(focused);}if(ctrl&&event.key==='Enter'&&focused.type==='file'){event.preventDefault();void operation('tab',focused);}if(ctrl&&event.shiftKey&&key==='c'){event.preventDefault();void operation('copy',focused);}if(ctrl&&event.shiftKey&&key==='f'&&focused.type==='folder'){event.preventDefault();void operation('search',focused);}}
-  }} onContextMenu={event=>{event.preventDefault();if(busy)return;setMenu({x:event.clientX,y:event.clientY});}}>
+  }}>
     {externalDrop&&<div className="explorer-external-drop" aria-hidden="true">松开以导入 Markdown 或图片<br/><small>复制到当前文件库</small></div>}
     <div className="explorer-search"><Search size={13}/><input ref={search} disabled={busy} aria-label="筛选文件" placeholder={scope?'在文件夹中查找…':'查找文件…'} value={filter} onChange={event=>setFilter(event.target.value)}/></div>
     <div className="explorer-tools"><span className="explorer-heading" title={scope}><span>{scope?scope.split('/').at(-1):'全部文档'}</span>{chosen.length>1&&<small role="status" aria-label={`已选择 ${chosen.length} 项`}>已选 {chosen.length} 项</small>}</span>{scope&&<button type="button" disabled={busy} onClick={()=>{setScope('');setFilter('');}}>全部</button>}<div>
@@ -241,15 +246,21 @@ export default function FileExplorer({entries,workspaceId,root,file,dirty,filter
     {warning&&<p className="explorer-error" role="status">操作已完成：{warning}<button type="button" aria-label="关闭文件操作警告" onClick={()=>setWarning('')}>×</button></p>}
     {error&&<p className="explorer-error" role="alert">{error}<button type="button" aria-label="关闭文件操作提示" onClick={()=>setError('')}>×</button></p>}
     {importStatus&&<p className="explorer-import-status" role="status">{importStatus}<button type="button" aria-label="关闭导入结果" onClick={()=>setImportStatus('')}>×</button></p>}
-    <div role="tree" aria-multiselectable="true" aria-label="文件和文件夹" className={'explorer-tree '+(drop?.path===''?'drop-inside':'')}>{row(entries)}{!view.matching.size&&<p className="empty-note">{filter?'没有匹配的文件。':'从一份新文档开始。'}</p>}<div className="explorer-root-drop">拖到空白处移至根目录</div></div>
+    <div className={'explorer-tree '+(drop?.path===''?'drop-inside':'')}>
+      <div role="tree" aria-multiselectable="true" aria-label="文件和文件夹">{row(entries)}</div>
+      {treeReady&&!entries.length&&!scope&&!filter
+        ? onOpenRepositories&&<div className="explorer-empty"><button type="button" disabled={busy} onClick={onOpenRepositories}>打开仓库管理</button></div>
+        : treeReady&&!view.matching.size&&<p className="empty-note">{filter?'没有匹配的文件。':'从一份新文档开始。'}</p>}
+      <div className="explorer-root-drop">拖到空白处移至根目录</div>
+    </div>
     {imagesOpen&&<ImageLibrary workspaceId={workspaceId} file={file} refreshKey={imageRevision} onClose={()=>{setImagesOpen(false);window.requestAnimationFrame(()=>container.current?.querySelector<HTMLButtonElement>('[aria-label="文档更多操作"]')?.focus());}}/>}
     {menu&&createPortal(<div ref={menuRef} role="menu" aria-label={menu.sort?'文件排序':menu.more?'文档更多操作':'文件操作'} className="explorer-menu" style={{left:menu.x,top:menu.y}} onKeyDown={event=>{const nodes=Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')||[]),index=nodes.indexOf(document.activeElement as HTMLButtonElement);if(['ArrowUp','ArrowDown','Home','End'].includes(event.key)){event.preventDefault();nodes[event.key==='Home'?0:event.key==='End'?nodes.length-1:(index+(event.key==='ArrowDown'?1:-1)+nodes.length)%nodes.length]?.focus();}if(event.key==='Escape'){event.preventDefault();closeMenu();}if(event.key==='Tab')closeMenu();}}>{multipleMenu&&<div className="explorer-menu-caption">已选 {chosen.length} 项</div>}{menuItems.map(item=><Fragment key={item.id||item.label}>{item.separator&&<hr role="separator"/>}<button role="menuitem" type="button" className={item.emphasis?'explorer-menu-ai':undefined} disabled={busy||item.disabled} onClick={()=>void item.run()}><span>{item.emphasis&&<Sparkles size={14} aria-hidden="true"/>}{item.label}</span>{item.key&&<kbd>{item.key}</kbd>}</button></Fragment>)}</div>,document.body)}
     {batch&&createPortal(<dialog className="explorer-dialog" aria-label={batch.kind==='move'?'批量移动':'批量删除'} ref={element=>{if(element&&!element.open)element.showModal();}} onCancel={event=>{event.preventDefault();if(!busy)setBatch(null);}}><h2>{batch.kind==='move'?'批量移动':'批量删除到回收站'}</h2><p>将处理以下项目；选中父文件夹内的项目随父文件夹处理。</p><ul>{batch.entries.map(item=>{const ancestor=batch.entries.find(other=>other.type==='folder'&&other.path!==item.path&&item.path.startsWith(other.path+'/'));return <li key={item.path}>{item.path}{ancestor?'（包含于 '+ancestor.path+'）':''}</li>;})}</ul>{batch.kind==='move'&&<label>目标文件夹<select value={moveParent} onChange={event=>setMoveParent(event.target.value)}><option value="">根目录</option>{all.filter(item=>item.type==='folder'&&!planned(batch.entries).some(source=>item.path===source.path||item.path.startsWith(source.path+'/'))).map(item=><option key={item.path} value={item.path}>{item.path}</option>)}</select></label>}{error&&<p role="alert">{error}</p>}{batchResult.length>0&&<div role="status">{batchResult.map((item,index)=><div key={index}>{item}</div>)}</div>}<button type="button" disabled={busy||batchResult.length>0} onClick={()=>void executeBatch()}>{batch.kind==='move'?'移动':'移到回收站'}</button><button type="button" disabled={busy} onClick={()=>{setBatch(null);setError('');}}>关闭</button></dialog>,document.body)}
     {(move||deleting)&&createPortal(<dialog className="explorer-dialog" aria-label={move?'移动到文件夹':'删除到回收站'} ref={element=>{if(element&&!element.open)element.showModal();}} onCancel={event=>{event.preventDefault();if(!busy){setMove(null);setDeleting(null);}}}>
       <h2>{move?'移动到文件夹':'删除到回收站'}</h2>
       {error&&<p role="alert">{error}</p>}
-      {move&&<><p>{move.name}</p><label>目标文件夹<select aria-label="目标文件夹" value={moveParent} onChange={event=>setMoveParent(event.target.value)}><option value="">根目录</option>{all.filter(item=>item.type==='folder'&&item.path!==move.path&&!item.path.startsWith(move.path+'/')).map(item=><option key={item.path} value={item.path}>{item.path}</option>)}</select></label><button type="button" disabled={busy} onClick={async()=>{const result=await run(()=>onAction({action:'move',path:move.path,parent:moveParent}));if(result){store(remapOrder(order,move.path,result.path));expand(result.path);setSelected(result.path);setMove(null);}}}>移动</button></>}
-      {deleting&&<><p>将「{deleting.name}」{deleting.type==='folder'?'及其中所有文件':''}移到回收站？可从回收站恢复。</p><button type="button" disabled={busy} onClick={async()=>{const result=await run(()=>onAction({action:'trash',path:deleting.path}));if(result){setDeleting(null);setSelected('');if(scope===deleting.path||scope.startsWith(deleting.path+'/'))setScope('');}}}>移到回收站</button></>}
+      {move&&<><p>{move.name}</p><label>目标文件夹<select aria-label="目标文件夹" value={moveParent} onChange={event=>setMoveParent(event.target.value)}><option value="">根目录</option>{all.filter(item=>item.type==='folder'&&item.path!==move.path&&!item.path.startsWith(move.path+'/')).map(item=><option key={item.path} value={item.path}>{item.path}</option>)}</select></label><button type="button" disabled={busy} onClick={async()=>{const result=await run(()=>onAction({action:'move',path:move.path,parent:moveParent}));if(result){store(remapOrder(order,move.path,result.path));expand(result.path);setSelected(result.path);setMove(null);}else setMove(null);}}>移动</button></>}
+      {deleting&&<><p>将「{deleting.name}」{deleting.type==='folder'?'及其中所有文件':''}移到回收站？可从回收站恢复。</p><button type="button" disabled={busy} onClick={async()=>{const result=await run(()=>onAction({action:'trash',path:deleting.path}));if(result){setDeleting(null);setSelected('');if(scope===deleting.path||scope.startsWith(deleting.path+'/'))setScope('');}else setDeleting(null);}}>移到回收站</button></>}
       <button type="button" disabled={busy} onClick={()=>{setMove(null);setDeleting(null);setError('');}}>取消</button>
     </dialog>,document.body)}
   </div>;

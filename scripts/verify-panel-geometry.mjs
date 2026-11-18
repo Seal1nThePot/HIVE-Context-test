@@ -7,7 +7,7 @@ import {spawn} from 'node:child_process';
 import http from 'node:http';
 
 const root=fileURLToPath(new URL('../',import.meta.url)),require=createRequire(import.meta.url);
-const output=path.join(root,'delivery/window-geometry-20261118');
+const output=path.resolve(process.env.HIVE_VERIFY_OUTPUT||path.join(root,'delivery/window-geometry-20261118'));
 const packageIndex=process.argv.indexOf('--package'),packageOutput=packageIndex<0?null:path.resolve(process.argv[packageIndex+1]);
 const runtimeRoot=packageOutput?path.join(packageOutput,'win-unpacked/resources/app.asar'):root;
 const reportPrefix=packageOutput?'package-':'';
@@ -70,7 +70,7 @@ async function worker(temporary){
         const collapse=async()=>{await tap();await until('!window.testDesktop.windows.has("conversation")');await sleep(10);};
         const read=()=>js('window.testDesktop.rect("conversation")');
         await until('!!window.testWorkspace&&!!window.testDesktop');
-        await js('window.testWorkspace.minimize("conversation")');await sleep(40);
+        await js('window.testWorkspace.floatNativePanel("conversation")');await until('window.testDesktop.windows.has("conversation")');await js('window.testWorkspace.minimize("conversation")');await sleep(40);
         const cycles=[];let saved,actual;
         for(let cycle=0;cycle<30;cycle++){
           await open();const rect=await read(),content=children.get('conversation').getContentBounds();

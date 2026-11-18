@@ -2,7 +2,7 @@ import { createRef, useEffect, useMemo, useRef, useState, type CSSProperties, ty
 import { createPortal } from "react-dom";
 import { dockedPanels, dockResizeEdges, measureDockTree, resizeDockSplit, PANEL_HEADER_HEIGHT, type DockEdge, type DockPlacementEdge, type Rect,type PanelGroup } from "./panelLayout";
 import { completeWorkspace, defaultWorkspace, detachWorkspacePanel, hideWorkspacePanel, openWorkspacePanel, placeWorkspacePanel, placeWorkspacePanelAtEdge, floatWorkspaceGroup, placeWorkspaceGroup, closeWorkspacePanelPreservingAutoHide, type WorkspaceLayout } from "./workspaceState";
-import {autoHidePanelRect,collapseAutoHidePanel,nearestPanelEdge,panelAutoHidePlacement,releaseAutoHidePanel,withAutoHideMetadata,repositionAutoHidePanel} from "./autoHide";
+import {autoHideIsNative,autoHidePanelRect,collapseAutoHidePanel,nearestPanelEdge,panelAutoHidePlacement,releaseAutoHidePanel,withAutoHideMetadata,repositionAutoHidePanel} from "./autoHide";
 import DockGuides from "./DockGuides";
 import {DockIntent,type DockScene,type DockPointer,type DockFeedback,type DockGuide} from "./dockInteraction";
 import type { DragControl } from "./PanelControl";
@@ -71,7 +71,7 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
   },[stage]);
   const {nativeProjection,detachedIds,measurements}=useMemo(()=>{
     const docked=new Set(dockedPanels(layout.tree));
-    const nativeProjection=desktop.enabled?layout.open.filter(id=>lifecycle.opening(id)||!docked.has(id)||!!layout.autoHide?.[id]):[];
+    const nativeProjection=desktop.enabled?layout.open.filter(id=>lifecycle.opening(id)||(layout.autoHide?.[id]?autoHideIsNative(layout,id):!docked.has(id))):[];
     const detachedIds=new Set([...desktop.windows.keys(),...nativeProjection]);
     return {nativeProjection,detachedIds,measurements:measureDockTree(visibleDockTree(layout.tree,detachedIds),{x:0,y:0,width:bounds.width,height:bounds.height})};
   },[layout,bounds,desktop.enabled,desktop.windows,lifecycle.revision]);
@@ -96,7 +96,7 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
   }
   function raise(id:string){if(dockedPanels(latest.current.tree).includes(id)&&!latest.current.autoHide?.[id])return;const group=latest.current.floatingGroups.find(value=>value.panels.includes(id));const key=group?.id||id;update(old=>({...old,layers:rankedFloatingLayers(old.layers,key)}));}
   function open(id:string){const rect=fit(latest.current.rects[id]||suggestedRect(id),id);
-    const placement=latest.current.autoHide?.[id];if(desktop.enabled&&placement&&!lifecycle.homes.has(id))lifecycle.homes.set(id,{rect:autoHidePanelRect(placement,boundsRef.current,iconAnchors.current.get(id)),placement});
+    const placement=latest.current.autoHide?.[id];if(desktop.enabled&&placement&&autoHideIsNative(latest.current,id)&&!lifecycle.homes.has(id))lifecycle.homes.set(id,{rect:autoHidePanelRect(placement,boundsRef.current,iconAnchors.current.get(id)),placement});
     update(old=>{
     let next:WorkspaceLayout;
     if(desktop.enabled&&lifecycle.homes.has(id))next=openNativePanel(old,id);
@@ -181,7 +181,7 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
     if(id===PRIMARY_EDITOR&&!minimize)return 'rejected';
     const home=lifecycle.homes.get(id),nativeRect=desktop.rect(id)||(home?desktop.lastRect(id):null);
     const rect=nativeRect||currentRect(id,true),group=groupFor(id),next=group?.panels.find(value=>value!==id);
-    const placement=latest.current.autoHide?.[id]||home?.placement||panelAutoHidePlacement(rect,boundsRef.current,!nativeRect&&dockedPanels(latest.current.tree).includes(id));
+    const placement={...(latest.current.autoHide?.[id]||home?.placement||panelAutoHidePlacement(rect,boundsRef.current,!nativeRect&&dockedPanels(latest.current.tree).includes(id))),host:nativeRect||home?'native' as const:'main' as const};
     return transition(minimize?'minimize':'close',[id],()=>{
       if(minimize&&(nativeRect||home))lifecycle.homes.set(id,{rect,placement:{...placement,rect}});
       update(old=>{const result=minimize&&(nativeRect||home)?minimizeNativePanel(old,id,rect,placement):hideWorkspacePanel(old,id,rect,minimize,minimize?placement:undefined);return id===PRIMARY_EDITOR?{...result,nativePrimaryHidden:true}:result;});if(next)onActivate?.(next);
@@ -200,7 +200,7 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
     transition('dock',[id],()=>{update(old=>placeWorkspacePanel(old,id,target,edge,suggestedRect(id)));onActivate?.(id);});
   }
   function openDocumentTab(id:string,target=PRIMARY_EDITOR){
-    transition('dock',[id],()=>{update(old=>placeWorkspacePanel(old,id,target,'center',suggestedRect(id)));onActivate?.(id);});
+    return transition('dock',[id],()=>{update(old=>placeWorkspacePanel(old,id,target,'center',suggestedRect(id)));onActivate?.(id);});
   }
   function dockingScene(id:string):DockScene {
     const state=latest.current,nativeIds=new Set([...desktop.windows.keys(),...state.open.filter(panel=>lifecycle.opening(panel))]),tree=visibleDockTree(state.tree,nativeIds),docked=dockedPanels(tree),groups=visibleFloatingGroups(state.floatingGroups,nativeIds),grouped=new Set(groups.flatMap(group=>group.panels));

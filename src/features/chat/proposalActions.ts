@@ -1,6 +1,7 @@
 import type { RefObject } from 'react';
 import type { EditorView } from '@codemirror/view';
-import { canApply, headings, modeLabels, type Mode, type Proposal, type UndoEdit } from '../../shared/core';
+import { Transaction } from '@codemirror/state';
+import { canApply, headings, modeLabels, previewIntact, type Mode, type Proposal, type UndoEdit } from '../../shared/core';
 import type { DiskFile } from '../../shared/fileTypes';
 import { headingKey, type WritingNode } from '../outline/writingNodes';
 import type { Message } from './chatTypes';
@@ -18,30 +19,26 @@ type ProposalContext = {
     inform: (message: string) => void;
     redraw: () => void;
     setMode: (mode: Mode) => void;
-    setPrompt: (text: string) => void;
     openChat: () => void;
     promptRef: RefObject<HTMLTextAreaElement | null>;
 };
-export function createProposalActions({ view, disk, proposal, undo, writingOutline, add, setError, inform, redraw, setMode, setPrompt, openChat, promptRef }: ProposalContext) {
+export function createProposalActions({ view, disk, proposal, undo, writingOutline, add, setError, inform, redraw, setMode, openChat, promptRef }: ProposalContext) {
+    // 建议已经在正文里了（未落盘）。✓ = 就留着这段，✗ = 把这段换回原文。
     function accept() {
         const a = proposal.current, v = view.current;
         if (!a || !v || !disk.current)
             return;
-        if (!canApply(a, v.state.doc.toString(), disk.current.path)) {
+        if (!previewIntact(a, v.state.doc, disk.current.path)) {
             proposal.current = { ...a, stale: true };
-            setError("目标已被手改，或原位置已变化。请继续调整并重新生成。");
+            setError("这段文字已经被手改或位置变了，请先核对再决定保留还是撤掉。");
             redraw();
             return;
         }
         proposal.current = null;
-        v.dispatch({
-            changes: { from: a.from, to: a.to, insert: a.text },
-            selection: { anchor: a.from + a.text.length },
-            userEvent: "input.ai",
-        });
+        // 记录下来，用于「撤回 AI 修改」：range 现在装着 AI 的文字，撤回时换成原文。
         undo.current.push({
             from: a.from,
-            to: a.from + a.text.length,
+            to: a.to,
             original: a.text,
             before: a.original,
             stale: false,
@@ -60,19 +57,28 @@ export function createProposalActions({ view, disk, proposal, undo, writingOutli
                     ? { ...value, targetHeading: headingKey(currentHeadings, added) }
                     : value)).catch(() => { });
         }
-        add("system", `已采纳「${a.node}」的${modeLabels[a.mode]}建议：${a.text.trim()}。后续请以最新正文为准。`);
-        inform("建议已写入正文，按 Ctrl+S 保存。");
+        add("system", `已保留「${a.node}」的${modeLabels[a.mode]}：${a.text.trim()}。`);
+        inform("已保留这段建议。");
         redraw();
     }
     function reject(adjust = false) {
-        const a = proposal.current;
+        const a = proposal.current, v = view.current;
         if (!a)
             return;
         proposal.current = null;
-        add("system", `已${adjust ? "退回调整" : "放弃"}「${a.node}」的建议：${a.text.trim()}。不要把未采纳内容当作当前正文。`);
+        const removable = !!v && !!disk.current && previewIntact(a, v.state.doc, disk.current.path);
+        if (removable)
+            v!.dispatch({
+                changes: { from: a.from, to: a.to, insert: a.original },
+                selection: { anchor: a.from },
+                userEvent: "input.ai.reject",
+                annotations: Transaction.addToHistory.of(false),
+            });
+        add("system", removable
+            ? `已${adjust ? "退回调整" : "撤掉"}「${a.node}」的${modeLabels[a.mode]}，正文回到原来的内容。`
+            : `「${a.node}」那段预览已经被手改，没有再动它，请自行核对那段文字。`);
         if (adjust) {
             setMode(a.mode);
-            setPrompt("");
             openChat();
             promptRef.current?.focus();
         }

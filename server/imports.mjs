@@ -15,20 +15,23 @@ function safeBase(name){
   return {base,ext};
 }
 export function importStore({root,files}){
-  async function store(name,buffer){return files.transaction(async()=>{
+  async function store(name,buffer,parent){return files.transaction(async()=>{
     const {base,ext}=safeBase(name);
     if(!Buffer.isBuffer(buffer))throw fail('文件内容无效。');
-    let destination='',extension=ext;
+    let destination='',extension=ext,kind='markdown';
+    if(parent!==undefined&&typeof parent!=='string')throw fail('目标文件夹无效。');
+    if(parent){const target=await files.resolve(parent,true);if(!(await fs.lstat(target)).isDirectory())throw fail('目标必须是文件夹。');}
     if(ext==='.md'){
       if(buffer.length>2_000_000)throw fail('Markdown 文件超过 2 MB。');
       try{new TextDecoder('utf-8',{fatal:true}).decode(buffer);}catch{throw fail('Markdown 文件必须使用 UTF-8 编码。');}
     }else if(['.png','.jpg','.jpeg','.gif','.webp'].includes(ext)){
       const type=imageType(buffer);
       if((ext==='.jpeg'?'.jpg':ext)!==type.extension)throw fail('图片扩展名与实际类型不符。');
-      extension=type.extension;destination=folder;
-      const dir=await files.resolve(folder,true);await fs.mkdir(dir,{recursive:true});
+      extension=type.extension;destination=parent===undefined?folder:parent;kind='image';
+      if(destination){const dir=await files.resolve(destination,true);await fs.mkdir(dir,{recursive:true});}
     }else throw fail('仅支持 Markdown、PNG、JPG、GIF 和 WebP。');
-    const first=[destination,base+extension].filter(Boolean).join('/'),directory=path.dirname(await files.resolve(first,!!destination));
+    if(kind==='markdown')destination=parent||'';
+    const first=[destination,base+extension].filter(Boolean).join('/'),directory=path.dirname(await files.resolve(first,true));
     const temporary=path.join(directory,`.hive-import-${randomUUID()}.tmp`);
     try{
       // Publish only a complete file. An interrupted write stays in our unique
@@ -36,8 +39,8 @@ export function importStore({root,files}){
       await fs.writeFile(temporary,buffer,{flag:'wx'});
       for(let number=1;number<=1000;number++){
         const relative=[destination,base+(number>1?'-'+number:'')+extension].filter(Boolean).join('/');
-        const target=await files.resolve(relative,!!destination);
-        try{await fs.link(temporary,target);return {path:relative,kind:destination?'image':'markdown'};}
+        const target=await files.resolve(relative,true);
+        try{await fs.link(temporary,target);return {path:relative,kind};}
         catch(error){if(error.code!=='EEXIST')throw error;}
       }
       throw fail('同名文件过多，请更换名称。',409);

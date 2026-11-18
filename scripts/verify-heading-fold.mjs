@@ -7,3 +7,6 @@ if(process.argv.includes('--worker')){
  }
  void worker();
 }else{const {build}=await import('esbuild');await build({entryPoints:[path.join(out,'fixture.tsx')],bundle:true,platform:'browser',format:'iife',outfile:path.join(out,'fixture.js'),loader:{'.css':'css','.woff2':'dataurl','.woff':'dataurl','.ttf':'dataurl'}});await fs.writeFile(path.join(out,'fixture.html'),'<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="fixture.css"><style>.editor-host{flex:1;min-height:0;overflow:hidden}</style><div id="root"></div><script src="fixture.js"></script>');const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;const child=spawn((await import('electron')).default,[path.resolve('scripts/verify-heading-fold.mjs'),'--worker'],{env,windowsHide:true,stdio:'pipe'});let log='';child.stdout.on('data',v=>{log+=v;process.stdout.write(v)});child.stderr.on('data',v=>{log+=v;process.stderr.write(v)});const code=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{child.kill();reject(Error('timeout'));},40000);child.on('exit',c=>{clearTimeout(timer);resolve(c);});child.on('error',reject);});await fs.writeFile(path.join(out,'ui.log'),log);console.log(log);assert.equal(code,0);}
+
+
+

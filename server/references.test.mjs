@@ -35,5 +35,10 @@ describe('ordered reference snapshots',()=>{
   });
 });
 it('only sends an explicit supported reasoning effort and omits the default',()=>{
-  expect(reasoningOptions(undefined)).toEqual({});expect(reasoningOptions('default')).toEqual({});expect(reasoningOptions('xhigh')).toEqual({reasoning_effort:'xhigh'});expect(()=>reasoningOptions('unexpected')).toThrow('推理强度');
+  const model={capabilities:{reasoning:{xhigh:{parameter:'reasoning_effort',value:'xhigh'}}}};
+  expect(reasoningOptions(undefined)).toEqual({});
+  expect(reasoningOptions('default',model)).toEqual({});
+  expect(reasoningOptions('xhigh',model)).toEqual({reasoning_effort:'xhigh'});
+  expect(()=>reasoningOptions('xhigh')).toThrow('推理档位');
+  expect(()=>reasoningOptions('unexpected',model)).toThrow('推理档位');
 });

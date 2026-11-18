@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "id": "hive-moss-gold-study",
+  "name": "青苔鎏金 · 配色试验",
+  "description": "黑、灰、白三档沿用青苔与金色。黑底略提亮菜单和输入框的描边，白底略压深菜单描边，让细线更易辨认。",
+  "bases": ["black", "gray", "white"],
+  "colorsFile": "colors.json"
+}

@@ -3,16 +3,16 @@ import {defaultTheme,normalizeTheme,readDefaultTheme,readTheme,resetThemeBase,sw
 import {dockingColors,dockingColorFields,dockingTokens,normalizeDockingProfiles} from './dockingAppearance';
 import {applyUserProfile,createTemplateBinding,templateBaseDefaults,userProfileFor} from './templateBinding';
 import {applyThemeTokens} from './applyTheme';
-import blue from '../../../templates/mediterranean-blue/colors.json';
+import blue from '../../../templates/claude-mediterranean-blue/colors.json';
 
 describe('custom docking and rail appearance',()=>{
   it('keeps a saved default frozen when a template later adds docking overrides',()=>{
-    const identity={id:'mediterranean-blue',name:'blue',bases:['black','white'] as const},binding=createTemplateBinding({...identity,bases:[...identity.bases]},blue),saved=templateBaseDefaults(binding,'black'),profile=userProfileFor(binding,saved,saved);
-    const next=createTemplateBinding({...identity,bases:[...identity.bases]},{...blue,dockingProfiles:{black:{guideIcon:'#abcdef'}}}),result=applyUserProfile(next,profile);
+    const identity={id:'claude-mediterranean-blue',name:'blue',bases:['black','white'] as const},{dockingProfiles:_dock,...plain}=blue,binding=createTemplateBinding({...identity,bases:[...identity.bases]},plain),saved=templateBaseDefaults(binding,'black'),profile=userProfileFor(binding,saved,saved);
+    const next=createTemplateBinding({...identity,bases:[...identity.bases]},{...plain,dockingProfiles:{black:{guideIcon:'#abcdef'}}}),result=applyUserProfile(next,profile);
     expect(dockingColors(result.preferences).guideIcon).toBe('#abcdef');expect(dockingColors(result.defaultScheme).guideIcon).toBe(dockingColors(saved).guideIcon);expect(result.defaultScheme.dockingProfiles).toEqual({});
   });
   it('derives missing fields from the active foreign template instead of olive constants',()=>{
-    const binding=createTemplateBinding({id:'mediterranean-blue',name:'blue',bases:['black','white']},blue);
+    const binding=createTemplateBinding({id:'claude-mediterranean-blue',name:'blue',bases:['black','white']},blue);
     for(const base of binding.bases){const theme=templateBaseDefaults(binding,base),s=themeTokens(theme).surfaces,c=dockingColors(theme);expect(c.guideBackground).toBe(s.popup+'f2');expect(c.railActiveBackground).toBe(theme.colors.accent+'77');expect(c.guideBorder).toBe(s.popupBorder);}
   });
   it('accepts alpha only on supported fields and rejects injected CSS and unknown keys',()=>{

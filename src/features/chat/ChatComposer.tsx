@@ -3,6 +3,7 @@ import { ArrowUp, Square } from "lucide-react";
 import { type Config } from '../settings/modelConfig';
 import ModelPicker from './ModelPicker';
 import type { ReasoningEffort } from './modelReasoning';
+import { composerKeyAction } from './composerKeys';
 export default function ChatComposer({inputRef,value,onChange,onSend,onStop,busy,disabled,placeholder,config,modelBusy,onModelChange,reasoningEffort,onReasoningChange}: {
   inputRef:RefObject<HTMLTextAreaElement|null>;value:string;onChange:(value:string)=>void;onSend:()=>void;onStop:()=>void;
   busy:boolean;disabled:boolean;placeholder:string;config:Config;modelBusy:boolean;
@@ -22,11 +23,11 @@ export default function ChatComposer({inputRef,value,onChange,onSend,onStop,busy
   },[]);
   return <form ref={box} className="composer compact-composer" onSubmit={event=>{event.preventDefault();onSend();}}>
     <textarea ref={inputRef} aria-label="向 AI 描述想法或修改要求" placeholder={placeholder} value={value} onChange={event=>onChange(event.target.value)}
-      onKeyDown={event=>{if(event.nativeEvent.isComposing)return;if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();onSend();}}}/>
+      onKeyDown={event=>{const action=composerKeyAction({key:event.key,shiftKey:event.shiftKey,ctrlKey:event.ctrlKey,metaKey:event.metaKey,isComposing:event.nativeEvent.isComposing,disabled,text:value});if(action!=='send')return;event.preventDefault();onSend();}}/>
     <div className="composer-actions compact-composer-actions">
       <ModelPicker config={config} disabled={modelBusy||busy} onModelChange={onModelChange} reasoningEffort={reasoningEffort} onReasoningChange={onReasoningChange}/>
       {busy?<button type="button" className="send-button stop" aria-label="停止生成" onClick={onStop}><Square size={14}/></button>
-        :<button type="submit" className="send-button" aria-label="发送给 AI" title="发送 · Ctrl+Enter" disabled={disabled||!value.trim()}><ArrowUp size={17}/></button>}
+        :<button type="submit" className="send-button" aria-label="发送给 AI" title="发送 · Enter（Shift+Enter 换行）" disabled={disabled||!value.trim()}><ArrowUp size={17}/></button>}
     </div>
   </form>;
 }

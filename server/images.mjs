@@ -1,5 +1,6 @@
 import path from 'node:path';
 import {promises as fs} from 'node:fs';
+import {isImagePath} from './file-kinds.mjs';
 
 export const MAX_IMAGE_BYTES=12*1024*1024;
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
@@ -12,6 +13,12 @@ export function imageType(buffer){
   throw fail('支持 PNG、JPG、GIF 和 WebP 图片。');
 }
 export function imageStore({root,files}){
+  async function readFile(relative){
+    if(!isImagePath(relative))throw fail('图片格式不受支持。');
+    const target=await files.resolve(relative,true),stat=await fs.lstat(target);
+    if(!stat.isFile()||stat.isSymbolicLink()||stat.size>MAX_IMAGE_BYTES)throw fail('图片无效或超过 12 MB。');
+    const buffer=await fs.readFile(target);return {buffer,...imageType(buffer)};
+  }
   async function store(document,name,buffer){return files.transaction(async()=>{
     const type=imageType(buffer),file=await files.resolve(document);await files.read(document);
     if(typeof name!=='string'||name.length>1000)throw fail('图片名称无效。');
@@ -38,5 +45,5 @@ export function imageStore({root,files}){
     const stat=await fs.lstat(target);if(!stat.isFile()||stat.isSymbolicLink()||stat.size>MAX_IMAGE_BYTES)throw fail('图片无效或超过 12 MB。');
     const buffer=await fs.readFile(target);return {buffer,...imageType(buffer)};
   }
-  return {store,read};
+  return {store,read,readFile};
 }

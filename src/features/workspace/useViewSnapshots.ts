@@ -54,7 +54,7 @@ export function useViewSnapshots({ workspace, sessions, activeSession, bindings,
             editors: [...sessions.current.values()].filter(session => included.has(session.id)).map(session => {
                 captureEditorView(session);
                 const state = session.view?.state || session.state, range = state?.selection.main;
-                return { id: session.id, file: session.disk?.path || null, anchor: range?.anchor || 0, head: range?.head || 0, scrollTop: session.restoreScroll ?? 0,scrollLeft:session.restoreScrollLeft??0, typewriter: !!session.typewriter, displayMode: session.displayMode || 'live', landing: !!session.landing };
+                return { id: session.id, file: session.disk?.path || null, imagePath:session.imagePath, anchor: range?.anchor || 0, head: range?.head || 0, scrollTop: session.restoreScroll ?? 0,scrollLeft:session.restoreScrollLeft??0, typewriter: !!session.typewriter, displayMode: session.displayMode || 'live', landing: !!session.landing };
             }),
             activeEditor: activeSession.current,
             appearance: { ...appearance.appearance },
@@ -111,6 +111,7 @@ export function useViewSnapshots({ workspace, sessions, activeSession, bindings,
                 const id = mapping.get(descriptor.id)!;
                 if (sessions.current.has(id))
                     continue;
+                if(descriptor.imagePath){await api('/image-file/info?path='+encodeURIComponent(descriptor.imagePath));if(!appAlive.current||currentMode.current!==saved.mode)throw new Error('写作空间已变化。');created.push({id,imagePath:descriptor.imagePath,disk:null,state:null,view:null,dirty:false});continue;}
                 const source = [...sessions.current.values(), ...created].find(session => session.disk?.path === descriptor.file), data = source?.disk || loaded.get(descriptor.file || '') || null;
                 const text = source ? (source.view?.state || source.state)?.doc.toString() || '' : data?.text || '';
                 const state = makeState(text, bindings(id).onUpdate,undefined,descriptor.displayMode), anchor = Math.min(descriptor.anchor, state.doc.length), head = Math.min(descriptor.head, state.doc.length);

@@ -7,7 +7,7 @@ import type {EditorSession} from '../editor/editorSessionTypes';
 import {generateWriting,stopWritingGeneration,type GenerationContext} from './writingGeneration';
 import {createProposalActions} from './proposalActions';
 
-const response=()=>new Response('event: chunk\ndata: '+JSON.stringify(JSON.stringify({text:'足够清楚',reason:'局部替换'}))+'\n\nevent: done\ndata: null\n\n');
+const response=()=>new Response('event: chunk\ndata: '+JSON.stringify('[1]\n足够清楚')+'\n\nevent: done\ndata: null\n\n');
 function fixture(){
   const doc='# 正文\n\n很清楚。\n\n尾声。',from=doc.indexOf('很清楚');let state=EditorState.create({doc,selection:{anchor:from,head:from+3}}),prompt='把“很清楚”改成“足够清楚”';
   const session:EditorSession={id:'editor',disk:{path:'A.md',text:doc,hash:'hash-a',eol:'LF',bom:false},state,view:null,dirty:false};
@@ -21,15 +21,21 @@ function fixture(){
     lifecycle,references:{sources:[]},writingOutline:{ready:true,busy:false,nodes:[]},request:vi.fn<typeof fetch>().mockResolvedValue(response()),annotationResponded:vi.fn(),
     ui:{setError:vi.fn(),setBusy:vi.fn(),setStream:vi.fn(),openPanel:vi.fn(),inform:vi.fn(),redraw:vi.fn()},
   };
-  const actions=createProposalActions({view:context.document.view,disk:context.document.disk,proposal:lifecycle.proposal,undo,writingOutline:{nodes:[],save:vi.fn().mockResolvedValue(undefined)},add:context.conversation.add,setError:context.ui.setError,inform:context.ui.inform,redraw:context.ui.redraw,setMode:vi.fn(),setPrompt:context.conversation.setPrompt,openChat:vi.fn(),promptRef:{current:null}});
+  const actions=createProposalActions({view:context.document.view,disk:context.document.disk,proposal:lifecycle.proposal,undo,writingOutline:{nodes:[],save:vi.fn().mockResolvedValue(undefined)},add:context.conversation.add,setError:context.ui.setError,inform:context.ui.inform,redraw:context.ui.redraw,setMode:vi.fn(),openChat:vi.fn(),promptRef:{current:null}});
   return {context,editor,actions,doc,getPrompt:()=>prompt};
 }
 describe('writing generation and review migration',()=>{
-  it('creates a proposal before changing text, then accepts and undoes it while preserving outside edits',async()=>{
-    const f=fixture();await generateWriting(f.context);expect(f.editor.state.doc.toString()).toBe(f.doc);
+  it('writes the suggestion into the document as a preview, keeps it on accept and undoes it while preserving outside edits',async()=>{
+    const f=fixture();await generateWriting(f.context);
+    // 建议直接成为正文（还在内存里）：用户看到的就是渲染后的成稿。
+    expect(f.editor.state.doc.toString()).toBe(f.doc.replace('很清楚','足够清楚'));
     const proposal=f.context.lifecycle.proposal.current!;expect(proposal.from).toBeGreaterThanOrEqual(f.doc.indexOf('很清楚'));expect(proposal.to).toBeLessThanOrEqual(f.doc.indexOf('很清楚')+3);
     f.actions.accept();expect(f.editor.state.doc.toString()).toBe(f.doc.replace('很清楚','足够清楚'));
     f.editor.dispatch({changes:{from:f.editor.state.doc.length,insert:'\n手写补充。'}});f.actions.undoAI();expect(f.editor.state.doc.toString()).toBe(f.doc+'\n手写补充。');
+  });
+  it('puts the text back when the preview is rejected',async()=>{
+    const f=fixture();await generateWriting(f.context);
+    f.actions.reject();expect(f.editor.state.doc.toString()).toBe(f.doc);expect(f.context.lifecycle.proposal.current).toBeNull();
   });
   it('refuses to accept a proposal after its target was edited by hand',async()=>{
     const f=fixture();await generateWriting(f.context);const proposal=f.context.lifecycle.proposal.current!;
@@ -39,6 +45,20 @@ describe('writing generation and review migration',()=>{
     const f=fixture();let resolve!:(response:Response)=>void;f.context.request=vi.fn<typeof fetch>().mockImplementation(()=>new Promise<Response>(done=>{resolve=done;}));
     const pending=generateWriting(f.context);stopWritingGeneration(f.context.lifecycle,f.context.ui);f.context.document.activeSession.current='editor:other';f.context.document.disk.current={...f.context.document.disk.current!,path:'B.md'};resolve(response());await pending;
     expect(f.context.lifecycle.proposal.current).toBeNull();expect(f.editor.state.doc.toString()).toBe(f.doc);expect(f.context.conversation.add).not.toHaveBeenCalledWith('assistant',expect.anything());
+  });
+  it('finishes a discussion without a document after opening another editor',async()=>{
+    const f=fixture(),{document,conversation,lifecycle}=f.context;
+    document.file='';document.view.current=null;document.disk.current=null;
+    conversation.mode='discuss';conversation.messages=[{id:'prior',role:'assistant',content:'Earlier in the conversation'}];
+    let resolve!:(value:Response)=>void;f.context.request=vi.fn<typeof fetch>().mockImplementation(()=>new Promise<Response>(done=>{resolve=done;}));
+    const pending=generateWriting(f.context);
+    expect(lifecycle.running.current).toBe(true);
+    expect(lifecycle.requestAnchor.current).toBeNull();
+    document.activeSession.current='editor:other';document.disk.current={...document.sessions.current.get('editor')!.disk!,path:'B.md'};
+    resolve(response());await pending;
+    expect(conversation.setLastRequest).toHaveBeenCalledWith(expect.objectContaining({file:'未打开文档',messages:expect.arrayContaining([expect.objectContaining({content:'Earlier in the conversation'})])}));
+    expect(conversation.add).toHaveBeenCalledWith('assistant',expect.any(String));
+    expect(lifecycle.proposal.current).toBeNull();
   });
   it('keeps a newer typed message when an in-flight request fails',async()=>{
     const f=fixture();let fail!:(error:Error)=>void;f.context.request=vi.fn<typeof fetch>().mockImplementation(()=>new Promise<Response>((_,reject)=>{fail=reject;}));

@@ -34,6 +34,7 @@ let panelDrag = null;
 let appActive = true, appBlurTimer;
 let closeTimer;
 let preferenceStore, initialPreferences = {};
+let startupThemeReady, mainWindowPresented = false;
 let dockWindow, dockData = null, dockLoaded = false;
 const tooltip = createTooltipManager({BrowserWindow,screen,root,getToolbar:()=>panelWindows.get('global-toolbar')});
 const webPreferences = { preload, contextIsolation: true, nodeIntegration: false, sandbox: true };
@@ -209,6 +210,10 @@ ipcMain.on('hive:dock-overlay', (event, value) => {
   catch (error) { console.error('Invalid dock overlay:', error.message); }
 });
 ipcMain.on('hive:preferences-read', event => { event.returnValue = isMainOrigin(event) ? initialPreferences : null; });
+ipcMain.on('hive:startup-theme-ready', (event, background) => {
+  if (!startupThemeReady || !isMainOrigin(event) || event.senderFrame !== mainWindow.webContents.mainFrame) return;
+  if (typeof background === 'string' && /^#[a-f0-9]{6}$/i.test(background)) startupThemeReady(background);
+});
 ipcMain.on('hive:preferences-save', (event, values) => {
   if (!isMainOrigin(event) || !preferenceStore) return;
   try { preferenceStore.save(values).catch(error => console.error('Unable to save UI preferences:', error)); }
@@ -234,6 +239,7 @@ ipcMain.on('hive:window-command', (event, command, id) => {
   if (!isMainOrigin(event) || !windowPolicy.commandAllowed(command, id !== undefined, id) || (id !== undefined && typeof id !== 'string')) return;
   const target = id === undefined ? mainWindow : panelWindows.get(id);
   if (!target || target.isDestroyed()) return;
+  if (target === mainWindow && !mainWindowPresented) return;
   if (['minimize','hide','close','maximize'].includes(command)) cancelPanelDrag(id ?? '$main');
   if (command === 'minimize') target.minimize();
   else if (command === 'maximize') { if (target.isMaximized()) target.unmaximize(); else target.maximize(); }
@@ -273,7 +279,7 @@ ipcMain.on('hive:panel-drag', (event, id, phase, edge, free) => {
   if (!resizing) emitPanelMove(id, phase,freeMove);
 });
 function showAllWindows(focusLast = false, restoreMinimized = false) {
-  if (!mainWindow || mainWindow.isDestroyed() || restoringWindows || exiting) return;
+  if (!mainWindowPresented || !mainWindow || mainWindow.isDestroyed() || restoringWindows || exiting) return;
   restoringWindows = true;
   try {
     if (mainWindow.isMinimized()) { if (!restoreMinimized) return; mainWindow.restore(); }
@@ -318,7 +324,6 @@ else {
       mainWindow.on('focus', () => { if (!restoringWindows) { lastActivePanel = null; showAllWindows(); } });
       mainWindow.on('restore', () => { if (!restoringWindows) showAllWindows(false, true); });
       mainWindow.webContents.on('did-start-loading', () => { rendererReady = false; closePending = false; });
-      mainWindow.once('ready-to-show', () => mainWindow.show());
       mainWindow.webContents.on('console-message', event => { if (event.level === 'error') console.error(event.message); });
       mainWindow.on('close', event => {
         if (exiting) return;
@@ -329,13 +334,30 @@ else {
           closeTimer = setTimeout(() => { closePending = false; if (mainWindow && !exiting) dialog.showErrorBox(`${appName} 退出未完成`, '保存等待超时，窗口和内容已保留。请检查保存状态后重试退出。'); }, 25000);
         }
       });
-      mainWindow.on('closed', () => { mainWindow = null; });
-      await mainWindow.loadURL(origin);
-      mainWindow.show();
+      mainWindow.on('closed', () => { mainWindowPresented = false; mainWindow = null; });
+      const startupWindow = mainWindow;
+      // A loaded URL or a compositor frame alone can still contain the default
+      // colors. Wait for the renderer to apply the restored theme before showing it.
+      let startupTimeout;
+      const themedFrame = new Promise((resolve, reject) => {
+        startupThemeReady = resolve;
+        startupTimeout = setTimeout(() => reject(new Error('界面配色初始化超时。')), 10000);
+      });
+      try {
+        const [, background] = await Promise.all([startupWindow.loadURL(origin), themedFrame]);
+        if (exiting || startupWindow.isDestroyed()) return;
+        startupWindow.setBackgroundColor(background);
+        mainWindowPresented = true;
+        startupWindow.show();
+      } finally {
+        clearTimeout(startupTimeout);
+        startupThemeReady = undefined;
+      }
       if (!sizeTargets.has(mainWindow)) { const {width,height}=mainWindow.getNormalBounds(); sizeTargets.set(mainWindow,{width,height}); }
       if (process.env.HIVE_DESKTOP_USER_DATA) console.log('HIVE window-ready:',JSON.stringify({id:'$main',bounds:mainWindow.getBounds()}));
-    } catch (error) { dialog.showErrorBox(`${appName} 启动失败`, String(error.message || error)); await completeExit(); }
+    } catch (error) { if (!exiting) { dialog.showErrorBox(`${appName} 启动失败`, String(error.message || error)); await completeExit(); } }
   });
   app.on('before-quit', event => { if (!exiting) { event.preventDefault(); if (mainWindow) mainWindow.close(); else void completeExit(); } });
   app.on('window-all-closed', () => { if (!exiting) void completeExit(); });
 }
+

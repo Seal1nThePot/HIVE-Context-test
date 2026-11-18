@@ -52,7 +52,7 @@ describe('generation transport',()=>{
   });
   it('keeps demo edits scoped to the given selected text',async()=>{
     vi.useFakeTimers();const pending=generateDemoText({requestMode:'edit',requestLimit:100,node:'选区',target:'很清楚。',userPrompt:'把“很清楚”改成“足够清楚”',signal:new AbortController().signal});
-    await vi.advanceTimersByTimeAsync(750);expect(JSON.parse(await pending).text).toBe('足够清楚。');
+    await vi.advanceTimersByTimeAsync(750);expect((await pending).trim()).toBe('[1]\n足够清楚。');
   });
   it('cancels a pending demo response through the original abort signal',async()=>{
     vi.useFakeTimers();const controller=new AbortController(),pending=generateDemoText({requestMode:'continue',requestLimit:100,node:'位置',target:'',userPrompt:'继续',signal:controller.signal});

@@ -1,3 +1,5 @@
+import ImageFileView from '../features/files/ImageFileView';
+import {retireDeletedImage} from '../features/files/imageSession';
 import {resolveLinkTarget} from '../features/editor/linkNavigation';
 import {useApplyTheme} from '../features/theme/applyTheme';
 import {flushThemeFiles} from '../features/theme/templateFiles';
@@ -30,6 +32,7 @@ import {documentMatchesText} from '../features/editor/documentText';
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -42,13 +45,14 @@ import TrashPanel from '../features/files/TrashPanel';
 import RepositoryPanel from '../features/files/RepositoryPanel';
 import FileExplorer from "../features/files/FileExplorer";
 import FilePicker from '../features/files/FilePicker';
+import {readRecentDocuments,rememberRecentDocument} from '../features/files/recentDocuments';
 import NewTabPage,{NewTabButton} from '../features/editor/NewTabPage';
-import type {Entry} from "../features/files/explorerState";
+import {flattenEntries,type Entry} from "../features/files/explorerState";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import { EditorSelection, type EditorState } from "@codemirror/state";
 import {
   ArrowLeft,
-  Check,
+  BookOpen,
   CheckCheck,
   ChevronRight,
   FileText,
@@ -62,14 +66,14 @@ import {
   Plus,
   RotateCcw,
   Save,
-  Sparkles,
   Search,
-  TextCursorInput,
   Trash2,
   WandSparkles,
   X,
 } from "lucide-react";
-import Editor from "../features/editor/Editor";
+import Editor,{rebindDocumentUpdates} from "../features/editor/Editor";
+import type {InlineProposal} from "../features/editor/proposalInline";
+import {ProposalOverlay} from "../features/editor/ProposalOverlay";
 import DisplayModeControl from '../features/editor/DisplayModeControl';
 import {prepareDocumentTabClose} from '../features/editor/closeDocumentTab';
 import FindReplacePanel from '../features/editor/FindReplacePanel';
@@ -95,7 +99,7 @@ import InputBasisPanel,{type InputBasisRequest} from '../features/chat/InputBasi
 import WorkspaceTabs from "../features/workspace/WorkspaceTabs";
 import RailEdgeHandle from "../features/workspace/RailEdgeHandle";
 import SettingsPage, {type SettingsSection} from "../features/settings/SettingsPage";
-import {initialConfig, parseModelChoice, type Config} from "../features/settings/modelConfig";
+import {initialConfig, parseModelChoice, selectedModelEntry, type Config, type ModelProbeRequest, type ModelProbeResult} from "../features/settings/modelConfig";
 import { useAppearance } from "../features/settings/useAppearance";
 import {useAnnotationPreferences} from '../features/settings/useAnnotationPreferences';
 import {usePanelIconDragPreferences} from '../features/settings/usePanelIconDragPreferences';
@@ -114,6 +118,7 @@ import {
 } from "../features/annotations/annotations";
 import {
   canApplyToDocument,
+  previewIntact,
   headings,
   mapAnchor,
   minimalReplacement,
@@ -127,13 +132,13 @@ import {
 const uid = () => crypto.randomUUID();
 
 export default function App() {
+  useApplyTheme();
   const [info,setInfo]=useState<WorkspaceInfo|null>(null),[error,setError]=useState(''),[attempt,setAttempt]=useState(0);
   useEffect(()=>{let alive=true;fetch('/api/workspace').then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);if(alive){setInfo(data);setError('');}}).catch(error=>{if(alive)setError(error.message);});return()=>{alive=false;};},[attempt]);
   if(!info)return <div className="workspace-loading" role="status">{error||'正在打开写作空间…'}{error&&<button onClick={()=>setAttempt(value=>value+1)}>重试</button>}</div>;
   return <WorkspaceProvider key={info.id} info={info} onChange={setInfo}><DesktopPanelsProvider><WritingApp/></DesktopPanelsProvider></WorkspaceProvider>;
 }
 function WritingApp() {
-  useApplyTheme();
   const desktopPanels = useDesktopPanels();
   const closing = useRef(false);
   const [closingWindow,setClosingWindow] = useState(false);
@@ -148,7 +153,7 @@ function WritingApp() {
   const panelIconDragPreferences=usePanelIconDragPreferences();
   const workspace = usePanelWorkspace(workbenchRef, id => {if(sessions.current.has(id))activateEditor(id);},28*appearanceSettings.appearance.uiScale/100,appearanceSettings.appearance.panelLockGesture);
   const sessions = useRef(new Map<string, EditorSession>([["editor", {id:"editor",disk:null,state:null,view:null,dirty:false,landing:true}]]));
-  const [filePickerTarget,setFilePickerTarget]=useState<string|null>(null),[newNoteBusy,setNewNoteBusy]=useState(false),[renameRequest,setRenameRequest]=useState<{path:string;key:string}>();
+  const [recentOpen,setRecentOpen]=useState(false),[newNoteBusy,setNewNoteBusy]=useState(false),[renameRequest,setRenameRequest]=useState<{path:string;key:string}>();
   const creatingNote=useRef(false);
   const activeSession = useRef("editor"), syncingSessions = useRef(false);
   const [activeEditorId, setActiveEditorId] = useState("editor");
@@ -162,11 +167,20 @@ function WritingApp() {
   const editorIds = [...sessions.current.keys()];
   const canDetachDocumentTab=desktopPanels.enabled&&editorIds.filter(id=>workspace.isOpen(id)).length>=2;
   function panelLabel(id:string) {
-    if(sessions.current.has(id))return sessions.current.get(id)?.landing?'新标签页':sessions.current.get(id)?.disk?.path.split('/').at(-1)||'未命名稿';
+    if(sessions.current.has(id))return sessions.current.get(id)?.landing?'新标签页':(sessions.current.get(id)?.imagePath||sessions.current.get(id)?.disk?.path)?.split('/').at(-1)||'未命名稿';
     return ({files:'文档',repositories:'仓库管理',conversation:'对话',outline:'大纲',toc:'标题目录',scratch:'草稿',annotations:'标注',basis:'依据',search:'查找替换',trash:'回收站',properties:'笔记属性'} as Record<string,string>)[id]||id;
   }
   const leftPanel = workspace.panel("files"), rightPanel = workspace.panel("conversation");
   const leftOpen = workspace.isOpen("files"), chatOpen = workspace.isOpen("conversation");
+  const [focusFileSearch,setFocusFileSearch]=useState(false);
+  useEffect(()=>{
+    if(!focusFileSearch)return;
+    const input=leftPanel.ref.current?.querySelector<HTMLInputElement>('input[aria-label="筛选文件"]');
+    if(!input?.isConnected||input.disabled||!input.getClientRects().length)return;
+    if(input.ownerDocument!==document)desktopPanels.focus('files');
+    input.focus({preventScroll:true});
+    setFocusFileSearch(false);
+  });
   const setChatOpen = (value: boolean) => value ? workspace.open("conversation") : workspace.close("conversation");
   const editorState = useRef<EditorState | null>(null);
   const scratchView = useRef<EditorView | null>(null),
@@ -189,6 +203,7 @@ function WritingApp() {
     [file, setFile] = useState(""),
     [dirty, setDirty] = useState(false),
     [tick, setTick] = useState(0);
+  useEffect(()=>{if(file)rememberRecentDocument(fileWorkspace.info.id,file);},[fileWorkspace.info.id,file]);
   const [scratchReady, setScratchReady] = useState(0);
   const [annotationTool,setAnnotationTool]=useState(false);
   useEffect(()=>{
@@ -201,7 +216,7 @@ function WritingApp() {
       "conversation",
     ),
     [annotationInstruction, setAnnotationInstruction] = useState(""),
-    [annotationFocus, setAnnotationFocus] = useState(""),
+    [annotationFocus, setAnnotationFocus] = useState<{id:string;nonce:number}|null>(null),
     [chatOrb, setChatOrb] = useState(false);
   const [outline, setOutline] = useState<ReturnType<typeof headings>>([]),
     [selection, setSelection] = useState({ from: 0, to: 0, text: "" }),
@@ -210,6 +225,8 @@ function WritingApp() {
   const [writingNodeId, setWritingNodeId] = useState<string | null>(null),
     [inlineRequest, setInlineRequest] =
       useState<InlineAnnotationRequest | null>(null);
+  // The conversation lives for the mounted workspace. Only document review
+  // state is transferred with editor activation and closure.
   const [mode, setMode] = useState<Mode>("discuss"),
     [prompt, setPrompt] = useState(""),
     [messages, setMessages] = useState<Message[]>([hello]),
@@ -233,7 +250,7 @@ function WritingApp() {
       action: () => void;
     } | null>(null);
   const references=useReferenceSources(fileWorkspace.info.id,file||'@'+activeEditorId);
-  const reasoning=useModelReasoning(!config.demo?config.selection:null);
+  const reasoning=useModelReasoning(!config.demo?config.selection:null,!config.demo?selectedModelEntry(config):undefined);
   function addReference(source:ReferenceSource){void addReferenceBatch([source]).then(results=>{const failed=results.filter(item=>!item.ok);if(failed.length)setError(failed.map(item=>item.path+'：'+item.error).join('；'));}).catch(error=>setError((error as Error).message));}
   const annotations = useTextAnnotations(
     file,
@@ -243,9 +260,9 @@ function WritingApp() {
     setError,
   );
   const {markText,showLocalAnnotation,unmarkText,locateAnnotation,reanchorAnnotation,sendAnnotations}=useAnnotationActions({
-    annotations,view,scratchView,activeTextSource,disk,file,activeSession,workspace,chooseSidebar,setError,setInlineRequest,setAnnotationFocus,generate,openChat,annotationInstruction,
+    annotations,view,scratchView,activeTextSource,disk,file,activeSession,workspace,chooseSidebar,setError,setInlineRequest,setAnnotationFocus:id=>setAnnotationFocus({id,nonce:Date.now()}),generate,openChat,annotationInstruction,
   });
-  const writingOutline = useWritingNodes(file, view, setError);
+  const writingOutline = useWritingNodes(/\.md$/i.test(file)?file:'', view, setError);
   const redraw = () => setTick((t) => t + 1);
   const {captureView,applyView}=useViewSnapshots({
     workspace,sessions,activeSession,bindings,activateEditor,api,
@@ -265,7 +282,21 @@ function WritingApp() {
     const derived=applyStoredDocumentChange({editorState,proposal,requestAnchor,undo},transaction);
     if(derived){setOutline(derived.outline);setSelection(derived.selection);}
   }
-  const {savingPaths,fileConflicts,saveSession,applyDiskFile}=useDocumentPersistence({api,appAlive,workspace:fileWorkspace.info,sessions,activeSession,disk,switching,structuring,fileBusy,tick,autoSave:fileWorkspace.info.autoSave,setDirty,setFileBusy,setEntries,setError,inform,redraw,onStoredChange:handleStoredChange});
+  // 建议只是正文里的预览，落盘时机必须由用户自己决定：有未确认的建议就不存盘。
+  const proposalFor = useCallback((id: string) => id === activeSession.current ? proposal.current : sessions.current.get(id)?.context?.proposal ?? null, []);
+  const pendingProposal = useCallback((id: string) => {
+    if(proposalFor(id))return true;
+    const path=sessions.current.get(id)?.disk?.path;
+    return !!path&&[...sessions.current.values()].some(session=>session.disk?.path===path&&proposalFor(session.id));
+  }, [proposalFor]);
+  const reviewTarget=useRef<string|null>(null);
+  function revealProposal(id:string,editor:EditorView){
+    const pending=proposalFor(id);
+    if(!pending)return;
+    const position=Math.max(0,Math.min(pending.from,editor.state.doc.length));
+    editor.dispatch({effects:EditorView.scrollIntoView(position,{y:'center'})});
+  }
+  const {savingPaths,fileConflicts,saveSession,applyDiskFile}=useDocumentPersistence({api,appAlive,workspace:fileWorkspace.info,sessions,activeSession,disk,switching,structuring,fileBusy,tick,autoSave:fileWorkspace.info.autoSave,pendingProposal,setDirty,setFileBusy,setEntries,setError,inform,redraw,onStoredChange:handleStoredChange});
   const onUpdate = useCallback((update: ViewUpdate) => {
     editorState.current = update.state;
     annotations.map("document", update);
@@ -321,7 +352,14 @@ function WritingApp() {
       const top=session.restoreScroll,left=session.restoreScrollLeft,window=next.dom.ownerDocument.defaultView!;
       const remember=()=>captureEditorView(session);next.scrollDOM.addEventListener('scroll',remember);
       let frame:number|undefined;
-      if(top!==undefined||left!==undefined)frame=window.requestAnimationFrame(()=>{if(session.view===next){next.scrollDOM.scrollTop=top||0;next.scrollDOM.scrollLeft=left||0;}});
+      if(top!==undefined||left!==undefined||reviewTarget.current===id)frame=window.requestAnimationFrame(()=>{
+        if(session.view!==next)return;
+        if(reviewTarget.current===id){
+          reviewTarget.current=null;
+          if(activeSession.current===id){revealProposal(id,next);return;}
+        }
+        next.scrollDOM.scrollTop=top||0;next.scrollDOM.scrollLeft=left||0;
+      });
       sessionScrollBindings.current.set(id,()=>{next.scrollDOM.removeEventListener('scroll',remember);if(frame!==undefined)window.cancelAnimationFrame(frame);});
     }
     if (activeSession.current === id) { view.current = next; editorState.current = session.state; if(next){annotations.syncEditor("document",next,session.disk?.path);setScratchReady(value=>value+1);} }
@@ -353,15 +391,14 @@ function WritingApp() {
     const previous = sessions.current.get(activeSession.current)!;
     previous.disk = disk.current;
     previous.state = view.current?.state || previous.state;
-    previous.context = {proposal:proposal.current,undo:undo.current,messages,prompt,writingNodeId,lastRequest};
-    if (running.current) stop();
+    previous.context = {proposal:proposal.current,undo:undo.current,writingNodeId};
+    if (requestAnchor.current && running.current) stop();
     const next = sessions.current.get(id)!;
     activeSession.current=id;
     view.current=next.view; editorState.current=next.state; disk.current=next.disk;
     proposal.current=next.context?.proposal||null; undo.current=next.context?.undo||[];
-    setActiveEditorId(id); setFile(next.disk?.path||""); setDirty(next.dirty);
-    setMessages(next.context?.messages||[hello]); setPrompt(next.context?.prompt||"");
-    setWritingNodeId(next.context?.writingNodeId||null); setLastRequest(next.context?.lastRequest||null);
+    setActiveEditorId(id); setFile(next.imagePath||next.disk?.path||""); setDirty(next.dirty);
+    setWritingNodeId(next.context?.writingNodeId||null);
     setOutline(next.state?headings(next.state):[]);
     const range=next.state?.selection.main;
     setSelection(range&&next.state?{from:range.from,to:range.to,text:next.state.sliceDoc(range.from,range.to)}:{from:0,to:0,text:""});
@@ -370,8 +407,8 @@ function WritingApp() {
   function closeEditor(id: string) {
     if(!desktopPanels.attach(id))return false;
     const session=sessions.current.get(id);if(session){captureEditorView(session);session.contentVersion=(session.contentVersion||0)+1;}
-    workspace.close(id);
-    if(activeSession.current===id){const next=editorIds.find(value=>value!==id&&workspace.isOpen(value));if(next)workspace.open(next);}
+    if(workspace.close(id)!=='succeeded')return false;
+    if(activeSession.current===id)workspace.open(editorIds.find(value=>value!==id&&workspace.isOpen(value))||'editor');
     return true;
   }
   function minimizeEditor(id:string) {
@@ -388,35 +425,72 @@ function WritingApp() {
       const next=[...sessions.current.keys()].find(id=>!closing.has(id)&&workspace.isOpen(id)) || 'editor';
       if(next!==activeSession.current&&sessions.current.has(next)){workspace.open(next);activateEditor(next);}
     }
+    let retained=0;
+    const retireImage=(session:EditorSession)=>{if(!retireDeletedImage(session))return false;if(activeSession.current===session.id){disk.current=null;view.current=null;editorState.current=null;setFile('');setDirty(false);}return true;};
     for(const session of kept){
+      if(retireImage(session))continue;
+      retained++;
       session.disk=null;session.dirty=true;
       if(activeSession.current===session.id){disk.current=null;setFile('');setDirty(true);}
     }
-    let retained=kept.length;
     for(const session of disposable){
       // A native host can refuse to return its editor (for example during IME
       // composition). Keep that live editor rather than discarding its state.
       if(session.id!=='editor'&&!closeEditor(session.id)){
+        if(retireImage(session))continue;
         session.disk=null;session.dirty=true;retained++;
         if(activeSession.current===session.id){disk.current=null;setFile('');setDirty(true);}
         continue;
       }
       session.contentVersion=(session.contentVersion||0)+1;
-      session.disk=null;session.state=null;session.view=null;session.dirty=false;session.landing=true;
+      session.imagePath=undefined;session.disk=null;session.state=null;session.view=null;session.dirty=false;session.landing=true;
       session.context=undefined;session.restoreScroll=undefined;session.restoreScrollLeft=undefined;
       if(activeSession.current===session.id){
         disk.current=null;view.current=null;editorState.current=null;proposal.current=null;undo.current=[];
-        setFile('');setDirty(false);setMessages([hello]);setPrompt('');setWritingNodeId(null);setLastRequest(null);
-        setOutline([]);setSelection({from:0,to:0,text:''});setInlineRequest(null);setStream('');
+        setFile('');setDirty(false);setWritingNodeId(null);
+        setOutline([]);setSelection({from:0,to:0,text:''});setInlineRequest(null);
       }
     }
     redraw();
     return retained;
   }
 
-  const { beginRead,refresh, showFile, openFile, safeSwitch, openSaveAs, save, openBlankTab, openInLanding, createInLanding, openExplorerFile, manageFile, preflightFileActions, reloadFromDisk, switchWorkspace, submitDialog, importFile } = useFileActions({
-    api,appAlive,promptRef,dialogRef, uid, workspace, sessions, activeSession, activeTextSource, editorState, view, disk, proposal, undo, prompt, dialog, file, dirty, running, structuring, switching, viewApplying, creatingNote, savingPaths, fileWorkspace, saveSession, finalizeTrashedSessions, applyDiskFile, annotations, references, bindings, stop, redraw, inform, setFile, setDirty, setError, setFileBusy, setNewNoteBusy, setEntries, setRoot, setConfirm, setDialog, setFilter, setRenameRequest, setCollapsed, setTrashRevision, setInlineRequest, setOutline, setSelection, setMessages, setLastRequest, setPrompt, setStream, setWritingNodeId,
+  const { refresh, openFile, safeSwitch, openSaveAs, save, openBlankTab, createQuickNote, openExplorerFile, manageFile, preflightFileActions, reloadFromDisk, switchWorkspace, submitDialog, importFile } = useFileActions({
+    api,appAlive,promptRef,dialogRef, uid, workspace, sessions, activeSession, activeTextSource, editorState, view, disk, proposal, undo, prompt, dialog, file, dirty, running, requestAnchor, structuring, switching, viewApplying, creatingNote, savingPaths, fileWorkspace, saveSession, finalizeTrashedSessions, applyDiskFile, annotations, references, bindings, stop, redraw, inform, setFile, setDirty, setError, setFileBusy, setNewNoteBusy, setEntries, setRoot, setConfirm, setDialog, setFilter, setRenameRequest, setCollapsed, setTrashRevision, setInlineRequest, setOutline, setSelection, setWritingNodeId,
   });
+  function openDocumentList() {
+    workspace.open('files');
+    setFocusFileSearch(true);
+  }
+  function exportMarkdown() {
+    const session=sessions.current.get(activeSession.current),state=session?.view?.state||session?.state;
+    if(!state||proposal.current||fileBusy)return;
+    if(desktopPanels.isComposing()) {setError('请先完成当前输入法组词，再导出文档。');return;}
+    const format=session?.disk;
+    const text=state.doc.toString();
+    const contents=(format?.bom?'\uFEFF':'')+(format?.eol==='CRLF'?text.replace(/\r?\n/g,'\r\n'):text);
+    const url=URL.createObjectURL(new Blob([contents],{type:'text/markdown;charset=utf-8'}));
+    const link=document.createElement('a');
+    link.href=url;
+    link.download=((format?.path.split('/').at(-1)||'未命名').replace(/\.md$/i,''))+'-副本.md';
+    link.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
+  const recentEntries=useMemo(()=>{
+    if(!recentOpen)return [];
+    const files=new Map(flattenEntries(entries).filter(entry=>entry.type==='file').map(entry=>[entry.path,entry]));
+    return readRecentDocuments(fileWorkspace.info.id).flatMap(path=>{
+      const entry=files.get(path);
+      return entry?[entry]:[];
+    });
+  },[entries,fileWorkspace.info.id,recentOpen]);
+  async function openRecentDocument(path:string) {
+    const existing=[...sessions.current.values()].find(session=>(session.imagePath||session.disk?.path)===path&&workspace.isOpen(session.id));
+    if(existing)workspace.open(existing.id);
+    else await openExplorerFile(path,!sessions.current.get(activeSession.current)?.landing);
+    const id=activeSession.current;
+    requestAnimationFrame(()=>{if(activeSession.current===id)sessions.current.get(id)?.view?.focus();});
+  }
   async function addReferenceBatch(sources:ReferenceSource[]){
     const owner=activeSession.current,session=sessions.current.get(owner),ownerPath=session?.disk?.path;
     const original={doc:(session?.view?.state||session?.state)?.doc,version:session?.contentVersion||0,proposal:proposal.current,prompt:promptRef.current?.value??prompt};
@@ -442,33 +516,48 @@ function WritingApp() {
     if(results.some(result=>result.ok))workspace.open('basis');
     return results;
   }
-  const closingDocumentTab=useRef(false),closeTabUi=useRef({prompt,fileBusy});
-  closeTabUi.current={prompt,fileBusy};
+  const closingDocumentTab=useRef(false),closeTabFileBusy=useRef(fileBusy);
+  closeTabFileBusy.current=fileBusy;
   async function closeDocumentTab(id:string) {
     const session=sessions.current.get(id);
     if(!session||closingDocumentTab.current)return;
-    const originalPath=session.disk?.path,originalVersion=session.contentVersion||0;
-    const valid=()=>sessions.current.get(id)===session&&session.disk?.path===originalPath&&(session.contentVersion||0)===originalVersion;
+    const originalPath=session.disk?.path,originalVersion=session.contentVersion||0,originalProposal=proposalFor(id);
+    const valid=()=>sessions.current.get(id)===session&&session.disk?.path===originalPath&&(session.contentVersion||0)===originalVersion&&proposalFor(id)===originalProposal;
     const composing=()=>desktopPanels.isComposing()||!!session.view?.composing;
-    const blocked=()=>running.current||structuring.current||switching.current||viewApplying.current||creatingNote.current||closeTabUi.current.fileBusy||!!dialogRef.current;
-    const pending=()=>id===activeSession.current?!!proposal.current||!!closeTabUi.current.prompt.trim():!!session.context?.proposal||!!session.context?.prompt.trim();
+    const blocked=()=>!!requestAnchor.current&&running.current||structuring.current||switching.current||viewApplying.current||creatingNote.current||closeTabFileBusy.current||!!dialogRef.current;
+    const retainedProposal=()=>!!originalProposal&&!!session.disk&&!!(session.view?.state||session.state);
+    const pending=()=>!!proposalFor(id)&&!retainedProposal();
+    const dirty=()=>session.dirty&&!retainedProposal();
     closingDocumentTab.current=true;
     try {
-      const result=await prepareDocumentTabClose({blocked,composing,pending,dirty:()=>session.dirty,save:()=>saveSession(id,true),valid});
+      const result=await prepareDocumentTabClose({blocked,composing,pending,dirty,save:()=>saveSession(id,true),valid});
       if(result!=='ready'){
-        setError(result==='composing'?'请先完成当前输入法组词，再关闭标签页。':result==='blocked'?'请先停止 AI 生成或等待当前操作完成，再关闭标签页。':result==='pending'?'请先处理待审建议和未发送的消息，再关闭标签页。':result==='unsaved'?'文档未能保存或保存期间有新修改，请先处理保存冲突或另存，再关闭标签页。':'标签页状态已变化，请处理当前操作后重试。');return;
+        setError(result==='composing'?'请先完成当前输入法组词，再关闭标签页。':result==='blocked'?'请先停止正文生成或等待当前操作完成，再关闭标签页。':result==='pending'?'这条待审建议暂时无法保留，请先在正文中处理。':result==='unsaved'?'文档未能保存或保存期间有新修改，请先处理保存冲突或另存，再关闭标签页。':'标签页状态已变化，请处理当前操作后重试。');return;
       }
       if(composing()){setError('请先完成当前输入法组词，再关闭标签页。');return;}
-      if(!valid()||blocked()||pending()||session.dirty){setError('标签页状态已变化，请处理当前操作后重试。');return;}
+      if(!valid()||blocked()||pending()||dirty()){setError('标签页状态已变化，请处理当前操作后重试。');return;}
       if(id!=='editor'&&!closeEditor(id))return;
       setError('');
+      if(originalProposal&&retainedProposal()){
+        if(id!=='editor'){
+          redraw();
+          return;
+        }
+        // The primary slot must remain in the layout. Move the intact draft and
+        // its undo history to a closed document session before showing the landing page.
+        captureEditorView(session);
+        const reviewId='editor:'+uid();
+        const context=activeSession.current===id?{proposal:originalProposal,undo:undo.current,writingNodeId}:session.context!;
+        const state=rebindDocumentUpdates(session.state!,bindings(reviewId).onUpdate);
+        sessions.current.set(reviewId,{...session,id:reviewId,state,view:null,context});
+      }
       session.contentVersion=(session.contentVersion||0)+1;
-      session.disk=null;session.state=null;session.view=null;session.dirty=false;session.landing=true;
+      session.imagePath=undefined;session.disk=null;session.state=null;session.view=null;session.dirty=false;session.landing=true;
       session.context=undefined;session.restoreScroll=undefined;session.restoreScrollLeft=undefined;
       if(activeSession.current===id){
         disk.current=null;view.current=null;editorState.current=null;proposal.current=null;undo.current=[];
-        setFile('');setDirty(false);setMessages([hello]);setPrompt('');setWritingNodeId(null);setLastRequest(null);
-        setOutline([]);setSelection({from:0,to:0,text:''});setInlineRequest(null);setStream('');
+        setFile('');setDirty(false);setWritingNodeId(null);
+        setOutline([]);setSelection({from:0,to:0,text:''});setInlineRequest(null);
       }
       redraw();
     } finally {closingDocumentTab.current=false;}
@@ -478,41 +567,14 @@ function WritingApp() {
   }
   useEffect(() => {
     let cancelled = false;
-    const initialTarget=activeSession.current,initialRead=beginRead(initialTarget);
-    const cleanup = () => {
-      initialRead.cancel();
+    const onError=(error:Error)=>{if(!cancelled)setError(error.message);};
+    void refresh().catch(onError);
+    void api<Config>('/config').then(next=>{if(!cancelled)setConfig(current=>next.revision>=current.revision?next:current);}).catch(onError);
+    return () => {
       cancelled = true;
       generation.current++;
       controller.current?.abort();
     };
-    if (disk.current){initialRead.cancel();return cleanup;}
-    Promise.all([
-      api<{ root: string; entries: Entry[] }>("/tree"),
-      api<Config>("/config"),
-    ])
-      .then(async ([tree, cfg]) => {
-        if (cancelled||!initialRead.valid()) return;
-        setEntries(tree.entries);
-        setRoot(tree.root);
-        setConfig(cfg);
-        const flatten = (items: Entry[]): Entry[] =>
-          items.flatMap((e) =>
-            e.type === "file" ? [e] : flatten(e.children || []),
-          );
-        const first =
-          flatten(tree.entries).find((e) => e.name === "开始写作.md") ||
-          flatten(tree.entries)[0];
-        if (first) {
-          const data = await api<DiskFile>(
-            "/file?path=" + encodeURIComponent(first.path),
-          );
-          if (!cancelled&&initialRead.valid()) showFile(data,initialTarget);
-        }
-      })
-      .catch((e) => {
-        if (!cancelled&&initialRead.current()) setError(e.message);
-      }).finally(()=>initialRead.cancel());
-    return cleanup;
   }, []);
   useEffect(() => {
     if (!notice) return;
@@ -528,17 +590,25 @@ function WritingApp() {
   }, [messages, busy, chatOpen, chatTab]);
   useEffect(() => {
     const before = (event: BeforeUnloadEvent) => {
-      if ([...sessions.current.values()].some(session => session.dirty)) {
+      if (prompt.trim()||[...sessions.current.values()].some(session => session.dirty||proposalFor(session.id))) {
         event.preventDefault();
         event.returnValue = "";
       }
     };
     window.addEventListener("beforeunload", before);
     return () => window.removeEventListener("beforeunload", before);
-  }, [dirty]);
+  }, [dirty,prompt,proposalFor]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      const document=(event.target as HTMLElement).ownerDocument||window.document;
+      const document=(event.target as HTMLElement|null)?.ownerDocument||window.document;
+      const fileKey=event.key.toLowerCase();
+      if((event.ctrlKey||event.metaKey)&&!event.altKey&&!event.shiftKey&&(fileKey==='n'||fileKey==='o')&&!event.defaultPrevented&&!event.isComposing&&!dialog&&!confirm&&!help&&!recentOpen&&!document.querySelector('[role="dialog"],dialog[open]')){
+        event.preventDefault();
+        if(event.repeat)return;
+        if(fileKey==='o')openDocumentList();
+        else if(!fileBusy&&!newNoteBusy&&!busy&&!desktopPanels.isComposing())void createQuickNote();
+        return;
+      }
       if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='f'&&!document.querySelector('[role="dialog"],dialog[open]')&&!(event.target as HTMLElement).closest('input,textarea')){event.preventDefault();ribbonCommand('find');return;}
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
@@ -580,7 +650,7 @@ function WritingApp() {
       let timeout:ReturnType<typeof setTimeout>|undefined;
       try{
         if(running.current||switching.current||structuring.current||viewApplying.current||fileBusy)throw new Error('请先停止 AI 生成或等待当前文件操作完成，再退出。');
-        if(prompt.trim()||proposal.current||[...sessions.current.values()].some(session=>session.id!==activeSession.current&&(session.context?.prompt.trim()||session.context?.proposal)))throw new Error('请先发送或清空未发送的消息，并处理待审建议，再退出。');
+        if(prompt.trim()||[...sessions.current.values()].some(session=>proposalFor(session.id)))throw new Error('请先发送或清空未发送的消息，并处理待审建议，再退出。');
         if(desktopPanels.isComposing()||[...sessions.current.values()].some(session=>session.view?.composing)||scratchView.current?.composing)throw new Error('请先完成当前输入法组词，再退出。');
         if(savingPaths.current.size)throw new Error('文件正在保存，请稍后重试退出。');
         const prepare=async()=>{
@@ -604,12 +674,12 @@ function WritingApp() {
     for(const doc of documents)for(const type of ['beforeinput','keydown','paste','drop'])doc.addEventListener(type,block,true);
     return()=>{for(const doc of documents)for(const type of ['beforeinput','keydown','paste','drop'])doc.removeEventListener(type,block,true);};
   },[closingWindow,desktopPanels.windows]);
-  useEffect(()=>{if(help||confirm||filePickerTarget||dialog&&!dialog.target)window.focus();},[settings,help,confirm,filePickerTarget,dialog]);
+  useEffect(()=>{if(help||confirm||recentOpen||dialog&&!dialog.target)window.focus();},[settings,help,confirm,recentOpen,dialog]);
 
   function openSettings(section:SettingsSection='models') {setSettingsSection(section);setSettingsRestoreKey(value=>value+1);setSettings(true);if(settings)desktopPanels.focus('settings');}
   async function updateSettings(route:string,body:unknown) {
     setConfigBusy(true);
-    try {setConfig(await api<Config>(route,body));}
+    try {const next=await api<Config>(route,body);setConfig(current=>next.revision>=current.revision?next:current);}
     finally {setConfigBusy(false);}
   }
   async function selectChatModel(choice: string) {
@@ -617,6 +687,12 @@ function WritingApp() {
     setError('');
     try {await updateSettings('/config',{revision:config.revision,demo:choice==='demo',...(choice==='demo'?{}:{selection:parseModelChoice(choice)})});}
     catch(error){setError((error as Error).message);}
+  }
+  // 快捷栏的按钮＝一步执行：切到该模式，并立刻对当前文档/选区跑一轮。
+  function runFromDock(next: Mode) {
+    setMode(next);
+    if(next!=="discuss")workspace.open(activeSession.current);
+    void generate({ mode: next, allowEmptyPrompt: true });
   }
   function chooseMode(next: Mode) {
     if(next!=="discuss")workspace.open(activeSession.current);
@@ -674,8 +750,27 @@ function WritingApp() {
         targetForNode(node, outline)?.from === currentHeading.from,
     );
   const p = proposal.current;
+  const reviewSessions=editorIds.filter(id=>id!==activeEditorId&&proposalFor(id));
+  const writingBusy=busy&&!!requestAnchor.current;
+  function reviewProposal(id:string){
+    const session=sessions.current.get(id);
+    if(!session||!proposalFor(id))return;
+    reviewTarget.current=id;
+    if(workspace.isOpen(id))workspace.open(id);
+    else if(workspace.openDocumentTab(id)!=='succeeded'){
+      reviewTarget.current=null;
+      setError('无法打开待审建议，请完成输入法组词或当前窗口操作后重试。');
+      return;
+    }
+    if(session.view){reviewTarget.current=null;revealProposal(id,session.view);}
+  }
 
   function generate(options?:GenerationOptions) {
+    const nextMode=options?.annotations?'discuss':options?.mode??mode;
+    if(nextMode!=='discuss'&&pendingProposal(activeSession.current)&&!p){
+      setError('这个文件还有待审建议，请在对话中打开原标签页审阅。');
+      return;
+    }
     return generateWriting({
       document:{view,disk,sessions,activeSession,file,outline,currentHeading,currentWritingNode},
       model:{config,reasoningEffort:reasoning.effort},
@@ -685,7 +780,7 @@ function WritingApp() {
       ui:{setError,setBusy,setStream,openPanel:workspace.open,inform,redraw},
     },options);
   }
-  const {accept,reject,undoAI}=createProposalActions({view,disk,proposal,undo,writingOutline,add,setError,inform,redraw,setMode,setPrompt,openChat:()=>openChat('conversation'),promptRef});
+  const {accept,reject,undoAI}=createProposalActions({view,disk,proposal,undo,writingOutline,add,setError,inform,redraw,setMode,openChat:()=>openChat('conversation'),promptRef});
 
   
   function iconRail(edge:DockEdge){
@@ -696,8 +791,10 @@ function WritingApp() {
     return <div className="rail-edge-wrap"><PanelIconRail minimumTriggerMs={panelIconDragPreferences.preferences.minimumTriggerMs} holdDelayMs={panelIconDragPreferences.preferences.holdDelayMs} holdStyle={panelIconDragPreferences.preferences.holdStyle} edge={edge} items={items} scale={scale} onToggle={workspace.toggleAutoHide} onMove={workspace.repositionAutoHide} onDock={workspace.openDocked}/>{(edge==='left'||edge==='right')&&<RailEdgeHandle edge={edge} scale={scale} disabled={!workspace.canPullRail(edge)} onCommit={width=>workspace.dockAutoHideRail(edge,width)}/>}</div>;
   }
   const stale = p
-    ? !canApplyToDocument(p, view.current?.state.doc, file)
+    ? !previewIntact(p, view.current?.state.doc, file)
     : false;
+  // 建议就地显示在正文锚点后面，不再用底部浮层压住文字。
+  const inlineProposal=useMemo<InlineProposal|null>(()=>p?{from:p.from,to:p.to,mode:modeLabels[p.mode],count:p.count,text:p.text,original:p.original,reason:p.reason,stale,node:p.node}:null,[p,stale]);
   return (
     <div className="app-shell" data-revision={tick}>
       <AppHeader
@@ -707,6 +804,8 @@ function WritingApp() {
         file={file} fileBusy={fileBusy} chatOpen={chatOpen} leftOpen={leftOpen} setError={setError} setHelp={setHelp}/>
       <Ribbon visible={appearanceSettings.appearance.ribbonVisible} collapsed={appearanceSettings.appearance.ribbonCollapsed}
         onCommand={ribbonCommand} editorReady={activeTextSource.current==='scratch'?workspace.isOpen('scratch')&&!!scratchView.current:!!view.current}
+        fileActions={{new:{run:()=>void createQuickNote(),disabled:fileBusy||newNoteBusy||busy},open:{run:openDocumentList},
+          export:{run:exportMarkdown,disabled:!editorState.current||!!proposal.current||fileBusy},recent:{run:()=>setRecentOpen(true)}}}
         onCollapsedChange={value=>appearanceSettings.setAppearance(old=>({...old,ribbonCollapsed:value}))}
         onVisibilityChange={value=>{appearanceSettings.setAppearance(old=>({...old,ribbonVisible:value}));if(!value){inform('已隐藏顶部编辑栏，可在设置 → 界面中重新显示。');document.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.focus();}}}
         onSettings={()=>openSettings('appearance')} viewControls={<ViewControls mode={mode} workspaceId={fileWorkspace.info.id} onCapture={captureView} onApply={applyView}/>}/>
@@ -738,6 +837,7 @@ function WritingApp() {
             aria-label="文档列表"
           >
             <FileExplorer onRefresh={refresh} entries={entries} workspaceId={fileWorkspace.info.id} root={root} file={file} dirty={dirty} filter={filter} setFilter={setFilter} collapsed={collapsed} setCollapsed={setCollapsed} renameRequest={renameRequest}
+              treeReady={!!root} onOpenRepositories={()=>workspace.open('repositories')}
               onOpen={openExplorerFile} onAction={manageFile} onPreflight={preflightFileActions} onReferenceBatch={addReferenceBatch}
               onReferenceDrop={addReference} onAI={path=>{const entry=entries.flatMap(function walk(value):Entry[]{return [value,...(value.children||[]).flatMap(walk)];}).find(entry=>entry.path===path);if(entry)addReference({path,type:entry.type});}}/>
           </div>
@@ -772,14 +872,14 @@ function WritingApp() {
             title={documentPanel.primary?'正文主版面 · 位置固定':documentPanel.lockHint}
             data-position-fixed={!documentPanel.movable||undefined}
           >
-            <div className="document-tab" data-tab-detachable={canDetachDocumentTab||undefined} title={`${session.landing?'新标签页':session.disk?.path||'未命名稿'}${canDetachDocumentTab?' · 拖动移出此标签':''}`} onPointerDown={event=>{
+            <div className="document-tab" data-tab-detachable={canDetachDocumentTab||undefined} title={`${session.landing?'新标签页':session.imagePath||session.disk?.path||'未命名稿'}${canDetachDocumentTab?' · 拖动移出此标签':''}`} onPointerDown={event=>{
               if(!canDetachDocumentTab)return;event.stopPropagation();workspace.beginTabDrag(id,event,{fromTab:true,onFinish:()=>{}});
             }}>
-              <span>{session.landing?'新标签页':session.disk?.path.split("/").at(-1) || "未命名稿"}</span>
+              <span>{session.landing?'新标签页':(session.imagePath||session.disk?.path)?.split("/").at(-1) || "未命名稿"}</span>
               {session.dirty && <i className="dirty-dot" />}
               <button type="button" className="document-tab-close" data-no-drag aria-label={`关闭${panelLabel(id)}标签页`} title="关闭标签页" onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();void closeDocumentTab(id);}}><X size={13}/></button>
             </div>
-            <NewTabButton onClick={()=>openBlankTab(id)} disabled={busy||newNoteBusy||fileBusy}/>
+            <NewTabButton onClick={()=>openBlankTab(id)} disabled={writingBusy||newNoteBusy||fileBusy}/>
             <div className="tab-spacer" />
             <button
               className="icon-button"
@@ -793,66 +893,11 @@ function WritingApp() {
             <PanelControls chrome={chrome} id={id} />
           </div>
           {session.disk&&fileConflicts[session.disk.path]&&<div className="file-conflict" role="alert"><span>{fileConflicts[session.disk.path]}</span><button type="button" onClick={()=>reloadFromDisk(id)}>重新读取磁盘</button><button type="button" onClick={()=>{activateEditor(id);openSaveAs(session.disk!.path);}}>另存本地副本</button></div>}
-          {session.landing?<><NewTabPage active={activeEditorId===id} busy={newNoteBusy||fileBusy} onCreate={()=>void createInLanding(id)} onOpen={()=>setFilePickerTarget(id)}/>{emptyPanelFooter("新标签页")}</>:<>
-                {<Editor initialState={session.state} keepAlive={busy&&activeEditorId===id||!!dialog?.target&&dialog.target.editor===session.view} documentFile={session.disk?.path||''} onOpenLink={target=>{try{const path=resolveLinkTarget(session.disk?.path||'',target);activateEditor(id);void openExplorerFile(path).catch(error=>setError(error.message));}catch(error){setError((error as Error).message);}}} annotationTool={annotationTool} searchActive={workspace.isOpen('search')&&activeEditorId===id&&activeTextSource.current==='document'} onFind={()=>{activateEditor(id);activeTextSource.current='document';ribbonCommand('find');}} displayMode={session.displayMode||'live'} typewriter={!!session.typewriter} onReady={bindings(id).onReady} onUpdate={bindings(id).onUpdate} onFocus={()=>{if(activeTextSource.current!=='document'){activeTextSource.current='document';redraw();}}} onMarkSelection={()=>{activateEditor(id);markText('document',sessions.current.get(id)?.disk?.path||'');}} onUnmarkSelection={annotationId=>{activateEditor(id);unmarkText('document',annotationId,sessions.current.get(id)?.disk?.path||'');}} onShowAnnotations={context=>{activateEditor(id);showLocalAnnotation('document',context,sessions.current.get(id)?.disk?.path||'');}} onError={setError}/>}
-          {activeEditorId === id && p && (
-            <section
-              className={"review-panel " + (stale ? "stale" : "")}
-              aria-label="AI 建议审阅"
-            >
-              <div className="review-heading">
-                <Sparkles size={15} />
-                <b>{stale ? "建议已过时" : "待审阅建议"}</b>
-                <span>
-                  {modeLabels[p.mode]} · {p.count} 字
-                </span>
-                <button className="text-button" onClick={() => locate(p.from)}>
-                  定位正文
-                  <TextCursorInput size={13} />
-                </button>
-              </div>
-              <p className="review-reason">
-                {stale
-                  ? "目标范围在生成后发生了手改，已阻止覆盖。请重新生成。"
-                  : p.reason}
-              </p>
-              <div
-                className={"diff-grid " + (!p.original ? "insert-only" : "")}
-              >
-                {p.original && (
-                  <div className="diff-before">
-                    <small>原文 · 仅此选区</small>
-                    <p>{p.original}</p>
-                  </div>
-                )}
-                <div className="diff-after">
-                  <small>
-                    {p.original ? "建议替换" : "建议插入"} · {p.node}
-                  </small>
-                  <p>{p.text.trim() || "（删除此处）"}</p>
-                </div>
-              </div>
-              <div className="review-actions">
-                <span>采纳前，正文保持当前内容</span>
-                <button className="text-button" onClick={() => reject(true)}>
-                  继续调整
-                </button>
-                <button className="secondary-button" onClick={() => reject()}>
-                  <X size={13} />
-                  放弃
-                </button>
-                <button
-                  className="gold-button"
-                  disabled={stale || busy}
-                  onClick={accept}
-                >
-                  <Check size={14} />
-                  采纳建议
-                </button>
-              </div>
-            </section>
-          )}
-          <EditorStatusBar status={session.disk?`自由写作 · ${session.dirty?'有未保存的修改':'已保存'}`:'未打开文档'} aiStatus={activeEditorId===id?(busy?'AI 正在生成':p?stale?'建议过时，请重新生成':'1 条建议等待审阅':undefined):session.context?.proposal?'1 条建议等待审阅':undefined} state={session.view?.state||session.state} eol={session.disk?.eol} bom={session.disk?.bom} preferences={statusPreferences} onSettings={()=>openSettings('appearance')}/>
+          {session.imagePath?<><ImageFileView key={fileWorkspace.info.id+session.imagePath} path={session.imagePath} workspaceId={fileWorkspace.info.id}/>{emptyPanelFooter("图片")}</>:session.landing?<><NewTabPage active={activeEditorId===id} busy={newNoteBusy||fileBusy||busy} onCreate={()=>void createQuickNote(id)} onOpen={openDocumentList}/>{emptyPanelFooter("新标签页")}</>:<>
+                {<Editor initialState={session.state} keepAlive={busy&&activeEditorId===id||!!dialog?.target&&dialog.target.editor===session.view} documentFile={session.disk?.path||''} onOpenLink={target=>{try{const path=resolveLinkTarget(session.disk?.path||'',target);activateEditor(id);void openExplorerFile(path).catch(error=>setError(error.message));}catch(error){setError((error as Error).message);}}} annotationTool={annotationTool} searchActive={workspace.isOpen('search')&&activeEditorId===id&&activeTextSource.current==='document'} onFind={()=>{activateEditor(id);activeTextSource.current='document';ribbonCommand('find');}} displayMode={session.displayMode||'live'} typewriter={!!session.typewriter} onReady={bindings(id).onReady} onUpdate={bindings(id).onUpdate} onFocus={()=>{if(activeTextSource.current!=='document'){activeTextSource.current='document';redraw();}}} onMarkSelection={()=>{activateEditor(id);markText('document',sessions.current.get(id)?.disk?.path||'');}} onUnmarkSelection={annotationId=>{activateEditor(id);unmarkText('document',annotationId,sessions.current.get(id)?.disk?.path||'');}} onShowAnnotations={context=>{activateEditor(id);showLocalAnnotation('document',context,sessions.current.get(id)?.disk?.path||'');}} onError={setError} inlineProposal={activeEditorId===id?inlineProposal:null}/>}
+              {activeEditorId===id&&<ProposalOverlay view={view.current} proposal={inlineProposal} accept={accept} reject={reject}/>
+              }
+          <EditorStatusBar status={session.disk?`自由写作 · ${session.dirty?'有未保存的修改':'已保存'}`:'未打开文档'} aiStatus={activeEditorId===id?(writingBusy?'AI 正在生成':p?stale?'建议已被改动，请核对':'预览中：✓ 保留 / ✗ 撤掉，未保存':undefined):session.context?.proposal?'1 条建议等待审阅':undefined} state={session.view?.state||session.state} eol={session.disk?.eol} bom={session.disk?.bom} preferences={statusPreferences} onSettings={()=>openSettings('appearance')}/>
           </>}
           {documentPanel.handles}
         </main></DesktopPanel>
@@ -875,20 +920,19 @@ function WritingApp() {
               title={rightPanel.lockHint}
             >
               <WritingModeControl mode={mode} onMode={chooseMode}/>
-              <div className="chat-mode-heading">
-                <b>{modeLabels[mode]}</b>
-              </div>
               <PanelControls chrome={chrome} id="conversation" />
             </div>
             <div className="chat-context">
               <FileText size={13} />
               <span>{`正文 ${editorIds.indexOf(activeEditorId)+1}`} · {file.split("/").at(-1) || "未打开文档"}</span>
               <button
+                className="chat-basis-button"
                 title="查看 AI 实际输入"
                 onClick={() => workspace.open('basis')}
               >
+                <BookOpen size={12} aria-hidden="true" />
                 依据
-                <ChevronRight size={12} />
+                <ChevronRight size={12} aria-hidden="true" />
               </button>
             </div>
             <div className="conversation-view">
@@ -908,11 +952,18 @@ function WritingApp() {
                     )}
                   </div>
                 )}
+                {reviewSessions.map(id=>(
+                  <div className="chat-context" key={id}>
+                    <FileText size={13}/>
+                    <span title={sessions.current.get(id)?.disk?.path}>{sessions.current.get(id)?.disk?.path}</span>
+                    <button type="button" onClick={()=>reviewProposal(id)}>审阅建议<ChevronRight size={12}/></button>
+                  </div>
+                ))}
                 <div ref={messagesEnd} />
               </div>
               <div className="chat-bottom">
                 <ChatComposer inputRef={promptRef} value={prompt} onChange={setPrompt} onSend={()=>void generate()} onStop={()=>{stop();inform("已停止，正文没有改变。");}}
-                  busy={busy} disabled={!file||!!p} placeholder={mode==="edit"?"输入修改要求…":mode==="outline"?"这一节想怎么写…":mode==="continue"?"接下来想写什么…":"输入消息…"}
+                  busy={busy} disabled={mode!=='discuss'&&(!disk.current||pendingProposal(activeEditorId))} placeholder={mode==="edit"?"输入修改要求…":mode==="outline"?"这一节想怎么写…":mode==="continue"?"接下来想写什么…":"输入消息…"}
                   config={config} modelBusy={configBusy} reasoningEffort={reasoning.effort} onReasoningChange={reasoning.setEffort} onModelChange={choice=>void selectChatModel(choice)}/>{reasoning.saveError&&<p role="status">{reasoning.saveError}</p>}
               </div>
             </div>
@@ -924,12 +975,12 @@ function WritingApp() {
         <PanelFrame chrome={chrome} id="outline" title="大纲" className="outline-workspace"><div className="sidebar-content">            <WritingOutline
               key={file}
               items={outline}
-              nodes={writingOutline.nodes}
+              nodes={/\.md$/i.test(file)?writingOutline.nodes:[]}
               selectedId={currentWritingNode?.id || null}
               onSelect={setWritingNodeId}
               onSave={writingOutline.save}
               busy={writingOutline.busy}
-              ready={writingOutline.ready}
+              ready={/\.md$/i.test(file)&&writingOutline.ready}
               onRetry={writingOutline.retry}
               onLocate={locate}
               onWrite={(id) => {
@@ -963,7 +1014,7 @@ function WritingApp() {
               onOpenFile={() => safeSwitch(() => void openFile("自由草稿.md"))}
             />
 </PanelFrame>
-        <PanelFrame chrome={chrome} id="annotations" title="标注" className="annotations-workspace"><AnnotationPanel
+        <PanelFrame chrome={chrome} id="annotations" title="标注" className="annotations-workspace"><AnnotationPanel focusRequest={annotationFocus}
                 items={annotations.items}
                 selected={annotations.selected}
                 toggle={annotations.toggle}
@@ -982,7 +1033,7 @@ function WritingApp() {
         <PanelFrame chrome={chrome} id="trash" title="回收站" className="trash-workspace"><TrashPanel open={workspace.isOpen('trash')} refreshKey={trashRevision} onRestore={id=>manageFile({action:'restore',id})} onChanged={()=>setTrashRevision(value=>value+1)}/></PanelFrame>
         <PanelFrame chrome={chrome} id="search" title="查找替换" className="find-replace-workspace"><FindReplacePanel editor={activeTextSource.current==='scratch'?scratchView.current:view.current} open={workspace.isOpen('search')} onClose={()=>workspace.close('search')} label={activeTextSource.current==='scratch'?'自由草稿.md':file.split('/').at(-1)||'未命名稿'}/></PanelFrame>
         {workspace.tabGroups.map(group=><WorkspaceTabs key={group.id} group={group} style={group.style} label={panelLabel} onSelect={workspace.open}
-          positionLocked={workspace.isPositionLocked(group.active)} lockHint={workspace.panel(group.active).lockHint} onNewTab={group.panels.every(id=>sessions.current.has(id))?()=>openBlankTab(group.active):undefined} newTabDisabled={busy||newNoteBusy||fileBusy}
+          positionLocked={workspace.isPositionLocked(group.active)} lockHint={workspace.panel(group.active).lockHint} onNewTab={group.panels.every(id=>sessions.current.has(id))?()=>openBlankTab(group.active):undefined} newTabDisabled={writingBusy||newNoteBusy||fileBusy}
           onTabDrag={canDetachDocumentTab&&group.panels.every(id=>sessions.current.has(id))?workspace.beginTabDrag:undefined} isDirty={id=>!!sessions.current.get(id)?.dirty}
           onCloseTab={group.panels.every(id=>sessions.current.has(id))?id=>void closeDocumentTab(id):undefined}
           onRaise={workspace.panel(group.active).raise} onDrag={workspace.beginGroupDrag} handles={workspace.panel(group.active).groupHandles} controls={<PanelControls chrome={chrome} id={group.active} groupMembers={group.panels} />}/>)}
@@ -1008,7 +1059,7 @@ function WritingApp() {
         editorFor={(source) => {const editor=source==='document'?view.current:scratchView.current;return editor?.dom.ownerDocument===ownerDocument?editor:null;}}
         onEdit={annotations.edit}
         onSend={sendAnnotations}
-        onOpenGlobal={()=>workspace.open('annotations')}
+        onRemove={annotations.remove} onFocusGlobal={id=>{setAnnotationFocus({id,nonce:Date.now()});workspace.open('annotations');}} onOpenGlobal={id=>{setAnnotationFocus({id,nonce:Date.now()});workspace.open('annotations');}}
         saving={annotations.saving}
         busy={busy}
         toolActive={annotationTool}
@@ -1017,7 +1068,7 @@ function WritingApp() {
       {closingWindow&&([document,...[...desktopPanels.windows.values()].map(popup=>popup.document)]).map((doc,index)=>createPortal(<div className="desktop-closing" role="status">正在保存并退出…</div>,doc.body,`closing-${index}`))}
       {appearanceSettings.appearance.floatingToolbarVisible!==false&&<GlobalToolbar mode={mode} continuationLimit={config.continuationLimit} aiOpen={chatOpen&&!desktopPanels.hiddenWindows.has('conversation')} annotationTool={annotationTool}
         onAnnotate={()=>setAnnotationTool(value=>!value)}
-        onMode={setMode} onToggleAi={()=>{if(desktopPanels.windows.has('conversation')){desktopPanels.toggleVisibility('conversation');return;}if(chatOpen)workspace.minimize('conversation');else {if(workspace.autoHideItems.some(item=>item.id==='conversation')){setChatTab('conversation');setChatOrb(false);workspace.open('conversation');}else openChat('conversation');setTimeout(()=>promptRef.current?.focus(),0);}}}/>}
+        onRun={runFromDock} busy={busy} onToggleAi={()=>{if(desktopPanels.windows.has('conversation')){desktopPanels.toggleVisibility('conversation');return;}if(chatOpen)workspace.minimize('conversation');else {if(workspace.autoHideItems.some(item=>item.id==='conversation')){setChatTab('conversation');setChatOrb(false);workspace.open('conversation');}else openChat('conversation');setTimeout(()=>promptRef.current?.focus(),0);}}}/>}
       {notice && (
         <div className="toast" role="status">
           <CheckCheck size={16} />
@@ -1033,8 +1084,9 @@ function WritingApp() {
         </div>
       )}
       {settings && <SettingsPage panelIconDragPreferences={panelIconDragPreferences} annotationPreferences={annotationPreferences} config={config} initialSection={settingsSection} restoreKey={settingsRestoreKey} appearance={appearanceSettings} statusPreferences={statusPreferences} busy={configBusy}
-        onRequest={updateSettings} onReload={async()=>setConfig(await api<Config>('/config'))} onClose={()=>setSettings(false)}/>}
-      {filePickerTarget&&<FilePicker entries={entries} onOpen={async path=>{const id=filePickerTarget;await openInLanding(path,id);requestAnimationFrame(()=>{if(activeSession.current===id)sessions.current.get(id)?.view?.focus();});}} onClose={()=>setFilePickerTarget(null)}/>}
+        onRequest={updateSettings} onProbe={(body:ModelProbeRequest,signal?:AbortSignal)=>requestApi<ModelProbeResult>(request,'/model-services/probe',body,signal)}
+        onReload={async()=>{const next=await api<Config>('/config');setConfig(current=>next.revision>=current.revision?next:current);}} onClose={()=>setSettings(false)}/>}
+      {recentOpen&&<FilePicker entries={recentEntries} onOpen={openRecentDocument} onClose={()=>setRecentOpen(false)}/>}
       {dialog&&(dialog.kind==='image'||dialog.kind==='table')&&dialog.target&&<EditorInsertDialog kind={dialog.kind} target={dialog.target} onClose={()=>setDialog(null)} onInserted={()=>{const target=dialog.target!;setDialog(null);if(dialog.kind==='image')void refresh().catch(error=>setError(error.message));requestAnimationFrame(()=>{if(target.valid())target.editor.focus();});inform(dialog.kind==='image'?'已插入图片。':'已插入表格。');}}/>}
       {dialog && dialog.kind!=='image'&&dialog.kind!=='table'&&dialog.kind!=='properties'&&(
         <div className="modal-backdrop">

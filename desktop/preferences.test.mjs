@@ -11,10 +11,12 @@ describe('desktop preference persistence', () => {
       expect(() => prefs.normalize(data)).toThrow();
     expect(prefs.allowed('hive.explorer.v1:workspace')).toBe(true);
     expect(prefs.allowed('hive.views.v1:workspace')).toBe(true);
+    expect(prefs.allowed('hive.recentDocuments.v1:workspace')).toBe(true);
   });
   it('persists typography alongside old appearance settings with matching preload/main allowlists',async()=>{
     const preload=readFileSync(new URL('./preload.cjs',import.meta.url),'utf8'),main=readFileSync(new URL('./preferences.cjs',import.meta.url),'utf8');
     expect(preload.match(/const exact = new Set\((\[[^\n]+\])\)/)?.[1]).toBe(main.match(/const exact = new Set\((\[[^\n]+\])\)/)?.[1]);
+    expect(preload.match(/(\[[^\n]+\])\.some\(prefix => key\.startsWith\(prefix\)/)?.[1]).toBe(main.match(/(\[[^\n]+\])\.some\(prefix => key\.startsWith\(prefix\)/)?.[1]);
     const value=JSON.stringify({version:1,preset:'novel',maxWidth:760,lineHeight:2.05,paragraphSpacing:.35,firstLineIndent:true}),dir=await mkdtemp(path.join(os.tmpdir(),'hive-typography-'));
     try{const file=path.join(dir,'prefs.json');await prefs.preferenceStore(file).save({'hive.appearance.v1':'{"version":1,"editorSize":18}','hive.typography.v1':value,'hive.theme.v1':value,'hive.frontmatter-visible.v1':'false'});const saved=await prefs.preferenceStore(file).read();expect(saved['hive.typography.v1']).toBe(value);expect(saved['hive.theme.v1']).toBe(value);expect(saved['hive.frontmatter-visible.v1']).toBe('false');}finally{await rm(dir,{recursive:true,force:true});}
   });

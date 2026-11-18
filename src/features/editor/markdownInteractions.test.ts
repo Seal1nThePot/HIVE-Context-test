@@ -18,6 +18,27 @@ function fixture(initial:EditorState){
   return {view,click};
 }
 describe('image and task interactions',()=>{
+  it('reveals the language opening when the caret or a multiline selection enters a code block',()=>{
+    const doc='before\n\n```powershell\nnpm test\nnpm run build\n```\n\nafter';
+    const opening=doc.indexOf('```powershell'),body=doc.indexOf('npm test');
+    let state=create(doc).update({selection:{anchor:body},effects:setPreviewFocus.of(true)}).state;
+    expect(visibleReplacements(state,true).some(item=>item.from===opening)).toBe(false);
+    state=state.update({selection:{anchor:body,head:body+20},userEvent:'select.keyboard'}).state;
+    expect(visibleReplacements(state,true).some(item=>item.from===opening)).toBe(false);
+    state=state.update({effects:setPreviewFocus.of(false)}).state;
+    expect(visibleReplacements(state,false).some(item=>item.from===opening)).toBe(true);
+    expect(state.doc.toString()).toBe(doc);
+  });
+  it('renders Mermaid fences in preview while keeping source mode and active editing intact',()=>{
+    const doc='before\n\n```mermaid\nflowchart LR\n A --> B\n```\n\nafter',state=create(doc);
+    const diagram=previewPlan(state).replacements.find(item=>item.kind==='mermaid');
+    expect(diagram?.text).toBe('flowchart LR\n A --> B');
+    expect(visibleReplacements(state,false)).toContain(diagram);
+    const editing=state.update({selection:{anchor:doc.indexOf('A --> B')},effects:setPreviewFocus.of(true)}).state;
+    expect(visibleReplacements(editing,true)).not.toContain(diagram);
+    expect(state.update({effects:setDisplayMode.of('source')}).state.field(markdownPreview).size).toBe(0);
+    expect(state.doc.toString()).toBe(doc);
+  });
   it('renders wiki images relative to their document, and resolves refreshed reference definitions',()=>{
     let state=create('![[Pasted image 20261117221326.png]]\n\n![说明][pic]\n\n[pic]: ../图片/旧.png');
     let images=previewPlan(state).replacements.filter(item=>item.kind==='image');

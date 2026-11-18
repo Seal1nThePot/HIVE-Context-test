@@ -216,21 +216,48 @@ describe('unified native presentation transitions',()=>{
 });
 
 describe('pulling native shelf panels back into the workspace',()=>{
+  it('reopens a docked panel inside the main window through repeated shelf cycles',()=>{
+    const f=fixture();
+    for(let cycle=0;cycle<3;cycle++){
+      f.act(w=>w.minimize('files'));expect(f.workspace.capture().autoHide?.files.host).toBe('main');
+      f.act(w=>w.toggleAutoHide('files'));
+      expect(f.workspace.panel('files').visible).toBe(true);expect(f.desktop.windows.has('files')).toBe(false);expect(f.workspace.capture().autoHideActive).toBe('files');
+      f.act(w=>w.toggleAutoHide('files'));expect(f.workspace.panel('files').visible).toBe(false);
+      f.act(w=>w.toggleAutoHide('files'));
+    }
+    expect(f.desktop.detach).not.toHaveBeenCalled();
+  });
+  it('restores main-window shelves from saved layouts including legacy layouts without a host tag',()=>{
+    const first=fixture();first.act(w=>w.open('trash'));first.act(w=>w.minimize('files'));first.act(w=>w.minimize('trash'));
+    const saved=first.workspace.capture();
+    for(const legacy of [false,true]){
+      const layout=structuredClone(saved);if(legacy)for(const placement of Object.values(layout.autoHide||{}))delete placement.host;
+      const f=fixture();f.act(w=>w.restoreLayout(layout));
+      for(const id of ['files','trash']){f.act(w=>w.toggleAutoHide(id));expect(f.workspace.panel(id).visible).toBe(true);expect(f.desktop.windows.has(id)).toBe(false);}
+      expect(f.desktop.detach).not.toHaveBeenCalled();
+    }
+  });
+  it('retains a native shelf host after saving and restoring its layout',()=>{
+    const first=fixture();first.act(w=>w.floatNativePanel('files'));first.act(w=>w.minimize('files'));const saved=first.workspace.capture();
+    expect(saved.autoHide?.files.host).toBe('native');
+    const f=fixture();f.act(w=>w.restoreLayout(saved));f.act(w=>w.toggleAutoHide('files'));
+    expect(f.desktop.windows.has('files')).toBe(true);expect(f.runtime.handles.get('files')?.dirty()).toBe(true);
+  });
   it('keeps ordinary minimized panels visible when their rail is pulled',()=>{
     const f=fixture();f.act(w=>w.minimize('files'));f.act(w=>w.dockAutoHideRail('left',280));
     expect(f.workspace.panel('files').visible).toBe(true);expect(f.workspace.autoHideItems).toEqual([]);
   });
   it('shows a panel after opening its icon, minimizing its native window, and pulling the rail',()=>{
-    const f=fixture();f.act(w=>w.minimize('files'));f.act(w=>w.toggleAutoHide('files'));
+    const f=fixture();f.act(w=>w.floatNativePanel('files'));f.act(w=>w.minimize('files'));f.act(w=>w.toggleAutoHide('files'));
     expect(f.desktop.windows.has('files')).toBe(true);
     f.act(w=>w.minimize('files'));expect(f.desktop.windows.has('files')).toBe(false);
     f.act(w=>w.dockAutoHideRail('left',280));
     expect(f.workspace.openIds).toContain('files');expect(dockedPanels(f.workspace.capture().tree)).toContain('files');
     expect(f.workspace.panel('files').visible).toBe(true);expect(f.workspace.autoHideItems).toEqual([]);
-    expect(f.desktop.windows.has('files')).toBe(false);expect(f.desktop.detach).toHaveBeenCalledTimes(1);
+    expect(f.desktop.windows.has('files')).toBe(false);expect(f.desktop.detach).toHaveBeenCalledTimes(2);
   });
   it.each(['left','right'] as const)('returns an open native panel before docking the %s rail',edge=>{
-    const f=fixture();f.act(w=>w.minimize('files'));f.act(w=>w.repositionAutoHide('files',.25,edge));f.act(w=>w.toggleAutoHide('files'));
+    const f=fixture();f.act(w=>w.floatNativePanel('files'));f.act(w=>w.minimize('files'));f.act(w=>w.repositionAutoHide('files',.25,edge));f.act(w=>w.toggleAutoHide('files'));
     const handle=f.runtime.handles.get('files')!,homeCalls=vi.mocked(handle.home).mock.calls.length;
     f.act(w=>w.dockAutoHideRail(edge,280));
     expect(f.workspace.panel('files').visible).toBe(true);expect(f.desktop.windows.has('files')).toBe(false);
@@ -238,7 +265,7 @@ describe('pulling native shelf panels back into the workspace',()=>{
   });
   it('keeps both sidebar tabs reachable after multiple native windows have been shelved',()=>{
     const f=fixture();f.act(w=>w.open('trash'));f.act(w=>w.minimize('files'));f.act(w=>w.minimize('trash'));
-    for(const id of ['files','trash']){f.act(w=>w.toggleAutoHide(id));f.act(w=>w.minimize(id));}
+    for(const id of ['files','trash']){f.act(w=>w.floatNativePanel(id));f.act(w=>w.minimize(id));}
     f.act(w=>w.dockAutoHideRail('left',280));
     expect(f.workspace.tabGroups.find(group=>group.panels.includes('files'))?.panels).toEqual(['files','trash']);
     for(const id of ['files','trash']){f.act(w=>w.open(id));expect(f.workspace.panel(id).visible).toBe(true);}
@@ -262,7 +289,7 @@ describe('pulling native shelf panels back into the workspace',()=>{
     expect(f.workspace.autoHideItems.map(item=>item.id)).toEqual(['conversation']);
   });
   it.each(['composing','locked','invalid width','return rejected'] as const)('preserves the shelf when %s prevents the transition',reason=>{
-    const f=fixture();f.act(w=>w.minimize('files'));f.act(w=>w.toggleAutoHide('files'));
+    const f=fixture();f.act(w=>w.floatNativePanel('files'));f.act(w=>w.minimize('files'));f.act(w=>w.toggleAutoHide('files'));
     if(reason==='composing')f.runtime.handles.get('files')!.isComposing=()=>true;
     if(reason==='locked')f.act(w=>w.toggleLocked());
     if(reason==='return rejected')f.desktop.returnMembers.mockReturnValue(false);

@@ -1,0 +1,108 @@
+/* AI 建议已经写进正文：正文里只有一圈细线，操作条浮在框的上方并跟着视口走（见 ProposalOverlay.tsx）。 */
+
+.cm-line.proposal-box {
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
+
+.cm-line.proposal-box-first {
+  border-top: 1px solid var(--line);
+  border-top-left-radius: 5px;
+  border-top-right-radius: 5px;
+}
+
+.cm-line.proposal-box-last {
+  border-bottom: 1px solid var(--line);
+  border-bottom-left-radius: 5px;
+  border-bottom-right-radius: 5px;
+}
+
+.cm-line.proposal-box-first.proposal-box-last {
+  border-radius: 5px;
+}
+
+.cm-line.proposal-box-stale {
+  border-color: color-mix(in srgb, var(--hive-danger) 45%, var(--line));
+}
+
+/* 浮在正文上的操作条：位置由 JS 按建议范围实时算，滚到框外时贴住视口顶部继续跟随。 */
+.proposal-bar {
+  position: fixed;
+  z-index: 40;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 2px 10px color-mix(in srgb, #000 22%, transparent);
+  color: var(--muted);
+  font-size: calc(10px * var(--text-scale, 1));
+  user-select: none;
+}
+
+.proposal-bar-tag {
+  flex: none;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.proposal-bar-reason {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.proposal-bar-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 三个图标按钮：与工具栏图标同一票样式，只有采纳带主色。 */
+.proposal-bar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 20px;
+  padding: 0;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.proposal-bar-button:hover {
+  background: var(--hive-selection-bg);
+  color: var(--text);
+}
+
+/* 采纳＝这里唯一的主动作，沿用应用主按钮（与发送、保存同一个金色）。 */
+.proposal-bar-button.accept {
+  border-color: var(--hive-accent);
+  background: var(--hive-accent);
+  color: var(--hive-on-accent);
+}
+
+.proposal-bar-button.accept:hover {
+  background: color-mix(in srgb, var(--hive-accent) 85%, var(--panel));
+  color: var(--hive-on-accent);
+}
+
+.proposal-bar.stale .proposal-bar-tag,
+.proposal-bar.stale .proposal-bar-reason {
+  color: var(--hive-danger);
+}
+
+.proposal-bar.stale .proposal-bar-button.accept {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

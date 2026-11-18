@@ -40,6 +40,6 @@ describe('real isolated backend process failures',()=>{
     const running=await start(),headers={'Content-Type':'application/json','X-Hive-Workspace':running.workspace.id};
     const cases=[{headers,body:'{truncated'},{headers,body:JSON.stringify({path:'draft.md',text:'x'.repeat(2000001),baseline:null})},{headers:{...headers,'X-Hive-Workspace':'stale'},body:JSON.stringify({path:'draft.md',text:'x',baseline:null})},{headers,body:JSON.stringify({path:'../outside.md',text:'x',baseline:null})}];
     for(const input of cases){const result=await fetch(running.base+'/api/file',{method:'POST',...input});expect(result.status).toBeGreaterThanOrEqual(400);expect((await fetch(running.base+'/api/health')).ok).toBe(true);}
-    expect(await fs.readdir(path.join(directory,'documents'))).toEqual(['自由草稿.md']);
+    expect(await fs.readdir(path.join(directory,'documents'))).toEqual([]);
   },15000);
 });

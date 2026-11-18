@@ -44,7 +44,6 @@
 }
 .free-workbench .panel-drag-header > .icon-button svg { width:calc(18px * var(--ui-scale)); height:calc(18px * var(--ui-scale)); }
 .free-workbench .writing-mode-trigger svg { width:calc(15.6px * var(--ui-scale)); height:calc(15.6px * var(--ui-scale)); }
-.free-workbench .chat-mode-heading > b { font-size:calc(11px * var(--text-scale)); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .workspace-group-header {
   display:flex; align-items:center; height:var(--panel-header-height); box-sizing:border-box; padding:0 calc(6px * var(--ui-scale)) 0 0;
   border:1px solid var(--hive-surface-border); border-bottom:1px solid var(--hive-panel-inner-border); background:var(--hive-header-bg); pointer-events:auto;
@@ -77,8 +76,7 @@
 .workspace-tab-frame .panel-resize-ne,.workspace-tab-frame .panel-resize-nw { width:4px; height:4px; }
 
 /* Density affects UI geometry; text and manuscript sizes have their own settings. */
-.app-header { height:calc(56px * var(--ui-scale)); min-height:calc(56px * var(--ui-scale)); padding:0 calc(20px * var(--ui-scale)); }
-.header-actions { gap:calc(4px * var(--ui-scale)); }
+.app-header { height:calc(56px * var(--ui-scale)); min-height:calc(56px * var(--ui-scale)); }
 .header-actions > .icon-button { width:calc(26px * var(--ui-scale)); height:calc(26px * var(--ui-scale)); }
 .ribbon-tabs { height:calc(30px * var(--ui-scale)); min-height:calc(30px * var(--ui-scale)); }
 .ribbon-body { padding:calc(6px * var(--ui-scale)) calc(20px * var(--ui-scale)); }
@@ -116,3 +114,6 @@
 /* Keep the rail scrollable without drawing its scrollbar. */
 .nearby-workbench-middle > .rail-edge-wrap .nearby-panel-rail {scrollbar-width:none;}
 .nearby-workbench-middle > .rail-edge-wrap .nearby-panel-rail::-webkit-scrollbar {display:none;}
+
+/* Preserve access to controls below the normal docking width. */
+.workspace-panel>.panel-drag-header,.workspace-group-header{overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}.panel-drag-header>b{flex-shrink:0;white-space:nowrap}.document-panel-controls{flex-shrink:0}

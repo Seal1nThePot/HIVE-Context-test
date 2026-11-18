@@ -53,3 +53,52 @@ it('reports deleted data when metadata cleanup fails and retains the manifest fo
  try{const now=Date.now(),files=fileStore(root),store=explorerStore({root,state,files},undefined,{now:()=>now});await fs.writeFile(path.join(root,'a.md'),'a');const item=await store.manage({action:'trash',path:'a.md'}),trash=path.join(root,'.hive-trash'),manifest=path.join(trash,item.id+'.json');item.deletedAt=new Date(now-8*86400000).toISOString();await fs.writeFile(manifest,JSON.stringify(item));await fs.writeFile(path.join(state,'file-times.json'),'broken');const result=await store.purgeTrash((await store.previewTrash(7)).token);expect(result.failed[0]).toMatchObject({id:item.id,dataDeleted:true});expect(result.failed[0].error).toContain('内容已永久删除');expect((await store.listTrash())[0].missing).toBe(true);expect(await fs.readFile(manifest,'utf8')).toContain(item.id);
  }finally{const resolved=path.resolve(base),tmp=path.resolve(os.tmpdir());if(path.dirname(resolved)!==tmp||!path.basename(resolved).startsWith('hive-retention-'))throw Error('unsafe test cleanup');await fs.rm(resolved,{recursive:true,force:true});}
 });
+it('deletes selected trash entries by id and clears their metadata',async()=>{
+  const base=await fs.mkdtemp(path.join(os.tmpdir(),'hive-retention-')),root=path.join(base,'docs'),state=path.join(base,'state');await fs.mkdir(root);await fs.mkdir(state);
+  try{const files=fileStore(root),store=explorerStore({root,state,files}),trash=path.join(root,'.hive-trash');
+    await fs.writeFile(path.join(root,'keep.md'),'keep');await fs.writeFile(path.join(root,'gone.md'),'gone');await fs.mkdir(path.join(root,'folder'));await fs.writeFile(path.join(root,'folder','inner.md'),'inner');
+    const keep=await store.manage({action:'trash',path:'keep.md'}),gone=await store.manage({action:'trash',path:'gone.md'}),folder=await store.manage({action:'trash',path:'folder'});
+    for(const name of ['text-annotations.json','writing-outline-nodes.json','writing-outlines.json','file-times.json'])await fs.writeFile(path.join(state,name),JSON.stringify({[name==='text-annotations.json'?'document:@trash/'+gone.id:'@trash/'+gone.id]:{},keep:{}}));
+    expect(await store.deleteTrash([gone.id])).toEqual({deletedIds:[gone.id],failed:[]});
+    expect((await store.listTrash()).map(x=>x.id).sort()).toEqual([keep.id,folder.id].sort());
+    for(const target of [path.join(trash,gone.id),path.join(trash,gone.id+'.json')])await expect(fs.lstat(target)).rejects.toMatchObject({code:'ENOENT'});
+    expect((await fs.lstat(path.join(trash,keep.id))).isFile()).toBe(true);
+    for(const name of ['text-annotations.json','writing-outline-nodes.json','writing-outlines.json','file-times.json'])expect(Object.keys(JSON.parse(await fs.readFile(path.join(state,name),'utf8')))).toEqual(['keep']);
+    expect((await store.deleteTrash([folder.id])).deletedIds).toEqual([folder.id]);
+    await expect(fs.lstat(path.join(trash,folder.id))).rejects.toMatchObject({code:'ENOENT'});
+    expect(await store.listTrash()).toHaveLength(1);
+  }finally{const resolved=path.resolve(base),tmp=path.resolve(os.tmpdir());if(path.dirname(resolved)!==tmp||!path.basename(resolved).startsWith('hive-retention-'))throw Error('unsafe test cleanup');await fs.rm(resolved,{recursive:true,force:true});}
+});
+
+it('skips unknown ids and rejects requests that match nothing',async()=>{
+  const base=await fs.mkdtemp(path.join(os.tmpdir(),'hive-retention-')),root=path.join(base,'docs'),state=path.join(base,'state');await fs.mkdir(root);await fs.mkdir(state);
+  try{const files=fileStore(root),store=explorerStore({root,state,files}),unknown='00000000-0000-4000-8000-000000000000';
+    await fs.writeFile(path.join(root,'a.md'),'a');const first=await store.manage({action:'trash',path:'a.md'});
+    expect(await store.deleteTrash([unknown,first.id,unknown])).toEqual({deletedIds:[first.id],failed:[]});
+    expect(await store.listTrash()).toEqual([]);
+    await expect(store.deleteTrash([unknown])).rejects.toMatchObject({status:404});
+    await expect(store.deleteTrash([])).rejects.toMatchObject({status:400});
+    await expect(store.deleteTrash('x')).rejects.toMatchObject({status:400});
+    await expect(store.deleteTrash(['not-a-uuid'])).rejects.toMatchObject({status:400});
+    await expect(store.deleteTrash(Array.from({length:101},()=>unknown))).rejects.toMatchObject({status:400});
+  }finally{const resolved=path.resolve(base),tmp=path.resolve(os.tmpdir());if(path.dirname(resolved)!==tmp||!path.basename(resolved).startsWith('hive-retention-'))throw Error('unsafe test cleanup');await fs.rm(resolved,{recursive:true,force:true});}
+});
+
+it('clears the index when trash data is already gone and keeps the manifest after an unlink failure',async()=>{
+  const base=await fs.mkdtemp(path.join(os.tmpdir(),'hive-retention-')),root=path.join(base,'docs'),state=path.join(base,'state');await fs.mkdir(root);await fs.mkdir(state);const unlink=fs.unlink;
+  try{const files=fileStore(root),store=explorerStore({root,state,files}),trash=path.join(root,'.hive-trash');
+    await fs.writeFile(path.join(root,'gone.md'),'gone');await fs.writeFile(path.join(root,'locked.md'),'locked');
+    const gone=await store.manage({action:'trash',path:'gone.md'}),locked=await store.manage({action:'trash',path:'locked.md'});
+    await fs.rm(path.join(trash,gone.id));
+    expect((await store.listTrash()).find(item=>item.id===gone.id).missing).toBe(true);
+    expect(await store.deleteTrash([gone.id])).toEqual({deletedIds:[gone.id],failed:[]});
+    expect((await store.listTrash()).map(item=>item.id)).toEqual([locked.id]);
+    await expect(fs.lstat(path.join(trash,gone.id+'.json'))).rejects.toMatchObject({code:'ENOENT'});
+    let injected=false;fs.unlink=async target=>{if(target===path.join(trash,locked.id)){injected=true;throw Object.assign(new Error('EPERM: operation not permitted, unlink'),{code:'EPERM'});}return unlink(target);};
+    const result=await store.deleteTrash([locked.id]);
+    expect(injected).toBe(true);expect(result.deletedIds).toEqual([]);
+    expect(result.failed[0]).toMatchObject({id:locked.id,path:'locked.md'});expect(result.failed[0].error).toContain('EPERM');
+    expect(await fs.readFile(path.join(trash,locked.id+'.json'),'utf8')).toContain(locked.id);
+    expect((await store.listTrash()).map(item=>item.id)).toEqual([locked.id]);
+  }finally{fs.unlink=unlink;const resolved=path.resolve(base),tmp=path.resolve(os.tmpdir());if(path.dirname(resolved)!==tmp||!path.basename(resolved).startsWith('hive-retention-'))throw Error('unsafe test cleanup');await fs.rm(resolved,{recursive:true,force:true});}
+});

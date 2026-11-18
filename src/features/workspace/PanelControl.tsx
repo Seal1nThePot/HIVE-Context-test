@@ -6,7 +6,16 @@ import { placePanelActions } from "./panelUiGeometry";
 import { usePanelDocument } from '../../shared/panelDocument';
 export type DragControl = { onStart?: () => void; onFinish: (dragged: boolean) => void; fromTab?:boolean };
 export type PanelAction = { label: string; icon?: ReactNode; run: () => void; disabled?:boolean; checked?:boolean };
-export default function PanelControl({ label, floating, onToggleFloat, onOpen, onClose, onMinimize, collapseEdge, primary=false, movable=true, canDock=true, actions=[], memberActions, detached=false, floatAction, actionsOnly=false }: {
+/** A tab first selects its member; the next task uses that member's actual menu. */
+export function openPanelContextMenu(document:Document,id:string,x:number,y:number){
+  document.defaultView?.setTimeout(()=>{
+    const candidates=[...document.querySelectorAll<HTMLButtonElement>('[data-panel-menu-id]')].filter(node=>node.dataset.panelMenuId===id);
+    const button=candidates.find(node=>node.getClientRects().length)||candidates[0];
+    if(button){const event=new document.defaultView!.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:x,clientY:y,button:2});button.dispatchEvent(event);}
+  },0);
+}
+export default function PanelControl({ label, panelId, floating, onToggleFloat, onOpen, onClose, onMinimize, collapseEdge, primary=false, movable=true, canDock=true, actions=[], memberActions, detached=false, floatAction, actionsOnly=false }: {
+  panelId?:string;
   label: string; floating: boolean;
   onToggleFloat: () => void; onOpen:()=>void;onClose: () => void;
   onMinimize:()=>void;collapseEdge?:DockEdge;primary?:boolean;movable?:boolean;canDock?:boolean;
@@ -15,6 +24,7 @@ export default function PanelControl({ label, floating, onToggleFloat, onOpen, o
   const document = usePanelDocument(), window = document.defaultView!;
   const [open, setOpen] = useState(false), [position, setPosition] = useState({x:0,y:0,width:158,height:30,orientation:"horizontal"});
   const button = useRef<HTMLButtonElement>(null), menu = useRef<HTMLDivElement>(null);
+  const [contextAnchor,setContextAnchor]=useState<{x:number;y:number}|null>(null);
   const CollapseIcon=collapseEdge?({left:ChevronsLeft,right:ChevronsRight,top:ChevronsUp,bottom:ChevronsDown})[collapseEdge]:ChevronsLeft;
   const choices: PanelAction[] = actionsOnly ? actions : [
     ...actions,
@@ -26,12 +36,26 @@ export default function PanelControl({ label, floating, onToggleFloat, onOpen, o
   ];
   useLayoutEffect(() => {
     if (!open || !button.current) return;
-    const rect = button.current.getBoundingClientRect();
+    const rect = contextAnchor?{...contextAnchor,width:0,height:0}:button.current.getBoundingClientRect();
     const scale=Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale'))||1;
     const textScale=Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--text-scale'))||1;
     setPosition(placePanelActions({x:rect.x,y:rect.y,width:rect.width,height:rect.height},{width:window.innerWidth,height:window.innerHeight},choices.length+(memberActions?1:0),scale,textScale));
     menu.current?.querySelector<HTMLButtonElement>('button')?.focus();
-  }, [open, choices.length, document]);
+  }, [open, choices.length, document,contextAnchor]);
+  useEffect(()=>{
+    if(!panelId)return;
+    const context=(event:MouseEvent)=>{
+      const target=event.target as Element;if(event.defaultPrevented||!target?.closest||target.closest('input,textarea,select,[contenteditable="true"],.cm-editor,.markdown-preview,[role="menu"]'))return;
+      const marker=target.closest<HTMLElement>('[data-panel-context],[data-panel-tab],[data-panel-id]');
+      if((marker?.dataset.panelContext||marker?.dataset.panelTab||marker?.dataset.panelId)!==panelId)return;
+      const scope=target.closest('.workspace-group-header,.independent-panel-header,.document-panel-header')||document;
+      const candidates=[...scope.querySelectorAll<HTMLButtonElement>('[data-panel-menu-id]')].filter(node=>node.dataset.panelMenuId===panelId);
+      const chosen=candidates.find(node=>node.getClientRects().length)||candidates[0];
+      if(chosen!==button.current)return;
+      event.preventDefault();setContextAnchor({x:event.clientX,y:event.clientY});setOpen(true);
+    };
+    document.addEventListener('contextmenu',context);return()=>document.removeEventListener('contextmenu',context);
+  },[document,panelId]);
   useEffect(() => {
     if (!open) return;
     const outside = (event: globalThis.PointerEvent) => {
@@ -46,10 +70,10 @@ export default function PanelControl({ label, floating, onToggleFloat, onOpen, o
   return <div className="panel-controls" data-no-drag onPointerDown={event=>event.stopPropagation()} onDoubleClick={event=>event.stopPropagation()}>
     {!actionsOnly&&(!primary||detached)&&<button type="button" className="panel-mini-button" aria-label={`收纳${label}面板`} title="收纳到主窗口侧栏" onClick={onMinimize}><CollapseIcon size={11}/></button>}
     {!actionsOnly&&!detached&&floating&&<button type="button" className="panel-mini-button panel-close-button" aria-label={`关闭${label}面板`} title="关闭面板" onClick={onClose}><X size={11}/></button>}
-    <button type="button" ref={button} className="panel-mini-button panel-menu-button" data-panel-control aria-label={`${label}面板功能`}
+    <button type="button" ref={button} className="panel-mini-button panel-menu-button" data-panel-menu-id={panelId} data-panel-control aria-label={`${label}面板功能`}
       title="面板功能 · 单击展开" aria-haspopup="menu" aria-expanded={open}
-      onClick={()=>setOpen(value=>!value)}
-      onContextMenu={event=>event.preventDefault()}
+      onClick={()=>{setContextAnchor(null);setOpen(value=>!value);}}
+      onContextMenu={event=>{event.preventDefault();event.stopPropagation();setContextAnchor({x:event.clientX,y:event.clientY});setOpen(true);}}
       >
       <Menu size={11}/>
     </button>

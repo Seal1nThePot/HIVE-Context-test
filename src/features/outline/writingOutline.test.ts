@@ -19,6 +19,6 @@ describe("workspace and independent writing outline", () => {
     const messages=makePrompt("outline","# 正文","","第二节","补充例子",[],{writingOutline:"## 第二节\n## 第一节",nodeDescription:"先说明原因"});
     expect(messages.at(-1)!.content).toContain("当前写作大纲：\n## 第二节\n## 第一节");
     expect(messages.at(-1)!.content).toContain("节点写作描述：先说明原因");
-    expect(messages[0].content).toContain("不重复标题");
+    expect(messages.at(-1)!.content).toContain("不重复标题");
   });
 });

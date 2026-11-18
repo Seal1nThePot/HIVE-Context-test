@@ -7,9 +7,13 @@ import {
   AlignLeft,
   AlignRight,
   Bold,
-  Clipboard,
   Columns2,
+  FileCog,
+  FileOutput,
+  FilePlus,
   FileText,
+  FolderOpen,
+  History,
   Image,
   Italic,
   LayoutPanelTop,
@@ -25,9 +29,20 @@ import {
 } from "lucide-react";
 import type {Alignment,InlineFormat} from '../editor/formatting';
 export type RibbonCommand=InlineFormat|Alignment|'bullet'|'numbered'|'quote'|'task'|'codeBlock'|'link'|'rule'|'find'|'image'|'table'|'properties'|'undo'|'redo'|0|1|2|3|4;
+export type RibbonFileActions = Partial<Record<'new' | 'open' | 'export' | 'recent', { run: () => void; disabled?: boolean }>>;
+const fileActionNames: Partial<Record<string, keyof RibbonFileActions>> = {
+  新建: 'new',
+  打开: 'open',
+  导出: 'export',
+  最近使用: 'recent',
+};
 const commands:Partial<Record<string,RibbonCommand>>={'撤销':'undo','重做':'redo','加粗':'bold','倾斜':'italic','下划线':'underline','删除线':'strike','行内代码':'inlineCode','代码块':'codeBlock','链接':'link','分隔线':'rule','待办列表':'task','左对齐':'left','居中':'center','右对齐':'right','项目符号':'bullet','编号':'numbered','引用':'quote','查找替换':'find','查找':'find','插入图片':'image','插入表格':'table','插入笔记属性':'properties','文档属性':'properties'};
 const shortcuts:Partial<Record<string,string>>={'加粗':'Ctrl+B','倾斜':'Ctrl+I','下划线':'Ctrl+U','左对齐':'Ctrl+Shift+L','居中':'Ctrl+Shift+E','右对齐':'Ctrl+Shift+R','撤销':'Ctrl+Z','重做':'Ctrl+Y','查找替换':'Ctrl+F'};
 const descriptions: Partial<Record<string,string>> = {
+  '新建':'在当前仓库中新建 Markdown 文稿。',
+  '打开':'打开文档面板以选择文件。',
+  '导出':'将当前文稿导出为 Markdown 副本。',
+  '最近使用':'查看当前仓库中最近打开的文件。',
   '撤销':'撤销上一步操作。','重做':'重做上一步撤销的操作。',
   '加粗':'将所选内容字体加粗。','倾斜':'将所选内容设为斜体。','下划线':'为所选内容添加下划线。','删除线':'为所选内容添加删除线。','行内代码':'将所选内容设为行内代码。',
   '左对齐':'将当前段落左对齐。','居中':'将当前段落居中对齐。','右对齐':'将当前段落右对齐。',
@@ -43,16 +58,16 @@ const content = {
     {
       name: "文档",
       items: [
-        ["新建", FileText],
-        ["打开", Clipboard],
-        ["导出", Columns2],
+        ["新建", FilePlus],
+        ["打开", FolderOpen],
+        ["导出", FileOutput],
       ],
     },
     {
       name: "信息",
       items: [
-        ["文档属性", Type],
-        ["最近使用", List],
+        ["文档属性", FileCog],
+        ["最近使用", History],
       ],
     },
   ],
@@ -127,16 +142,15 @@ const content = {
     },
   ],
 } as const;
-export default function Ribbon({viewControls,visible,collapsed,onVisibilityChange,onCollapsedChange,onSettings,onCommand,editorReady}:{viewControls:ReactNode;visible:boolean;collapsed:boolean;onVisibilityChange:(value:boolean)=>void;onCollapsedChange:(value:boolean)=>void;onSettings:()=>void;onCommand:(command:RibbonCommand)=>void;editorReady:boolean}) {
+export default function Ribbon({viewControls,visible,collapsed,onVisibilityChange,onCollapsedChange,onSettings,onCommand,editorReady,fileActions}:{viewControls:ReactNode;visible:boolean;collapsed:boolean;onVisibilityChange:(value:boolean)=>void;onCollapsedChange:(value:boolean)=>void;onSettings:()=>void;onCommand:(command:RibbonCommand)=>void;editorReady:boolean;fileActions?:RibbonFileActions}) {
   const [tab, setTab] = useState<keyof typeof content>("开始");
   const [menuOpen,setMenuOpen]=useState(false),[position,setPosition]=useState({x:0,y:0});
   const menuButton=useRef<HTMLButtonElement>(null),menu=useRef<HTMLDivElement>(null);
   const [tooltip,setTooltip]=useState<{name:string; x:number; y:number; description:string}|null>(null);
-  function showTooltip(name:string, target:HTMLElement) {
+  function showTooltip(name:string, target:HTMLElement, description:string) {
     const rect=target.getBoundingClientRect();
     const width=Math.min(260,window.innerWidth-16);
-    setTooltip({name,x:Math.max(8,Math.min(rect.left,window.innerWidth-width-8)),y:rect.bottom+20,
-      description:commands[name]===undefined?'此功能尚未开放。':!editorReady?'请先打开或激活编辑区。':descriptions[name]||'执行此操作。'});
+    setTooltip({name,x:Math.max(8,Math.min(rect.left,window.innerWidth-width-8)),y:rect.bottom+20,description});
   }
   useEffect(()=>{setTooltip(null);},[tab,visible,collapsed,editorReady]);
   useEffect(()=>{
@@ -188,23 +202,35 @@ export default function Ribbon({viewControls,visible,collapsed,onVisibilityChang
                 </select>
               )}
               {group.items.map(([name, Icon]) => {
-                const disabled=commands[name]===undefined||!editorReady;
+                const fileActionName = fileActionNames[name];
+                const fileAction = fileActionName ? fileActions?.[fileActionName] : undefined;
+                const command = commands[name];
+                const reserved = !fileAction && command === undefined;
+                const disabled = fileAction ? !!fileAction.disabled : reserved || !editorReady;
+                let unavailable = '';
+                if (reserved) unavailable = '功能预留';
+                else if (disabled) {
+                  if (!fileAction) unavailable = '请先打开或激活编辑区';
+                  else if (fileActionName === 'export' && !editorReady) unavailable = '请先打开或激活 Markdown 文稿';
+                  else unavailable = '当前不可用';
+                }
+                const description = reserved ? '此功能尚未开放。' : unavailable ? unavailable + '。' : descriptions[name] || '执行此操作。';
                 return <div key={name} className="ribbon-tool-trigger"
                   tabIndex={disabled?0:undefined}
-                  aria-label={disabled?name+(commands[name]===undefined?'（功能预留）':'（请先打开或激活编辑区）'):undefined}
+                  aria-label={disabled?name+'（'+unavailable+'）':undefined}
                   aria-disabled={disabled||undefined}
                   aria-describedby={disabled&&tooltip?.name===name?'ribbon-tool-tooltip':undefined}
-                  onMouseEnter={event=>showTooltip(name,event.currentTarget)}
+                  onMouseEnter={event=>showTooltip(name,event.currentTarget,description)}
                   onMouseLeave={()=>setTooltip(null)}
-                  onFocus={event=>showTooltip(name,event.currentTarget)}
+                  onFocus={event=>showTooltip(name,event.currentTarget,description)}
                   onBlur={()=>setTooltip(null)}>
                   <button
                     type="button"
                     disabled={disabled}
-                    aria-label={commands[name]===undefined?name+'（功能预留）':name}
+                    aria-label={reserved?name+'（功能预留）':name}
                     aria-describedby={!disabled&&tooltip?.name===name?'ribbon-tool-tooltip':undefined}
-                    onMouseDown={event=>{if(commands[name]!==undefined)event.preventDefault();}}
-                    onClick={()=>{const command=commands[name];if(command!==undefined)onCommand(command);}}
+                    onMouseDown={event=>{if(command!==undefined)event.preventDefault();}}
+                    onClick={()=>{if(fileAction)fileAction.run();else if(command!==undefined)onCommand(command);}}
                   >
                     <Icon size={16} />
                     <span>{name}</span>

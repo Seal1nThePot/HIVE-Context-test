@@ -28,3 +28,4 @@ function createAboutHandlers({isMainOrigin, app, shell, root, versions, platform
   };
 }
 module.exports = {createAboutHandlers};
+

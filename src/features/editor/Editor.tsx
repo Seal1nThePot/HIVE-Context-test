@@ -28,6 +28,7 @@ import {
 } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import { annotationHighlights } from "../annotations/annotationDecorations";
+import {inlineProposalField,setInlineProposal,type InlineProposal} from './proposalInline';
 import {configureMarkdownDisplay,configureImageContext,markdownDisplayExtensions,displayModeField,setDisplayMode} from './markdownDisplay';
 import {sourceMarkdownLanguage} from './sourceSyntax';
 import {fencedCodeHighlight,fencedCodeLanguage} from './codeHighlight';
@@ -57,6 +58,12 @@ const colors = HighlightStyle.define([
   { tag: tags.monospace, color: "var(--hive-document-text, var(--text))", backgroundColor: "color-mix(in srgb, var(--hive-document-text) 5%, transparent)" },
   { tag: tags.quote, color: "var(--hive-document-text, var(--text))" },
 ]);
+const documentUpdateListener = new Compartment();
+
+export function rebindDocumentUpdates(state: EditorState, onUpdate: (update: ViewUpdate) => void) {
+  return state.update({effects: documentUpdateListener.reconfigure(EditorView.updateListener.of(onUpdate))}).state;
+}
+
 export function makeState(
   doc: string|Text,
   onUpdate: (u: ViewUpdate) => void,
@@ -68,6 +75,7 @@ export function makeState(
     extensions: [
       markdown({ base: sourceMarkdownLanguage, codeLanguages:fencedCodeLanguage }),
       annotationHighlights,
+      inlineProposalField,
       markdownDisplayExtensions,
       headingFolding,
       displayModeField.init(()=>underlyingDisplayMode(displayMode)),
@@ -101,7 +109,7 @@ export function makeState(
         "aria-label": label,
         spellcheck: "false",
       }),
-      EditorView.updateListener.of(onUpdate),
+      documentUpdateListener.of(EditorView.updateListener.of(onUpdate)),
       EditorView.theme(
         {
           "&": {
@@ -173,6 +181,7 @@ export default function Editor({
   annotationTool=false,
   initialState=null,
   keepAlive=false,
+  inlineProposal=null,
 }: {
   onReady: (v: EditorView | null) => void;
   onUpdate: (u: ViewUpdate) => void;
@@ -190,6 +199,7 @@ export default function Editor({
   annotationTool?:boolean;
   initialState?:EditorState|null;
   keepAlive?:boolean;
+  inlineProposal?:InlineProposal|null;
 }) {
   const fileWorkspace=useFileWorkspace();
   const panelDocument=usePanelDocument();
@@ -300,7 +310,24 @@ export default function Editor({
     view.dom.addEventListener('hive:table-annotation',handler);return()=>view.dom.removeEventListener('hive:table-annotation',handler);
   },[onMarkSelection,onUnmarkSelection,awake]);
   useEffect(()=>{if(editorRef.current){configureMarkdownDisplay(editorRef.current,underlyingDisplayMode(displayMode));configureTypewriter(editorRef.current,typewriter);configureFloatingSearch(editorRef.current,searchActive);configureImageContext(editorRef.current,documentFile?{file:documentFile,workspace:fileWorkspace.info.id}:null);}});
+  useEffect(()=>{
+    const view=editorRef.current;if(!view||!awake)return;
+    if(!view.state.field(inlineProposalField,false))view.dispatch({effects:StateEffect.appendConfig.of(inlineProposalField)});
+    view.dispatch({effects:setInlineProposal.of(inlineProposal)});
+  },[awake,inlineProposal]);
   return <><div className={'editor-host'+(displayMode==='split'?' split-view':'')+(annotationTool?' annotation-tool-active':'')} ref={host} onFocusCapture={onFocus}
+    onClick={event=>{
+      if(!onOpenLink||event.button!==0||event.altKey)return;
+      const target=event.target as HTMLElement,editor=target.closest('.split-source')?sourceRef.current:editorRef.current;
+      if(!editor||target.closest('textarea,button'))return;
+      const rendered=target.closest<HTMLElement>('.cm-preview-link,[data-hive-link]');
+      if(!rendered&&!(event.ctrlKey||event.metaKey))return;
+      if(!event.ctrlKey&&!event.metaKey&&!target.ownerDocument.getSelection()?.isCollapsed)return;
+      const pos=editor.posAtCoords({x:event.clientX,y:event.clientY});
+      const link=rendered?.dataset.hiveLink||rendered?.title||(pos!==null?linkAt(editor.state,pos):undefined);
+      if(!link||/^(?:https?:|mailto:)/i.test(link))return;
+      event.preventDefault();event.stopPropagation();onOpenLink(link);
+    }}
     onPointerDownCapture={event=>{const editor=editorRef.current;if(event.button===2&&editor)rightSelection.current={selection:editor.state.selection,doc:editor.state.doc};}}
     onContextMenu={event=>{
       const editor=editorRef.current;if(!onMarkSelection||!editor)return;

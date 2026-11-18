@@ -1,3 +1,4 @@
+import {normalizeReasoningEffects,type ReasoningEffects} from '../chat/reasoningEffects';
 import {normalizeDockingProfiles,type DockingProfiles} from './dockingAppearance';
 import {normalizeEditorProfiles,type EditorProfiles} from './editorAppearance';
 import {defaultWritingDock,normalizeWritingDock,type WritingDockAppearance} from '../chat/writingDockAppearance';
@@ -15,11 +16,26 @@ export type PaletteId=keyof typeof palettes;
 export type BaseColor='black'|'white'|'gray'|'custom';
 export type ColorProfiles=Partial<Record<BaseColor,Palette>>;
 export type ThemeCorePreferences={version:1;base:BaseColor;customBase:string;palette:PaletteId;colors:Palette;colorProfiles:ColorProfiles;surfaceContrastMode:'auto'|'manual';surfaceContrast:number;surfaceColors:SurfaceProfiles};
+export type ReasoningTrackColors={left:string;middle:string;right:string};
+export type ReasoningTrackProfiles=Partial<Record<BaseColor,ReasoningTrackColors>>;
 export type WritingDockProfiles=Partial<Record<BaseColor,WritingDockAppearance>>;
-export type ThemePreferences=ThemeCorePreferences&{writingDock:WritingDockAppearance;writingDockProfiles:WritingDockProfiles;dockingProfiles:DockingProfiles;editorProfiles:EditorProfiles};
-export const defaultTheme:ThemePreferences={version:1,base:'black',customBase:'#202820',palette:'hive',colors:{...palettes.hive.colors},colorProfiles:{},surfaceContrastMode:'auto',surfaceContrast:100,surfaceColors:{},writingDock:defaultWritingDock,writingDockProfiles:{},dockingProfiles:{},editorProfiles:{}};
+export type ComposerShadow={color:string;blur:number;offsetY:number};
+export const defaultComposerShadow:ComposerShadow={color:'#00000066',blur:14,offsetY:4};
+export type ThemePreferences=ThemeCorePreferences&{writingDock:WritingDockAppearance;writingDockProfiles:WritingDockProfiles;dockingProfiles:DockingProfiles;editorProfiles:EditorProfiles;reasoningEffects?:ReasoningEffects;reasoningTrackProfiles?:ReasoningTrackProfiles;composerShadow:ComposerShadow};
+export const defaultTheme:ThemePreferences={version:1,base:'black',customBase:'#202820',palette:'hive',colors:{...palettes.hive.colors},colorProfiles:{},surfaceContrastMode:'auto',surfaceContrast:100,surfaceColors:{},writingDock:defaultWritingDock,writingDockProfiles:{},dockingProfiles:{},editorProfiles:{},composerShadow:defaultComposerShadow};
 export function isHex(value:unknown):value is string{return typeof value==='string'&&/^#[0-9a-f]{6}$/i.test(value);}
+export function normalizeComposerShadow(value:unknown):ComposerShadow{
+  const raw=value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:{};
+  const clamp=(input:unknown,min:number,max:number,fallback:number)=>typeof input==='number'&&Number.isFinite(input)?Math.round(Math.max(min,Math.min(max,input))):fallback;
+  const color=typeof raw.color==='string'&&/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i.test(raw.color)?raw.color.toLowerCase():defaultComposerShadow.color;
+  return {color,blur:clamp(raw.blur,0,40,defaultComposerShadow.blur),offsetY:clamp(raw.offsetY,0,24,defaultComposerShadow.offsetY)};
+}
+export function composerShadowCss(value:ComposerShadow){return `0 ${value.offsetY}px ${value.blur}px ${value.color}`;}
 export function defaultColorsForBase(base:BaseColor):Palette{return {...(base==='gray'?oliveGrayColors:base==='white'?oliveWhiteColors:palettes.hive.colors)};}
+function normalizeReasoningTrackProfiles(value:unknown):ReasoningTrackProfiles{
+  const result:ReasoningTrackProfiles={},raw=value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:{};
+  for(const base of ['black','white','gray','custom'] as const){const entry=raw[base];if(!entry||typeof entry!=='object'||Array.isArray(entry))continue;const v=entry as Record<string,unknown>;if(isHex(v.left)&&isHex(v.middle)&&isHex(v.right))result[base]={left:v.left.toLowerCase(),middle:v.middle.toLowerCase(),right:v.right.toLowerCase()};}return result;
+}
 function normalizePalette(value:unknown,base:BaseColor):Palette{
   const raw=value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:{},colors=defaultColorsForBase(base);
   for(const role of colorRoles)if(isHex(raw[role]))colors[role]=raw[role].toLowerCase();
@@ -39,7 +55,7 @@ function savedDefaultColorProfiles(value:unknown):ColorProfiles{
 }
 export function normalizeTheme(value:unknown):ThemePreferences {
   const v=value&&typeof value==='object'?value as Record<string,unknown>:{};
-  if(v.version!==1)return {...defaultTheme,colors:{...defaultTheme.colors},colorProfiles:{},surfaceColors:{},writingDock:normalizeWritingDock(null),writingDockProfiles:{},dockingProfiles:{},editorProfiles:{}};
+  if(v.version!==1)return {...defaultTheme,colors:{...defaultTheme.colors},colorProfiles:{},surfaceColors:{},writingDock:normalizeWritingDock(null),writingDockProfiles:{},dockingProfiles:{},editorProfiles:{},composerShadow:normalizeComposerShadow(null)};
   const base=(['black','white','gray','custom'] as unknown[]).includes(v.base)?v.base as BaseColor:'black';
   const palette=typeof v.palette==='string'&&Object.hasOwn(palettes,v.palette)?v.palette as PaletteId:'hive';
   // Retired presets must not reappear under the remaining preset's name.
@@ -70,7 +86,7 @@ export function normalizeTheme(value:unknown):ThemePreferences {
     const destination=misplacedDark?'black':base;
     profiles[destination]=normalizeWritingDock(v.writingDock,destination==='black'?color=>color:color=>mapLegacyColor(color,core));
   }
-  return {...core,dockingProfiles:normalizeDockingProfiles(v.dockingProfiles),editorProfiles:normalizeEditorProfiles(v.editorProfiles),writingDockProfiles:profiles,writingDock:profiles[base]??defaultDockForTheme(core)};
+  return {...core,...(v.reasoningTrackProfiles?{reasoningTrackProfiles:normalizeReasoningTrackProfiles(v.reasoningTrackProfiles)}:{}),...(v.reasoningEffects?{reasoningEffects:normalizeReasoningEffects(v.reasoningEffects)}:{}),dockingProfiles:normalizeDockingProfiles(v.dockingProfiles),editorProfiles:normalizeEditorProfiles(v.editorProfiles),writingDockProfiles:profiles,writingDock:profiles[base]??defaultDockForTheme(core),composerShadow:normalizeComposerShadow(v.composerShadow)};
 }
 export function defaultDockForTheme(theme:ThemeCorePreferences):WritingDockAppearance{
   if(theme.base==='black')return normalizeWritingDock(defaultWritingDock);

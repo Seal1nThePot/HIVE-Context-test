@@ -29,8 +29,8 @@ html.hive-desktop:has(body.desktop-toolbar-window),body.desktop-toolbar-window {
 .hive-desktop .app-header button,.hive-desktop .app-header input,.hive-desktop .app-header label,.hive-desktop .app-header .header-actions,
 .desktop-panel-window .panel-drag-header button,.desktop-panel-window .panel-drag-header input,.desktop-panel-window .panel-drag-header [data-no-drag] { -webkit-app-region:no-drag; }
 .hive-desktop .app-header .panel-menu-button { width:26px; height:26px; }
-.header-right { display:flex; align-items:center; gap:12px; min-width:0; }
-.header-window-controls { position:relative; display:flex; align-items:center; gap:4px; padding-left:calc(10px + var(--header-divider-width)); -webkit-app-region:no-drag; }
+.header-right { display:flex; flex:none; align-items:center; gap:var(--header-gap); min-width:0; }
+.header-window-controls { position:relative; display:flex; align-items:center; gap:var(--header-control-gap); padding-left:calc(var(--header-gap) + var(--header-divider-width)); -webkit-app-region:no-drag; }
 .header-window-controls::before { content:''; position:absolute; left:0; top:50%; transform:translateY(-50%); }
 .header-window-controls .icon-button { width:26px; height:26px; padding:4px; border:0; border-radius:3px; color:var(--hive-titlebar-text); background:transparent; }
 .header-window-controls .icon-button:hover { background:var(--hive-selection-bg); color:var(--hive-selection-text); }

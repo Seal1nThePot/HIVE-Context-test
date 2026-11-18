@@ -6,7 +6,7 @@ import WritingDock from './WritingDock';
 import type {Mode} from '../../shared/core';
 import './global-toolbar.css';
 
-type Props={mode:Mode;continuationLimit:number;aiOpen:boolean;annotationTool:boolean;onMode:(mode:Mode)=>void;onToggleAi:()=>void;onAnnotate:()=>void};
+type Props={mode:Mode;continuationLimit:number;aiOpen:boolean;annotationTool:boolean;busy?:boolean;onRun:(mode:Mode)=>void;onToggleAi:()=>void;onAnnotate:()=>void};
 
 export default function GlobalToolbar(props:Props){
   const desktop=useDesktopPanels(),started=useRef(false);

@@ -7,13 +7,20 @@ function titleOf(item: TextAnnotation) {
   const characters = Array.from(text || "未命名标注");
   return characters.slice(0, 32).join("") + (characters.length > 32 ? "…" : "");
 }
-export default function AnnotationPanel({items,selected,toggle,selectAll,remove,locate,reanchor,onSend,busy,saveError,retrySave}: {
+export default function AnnotationPanel({items,selected,toggle,selectAll,remove,locate,reanchor,onSend,busy,saveError,retrySave,focusRequest}: {
   items:TextAnnotation[];selected:Set<string>;toggle:(id:string)=>void;selectAll:()=>void;
   remove:(id:string)=>void;locate:(item:TextAnnotation)=>void;reanchor:(item:TextAnnotation)=>void;
   onSend:(ids:string[])=>void;busy:boolean;saveError:boolean;retrySave:()=>void;
+  focusRequest?:{id:string;nonce:number}|null;
 }){
   const document=usePanelDocument(),window=document.defaultView!;
   const [context,setContext]=useState<{id:string;x:number;y:number}|null>(null), menu=useRef<HTMLDivElement>(null);
+  const list=useRef<HTMLElement>(null);
+  useEffect(()=>{
+    if(!focusRequest)return;
+    const item=[...list.current?.querySelectorAll<HTMLElement>('[data-annotation-list-id]')||[]].find(node=>node.dataset.annotationListId===focusRequest.id);
+    item?.scrollIntoView({block:'nearest',inline:'nearest'});
+  },[focusRequest,items]);
   useEffect(()=>{
     if(!context)return;
     menu.current?.querySelector<HTMLButtonElement>('button')?.focus();
@@ -26,9 +33,9 @@ export default function AnnotationPanel({items,selected,toggle,selectAll,remove,
   const run=(action:()=>void)=>{setContext(null);action();};
   function backup(){const url=URL.createObjectURL(new Blob([JSON.stringify(items,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='文本标注备份.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
   return <section className="annotation-panel annotation-title-panel" aria-label="文本标注列表">
-    <nav className="annotation-title-list" aria-label="标注标题">
+    <nav ref={list} className="annotation-title-list" aria-label="标注标题">
       {!items.length&&<p className="annotation-title-empty">暂无标注</p>}
-      {items.map(value=><button key={value.id} className={(selected.has(value.id)?'selected ':'')+(value.stale?'stale-title':'')}
+      {items.map(value=><button key={value.id} data-annotation-list-id={value.id} aria-current={focusRequest?.id===value.id?'true':undefined} className={(selected.has(value.id)||focusRequest?.id===value.id?'selected ':'')+(value.stale?'stale-title':'')}
         aria-label={`定位标注：${titleOf(value)}`} title={value.stale?'原文已变化，点击查看上次位置附近；右键可更新位置':value.original.trim()}
         onClick={event=>{if(event.ctrlKey||event.metaKey||event.shiftKey)toggle(value.id);locate(value);}}
         onContextMenu={event=>{event.preventDefault();setContext({id:value.id,x:Math.max(8,Math.min(window.innerWidth-224,event.clientX)),y:Math.max(8,Math.min(window.innerHeight-310,event.clientY))});}}

@@ -46,6 +46,8 @@ export default function InlineAnnotationEditor({
   onEdit,
   onSend,
   onOpenGlobal,
+  onFocusGlobal,
+  onRemove,
   saving,
   busy,
   toolActive=false,
@@ -57,7 +59,9 @@ export default function InlineAnnotationEditor({
   editorFor: (source: AnnotationSource) => EditorView | null;
   onEdit: (id: string, note: string) => void;
   onSend: (ids: string[]) => void;
-  onOpenGlobal: () => void;
+  onOpenGlobal: (id:string) => void;
+  onFocusGlobal?: (id:string) => void;
+  onRemove?: (id:string) => void;
   saving: boolean;
   busy: boolean;
   toolActive?:boolean;
@@ -157,6 +161,7 @@ export default function InlineAnnotationEditor({
   useEffect(()=>{window.addEventListener('scroll',measureBubble,true);window.addEventListener('resize',measureBubble);return()=>{window.removeEventListener('scroll',measureBubble,true);window.removeEventListener('resize',measureBubble);};},[bubbleItem,bubblePlacement]);
   function openBubble(id:string){
     const bubbleItem=items.find(item=>item.id===id);if(!bubbleItem)return;
+    onFocusGlobal?.(id);
     const clicked=bubbles.find(b=>b.id===id);if(clicked){setBubblePosition({x:clicked.x,y:clicked.y});}
     const editor=editorFor(bubbleItem.source);
     const cells=editor?[...editor.dom.querySelectorAll<HTMLElement>('[data-table-annotation-ids]')]:[];
@@ -222,7 +227,8 @@ export default function InlineAnnotationEditor({
         </p>
       )}
       <div className="inline-annotation-footer">
-        <button type="button" className="annotation-open-global" aria-label="打开全局标注栏" onClick={()=>{setShown(null);onOpenGlobal();}}>全局标注</button>
+        <button type="button" className="annotation-open-global" aria-label="打开全局标注栏" onClick={()=>{setShown(null);onOpenGlobal(item.id);}}>全局标注</button>
+        {onRemove&&<button type="button" className="text-button" aria-label={shown.ids.length>1?'删除这组标注':'删除此标注'} disabled={busy} onClick={()=>{for(const id of shown.ids)onRemove(id);setShown(null);}}>删除</button>}
         <span className="annotation-save-status" role="status">{saving ? "正在保存…" : "已自动保留要求"}</span>
         <button className="text-button" onClick={() => setShown(null)}>
           <Check size={12} />

@@ -33,6 +33,6 @@ npm run verify:package
 
 Windows 文件夹应用构建后，可运行 `node scripts/stress-storage.mjs` 和 `node scripts/stress-renderer.mjs` 做隔离压力测试。默认结果保存在 `.runtime/stress`，也可设置 `HIVE_STRESS_EVIDENCE`。前者默认覆盖 3 万篇文稿和 2 万个依赖文件；后者使用隐藏窗口和合成编辑事务，不代表真实键盘或中文输入法验收。
 
-全量测试使用 Vitest，生产构建使用 TypeScript/Vite。0.1.5 当前全量 113 个测试文件、879 项通过；包内隐藏 Electron 的编辑、分栏和文件管理联动通过 24 项检查。压力测试脚本与本机原始数据另行记录，不能据此推算所有机器的长期内存占用。
+全量测试使用 Vitest，生产构建使用 TypeScript/Vite。0.1.5 当前全量 123 个测试文件、940 项通过；包内隐藏 Electron 的编辑、分栏和文件管理联动通过 24 项检查。压力测试脚本与本机原始数据另行记录，不能据此推算所有机器的长期内存占用。
 
 开发、文稿、凭据、运行数据、历史备份和个人交接不随源码发布。应用需要的 [离线帮助](docs/help.md) 和 [更新日志](docs/CHANGELOG.md) 保留在仓库中，亦可在“设置 → 关于”查看。

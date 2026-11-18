@@ -12,7 +12,7 @@ export async function resolveReferences({files},input){
     let paths;
     if(item.type==='folder'){
       // list() excludes hidden entries and symbolic links; resolve() validates the selected root.
-      try{const target=await files.resolve(path,true);const tree=await files.list(target,path+'/');const flatten=items=>items.flatMap(entry=>entry.type==='file'?[entry.path]:flatten(entry.children||[]));paths=flatten(tree).sort((a,b)=>a.localeCompare(b,'zh-CN',{numeric:true}));}
+      try{const target=await files.resolve(path,true);const tree=await files.list(target,path+'/');const flatten=items=>items.flatMap(entry=>entry.type==='file'?(/\.md$/i.test(entry.path)?[entry.path]:[]):flatten(entry.children||[]));paths=flatten(tree).sort((a,b)=>a.localeCompare(b,'zh-CN',{numeric:true}));}
       catch{throw fail('无法读取参考文件夹“'+path+'”，请检查它是否仍然存在。');}
       if(!paths.length)warnings.push('文件夹“'+path+'”中没有可读取的 Markdown 笔记。');
     }else paths=[path];

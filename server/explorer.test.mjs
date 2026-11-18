@@ -36,6 +36,16 @@ it('does not overwrite a collision while renaming, moving or restoring',async()=
   await expect(explorer.manage({action:'restore',id:deleted.id})).rejects.toMatchObject({status:409});
   expect((await files.read('a.md')).text).toBe('new');expect(await explorer.listTrash()).toHaveLength(1);
 });
+it('trashes the AI scratch note like any other document while keeping it out of rename and move',async()=>{
+  await files.save({path:'自由草稿.md',text:'草稿正文',baseline:null});
+  const deleted=await explorer.manage({action:'trash',path:'自由草稿.md'});
+  expect(await explorer.listTrash()).toHaveLength(1);
+  await expect(fs.access(path.join(root,'自由草稿.md'))).rejects.toThrow();
+  await explorer.manage({action:'restore',id:deleted.id});
+  expect((await files.read('自由草稿.md')).text).toBe('草稿正文');
+  await expect(explorer.manage({action:'rename',path:'自由草稿.md',name:'改名.md'})).rejects.toThrow();
+  await expect(explorer.manage({action:'move',path:'自由草稿.md',parent:''})).rejects.toThrow();
+});
 it('duplicates all ordinary folder contents without changing the source',async()=>{
   await files.save({path:'folder/a.md',text:'original',baseline:null});await fs.writeFile(path.join(root,'folder','image.png'),'image');
   await explorer.manage({action:'duplicate',path:'folder'});expect((await files.read('folder 副本/a.md')).text).toBe('original');expect(await fs.readFile(path.join(root,'folder 副本/image.png'),'utf8')).toBe('image');

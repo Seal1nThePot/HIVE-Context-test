@@ -18,3 +18,13 @@
 .note-properties-panel .property-name {flex-direction:column;}.note-properties-panel .property-name select {width:100%;min-height:30px;padding:4px;}.note-properties-panel .property-name input {width:100%;}
 .note-properties-panel .note-property-row textarea {resize:none;max-height:none;overflow:hidden;overflow-wrap:anywhere;white-space:pre-wrap;}
 .properties-empty,.properties-warning,.properties-error {color:inherit;line-height:1.5;}
+
+/* Keep each property name above its value, including in narrow panels. */
+.note-properties-panel .note-property-row {grid-template-columns:minmax(0,1fr) 30px;}
+.note-properties-panel .property-name {grid-column:1;flex-direction:row;border-radius:5px 0 0 0;}
+.note-properties-panel .property-name select {width:auto;max-width:45%;min-width:0;}
+.note-properties-panel .property-name input {flex:1;min-width:0;width:0;}
+.note-properties-panel .note-property-row > :is(textarea,input,select) {grid-column:1 / -1;grid-row:2;border-top:1px solid var(--hive-surface-border);}
+.note-properties-panel .property-remove {grid-column:2;grid-row:1;}
+.note-properties-panel footer {flex-wrap:wrap;}
+.note-properties-panel footer button {white-space:nowrap;}

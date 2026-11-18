@@ -42,9 +42,9 @@ export async function workspaceStore(local, defaultRoot, {revealFile}={}) {
       try { await files.read('自由草稿.md'); }
       catch(error) {
         if(error.code !== 'ENOENT') throw error;
-        let old={text:'',eol:'LF',bom:false};
+        let old;
         try {old=await fileStore(local).read('scratch.md');} catch(error) {if(error.code!=='ENOENT')throw error;}
-        await files.save({path:'自由草稿.md',text:old.text,eol:old.eol,bom:old.bom,baseline:null});
+        if(old)await files.save({path:'自由草稿.md',text:old.text,eol:old.eol,bom:old.bom,baseline:null});
       }
     }
     const context={id,root,state,files,annotations:annotationStore(state),nodes:writingNodeStore(state),outlines:outlineStore(state)};

@@ -13,16 +13,18 @@
   pointer-events: none;
 }
 
-/* The source pane follows the rendered pane's soft breaks; excess width scrolls horizontally. */
-.editor-host.split-view .split-source .cm-line { white-space: pre !important; overflow-wrap: normal !important; word-break: normal !important; }
+/* Project rendered breaks where possible. Source-only Markdown markers and the
+   line-number gutter can still use more width, so prose also wraps at its own edge. */
+.editor-host.split-view .split-source .cm-line:not(.cm-code-nowrap) { white-space: pre-wrap !important; overflow-wrap: anywhere !important; word-break: normal !important; }
 
 .editor-host.split-view .cm-line[style*="--split-alignment-before"]::before {
   content: ""; display: block; height: var(--split-alignment-before, 0px); pointer-events: none;
 }
-.editor-host.split-view .split-source .cm-content { white-space: pre !important; overflow-wrap: normal !important; word-break: normal !important; }
+.editor-host.split-view .split-source .cm-content { white-space: pre-wrap !important; overflow-wrap: anywhere !important; word-break: normal !important; }
 .editor-host.split-view .cm-scroller { scrollbar-gutter: stable; }
 .editor-host.split-view .split-source .cm-scroller { overflow-x: scroll; }
 .editor-host.split-view .split-main .cm-preview-table :is(th, td) { vertical-align: top; }
 .editor-host.split-view .split-main .cm-preview-table tr[style*="--split-table-extra"] > :is(th, td) {
   padding-bottom: calc(6px + var(--split-table-extra, 0px));
 }
+

@@ -8,7 +8,7 @@ import {fork,spawn} from 'node:child_process';
 const project=fileURLToPath(new URL('../',import.meta.url)),require=createRequire(import.meta.url);
 const pkg=JSON.parse(await fs.readFile(path.join(project,'package.json'),'utf8'));
 const output=path.resolve(process.env.HIVE_VERIFY_OUTPUT||path.join(project,'.runtime/checks'));
-const packaged=process.argv.includes('--package'),bundle=path.join(project,'release'),prefix=packaged?'packaged':'source';
+const packaged=process.argv.includes('--package'),bundle=path.resolve(process.env.HIVE_VERIFY_BUNDLE||path.join(project,'release')),prefix=packaged?'packaged':'source';
 async function worker(){
   const {app,BrowserWindow}=require('electron');app.setPath('userData',path.join(process.argv.at(-1),'profile'));app.disableHardwareAcceleration();await app.whenReady();
   const win=new BrowserWindow({show:false,focusable:false,skipTaskbar:true,width:1600,height:1050,webPreferences:{offscreen:true,contextIsolation:true,nodeIntegration:false,backgroundThrottling:false}});
@@ -35,7 +35,11 @@ async function worker(){
       check('split projects actual visual breaks',get('.split-source').querySelectorAll('.cm-split-projected-break').length>0);
       const wordRect=(root,text)=>{const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);for(let node;node=walker.nextNode();){const at=node.textContent.indexOf(text);if(at>=0){const range=document.createRange();range.setStart(node,at);range.setEnd(node,at+text.length);return range.getClientRects()[0];}}return null;};
       for(const text of ['整合验收','最终入口：']){const a=wordRect(get('.split-source .cm-content'),text),b=wordRect(get('.split-main .cm-content'),text);check('split character alignment '+text,!!a&&!!b&&Math.abs(a.top-b.top)<=3,{source:a?.top,preview:b?.top});}
-      check('source pane follows fixed projection without natural wrap',getComputedStyle(get('.split-source .cm-content')).whiteSpace==='pre');
+      check('source prose wraps at its own boundary in addition to projected breaks',getComputedStyle(get('.split-source .cm-content')).whiteSpace==='pre-wrap');
+      const sourceBounds=get('.split-source .cm-scroller').getBoundingClientRect();let sourceRight=0;
+      const sourceText=document.createTreeWalker(get('.split-source .cm-content'),NodeFilter.SHOW_TEXT);
+      for(let node;node=sourceText.nextNode();){if(node.parentElement?.closest('.cm-code-nowrap'))continue;const range=document.createRange();range.selectNodeContents(node);for(const rect of range.getClientRects())sourceRight=Math.max(sourceRight,rect.right);}
+      check('source prose remains inside its split pane',sourceRight<=sourceBounds.right+1,{sourceRight,paneRight:sourceBounds.right});
       const table=()=>get('.split-main [data-table-widget]');await wait(()=>table()?.querySelector('[data-table-action="column-after"]'),'table actions');table().querySelector('textarea[data-row="1"][data-col="0"]').focus();table().querySelector('[data-table-action="column-after"]').click();await pause();check('table quick insert renders three columns',table().querySelectorAll('th').length===3);
       const editableCell=table().querySelector('[data-cell="1:0"]');editableCell.querySelector('.cm-table-cell-preview').dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));await pause();const input=editableCell.querySelector('textarea');check('table preview enters source editing on double click',!input.hidden);Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'整合联动内容');input.dispatchEvent(new Event('input',{bubbles:true}));await pause();check('live table edit updates source',get('.split-source .cm-content').textContent.includes('整合联动内容'));input.blur();input.dispatchEvent(new FocusEvent('blur'));await pause();check('table returns to rendered cell on synthetic blur',!table().querySelector('[data-cell="1:0"] .cm-table-cell-preview').hidden);
       get('[aria-label="设置"]').click();await wait(()=>get('.settings-page'),'settings');[...document.querySelectorAll('[aria-label="设置分类"] button')].find(b=>b.textContent==='外观').click();await wait(()=>get('.editor-color-settings'),'editor colors');
@@ -57,6 +61,74 @@ async function worker(){
       const folder=get('.explorer-row[data-path="删除文件夹"]');folder.click();await wait(()=>get('.explorer-row[data-path="删除文件夹/子稿.md"]'),'expand delete folder');await open('删除文件夹/子稿.md','后代删除唯一内容');await trash('删除文件夹');
       check('deleting a folder removes its open descendant content',!get('.document-pane')?.textContent.includes('后代删除唯一内容'));
       await open('整合验收.md','整合验收');
+      const composer=()=>get('.conversation-view textarea');
+      const writePrompt=value=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(composer(),value);composer().dispatchEvent(new Event('input',{bubbles:true}));};
+      const send=async()=>{await wait(()=>!get('[aria-label="发送给 AI"]')?.disabled&&get('[aria-label="发送给 AI"]'),'ready to send');get('[aria-label="发送给 AI"]').click();};
+      const closeTab=(path,id)=>[...document.querySelectorAll('.document-tab-close')].find(button=>button.getAttribute('aria-label')==='关闭'+path+'标签页'&&button.getClientRects().length&&(!id||(button.closest('.workspace-tab-item')?.querySelector('[data-panel-tab]')?.dataset.panelTab||button.closest('[data-panel-id]')?.dataset.panelId)===id))?.click();
+      const activeDocument=()=>get('.active-editor .split-main .cm-content')?.cmTile?.root?.view;
+      const select=source=>{const v=activeDocument(),from=v.state.doc.toString().indexOf(source);if(from<0)throw Error('Missing selection '+source);v.dispatch({selection:{anchor:from,head:from+source.length}});};
+      const chatMode=async text=>{get('[aria-label="切换写作模式"]').click();await wait(()=>get('.writing-mode-menu'),'writing modes');[...get('.writing-mode-menu').querySelectorAll('button')].find(button=>button.textContent===text).click();await pause();};
+      const fileText=async path=>(await(await fetch('/api/file?path='+encodeURIComponent(path))).json()).text;
+      const currentChat=()=>get('.messages').textContent;
+      const activeTabText=()=>get('.active-editor')?.textContent||'';
+      const reviewButton=path=>[...document.querySelectorAll('.messages .chat-context')].find(item=>item.textContent.includes(path))?.querySelector('button');
+
+      await open('对话甲.md','甲稿原句');
+      writePrompt('跨标签讨论消息');
+      await send();
+      closeTab('对话甲.md','editor');
+      await wait(()=>get('.active-editor .document-new-page'),'close last document while discussion runs');
+      await wait(()=>currentChat().includes('【交互演示】'),'discussion finishes after closing last document');
+      check('discussion survives closing the last document during generation',currentChat().includes('跨标签讨论消息'));
+      writePrompt('未发送草稿留在同一个对话');
+      await open('对话甲.md','甲稿原句');
+      await menuAction('对话乙.md','在新标签页中打开');
+      await wait(()=>activeTabText().includes('乙稿原句'),'open second document without clearing draft');
+      closeTab('对话乙.md');
+      await wait(()=>activeTabText().includes('甲稿原句'),'close second document');
+      check('history and unsent draft survive switching and closing documents',currentChat().includes('跨标签讨论消息')&&composer().value==='未发送草稿留在同一个对话');
+
+      await menuAction('对话甲.md','在新标签页中打开');
+      await wait(()=>get('.workspace-tabs [data-panel-tab="editor"]'),'same-file editor tabs');
+      const siblingTab=[...document.querySelectorAll('.workspace-tabs [data-panel-tab]')].find(tab=>tab.dataset.panelTab!=='editor'&&tab.textContent==='对话甲.md');
+      get('.workspace-tabs [data-panel-tab="editor"]').click();
+      await wait(()=>get('.active-editor[data-panel-id="editor"]'),'select primary copy for proposal');
+      await chatMode('轻量修改');
+      const primary=activeDocument(),primaryEnd=primary.state.doc.length;
+      primary.dispatch({changes:{from:primaryEnd,insert:'手写尾句。'},userEvent:'input.type'});
+      select('甲稿原句');
+      writePrompt('把“甲稿原句”改成“甲稿建议”');
+      await send();
+      await wait(()=>get('.active-editor .proposal-bar')&&activeTabText().includes('甲稿建议'),'primary proposal preview');
+      writePrompt('审阅期间保留的草稿');
+      closeTab('对话甲.md','editor');
+      await wait(()=>get('.active-editor .document-new-page')&&reviewButton('对话甲.md'),'park primary proposal');
+      check('closing primary keeps pending suggestion unsaved and retains the chat draft',(await fileText('对话甲.md')).includes('甲稿原句')&&!(await fileText('对话甲.md')).includes('甲稿建议')&&composer().value==='审阅期间保留的草稿');
+      get('[data-panel-tab="'+siblingTab.dataset.panelTab+'"]').click();
+      await wait(()=>activeTabText().includes('甲稿建议'),'select a mirrored view of the pending proposal');
+      window.dispatchEvent(new KeyboardEvent('keydown',{key:'s',ctrlKey:true,bubbles:true}));
+      await wait(()=>document.body.textContent.includes('这段 AI 建议还没确认'),'saving the mirrored preview is blocked');
+      check('saving another tab for the same file cannot commit the pending proposal',!(await fileText('对话甲.md')).includes('甲稿建议'));
+      reviewButton('对话甲.md').click();
+      await wait(()=>get('.active-editor .proposal-bar')&&activeTabText().includes('手写尾句。'),'restore primary proposal with pre-existing manual edit');
+      get('.active-editor .proposal-bar .adjust').click();
+      await wait(()=>!get('.active-editor .proposal-bar')&&activeTabText().includes('甲稿原句'),'reject restored primary proposal');
+      check('review restores original text and keeps the unsent message',composer().value==='审阅期间保留的草稿'&&activeTabText().includes('手写尾句。'));
+
+      await menuAction('对话乙.md','在新标签页中打开');
+      await wait(()=>activeTabText().includes('乙稿原句'),'open second document for proposal');
+      select('乙稿原句');
+      writePrompt('把“乙稿原句”改成“乙稿建议”');
+      await send();
+      await wait(()=>get('.active-editor .proposal-bar')&&activeTabText().includes('乙稿建议'),'secondary proposal preview');
+      closeTab('对话乙.md');
+      await wait(()=>reviewButton('对话乙.md'),'park secondary proposal');
+      check('closing secondary preserves the uncommitted proposal',(await fileText('对话乙.md')).includes('乙稿原句')&&!(await fileText('对话乙.md')).includes('乙稿建议'));
+      get('.explorer-row[data-path="对话乙.md"]').click();
+      await wait(()=>get('.active-editor .proposal-bar')&&activeTabText().includes('乙稿建议'),'reopen secondary proposal by file path');
+      get('.active-editor .proposal-bar .accept').click();
+      await wait(()=>!get('.active-editor .proposal-bar'),'accept on the original document');
+      check('review and acceptance stay attached to the original document',activeTabText().includes('乙稿建议')&&!(await fileText('对话甲.md')).includes('乙稿建议'));
       await new Promise(resolve=>setTimeout(resolve,900));
       return {checks,build};
     })()`);
@@ -71,13 +143,14 @@ else{
     const docs=path.join(temp,'documents');await fs.mkdir(path.join(docs,'章节'),{recursive:true});
     await fs.writeFile(path.join(docs,'章节/一.md'),'内部验证文稿。');
     await fs.writeFile(path.join(docs,'删除当前.md'),'删除当前唯一内容。');await fs.writeFile(path.join(docs,'删除其他.md'),'删除其他唯一内容。');await fs.mkdir(path.join(docs,'删除文件夹'));await fs.writeFile(path.join(docs,'删除文件夹/子稿.md'),'后代删除唯一内容。');
+    await fs.writeFile(path.join(docs,'对话甲.md'),'# 对话甲\n\n甲稿原句。');await fs.writeFile(path.join(docs,'对话乙.md'),'# 对话乙\n\n乙稿原句。');
     await fs.writeFile(path.join(docs,'示例 图.png'),fixtureImage);
     const paragraph='这是用于整合验证的中文与 English mixed text，数字 12345、标点和很长的网址 https://example.org/research/2026/notes?language=English&version=12345 都保持原文。';
     await fs.writeFile(path.join(docs,'整合验收.md'),'# 整合验收\n\n> **最终入口：** '+paragraph.repeat(2)+'\n\n![[示例 图.png]]\n\n- [ ] 整合待办\n\n| 标题甲 | 标题乙 |\n| :--- | ---: |\n| 内容甲 | 内容乙 |\n\n这是本轮合成资料，不含用户文稿。\n');
     const appRoot=packaged?path.join(bundle,'win-unpacked'):null,backend=appRoot?path.join(appRoot,'resources/app.asar/server/index.mjs'):path.join(project,'server/index.mjs');
     server=fork(backend,['--production'],{execPath:appRoot?path.join(appRoot,'HIVE markdown editor.exe'):process.execPath,cwd:project,silent:true,windowsHide:true,env:{...process.env,...(appRoot?{ELECTRON_RUN_AS_NODE:'1'}:{}),HIVE_PORT:'0',HIVE_DOCUMENTS:docs,HIVE_STATE_DIR:path.join(temp,'state'),HIVE_API_KEY:''}});server.stdout.on('data',v=>serverLog+=v);server.stderr.on('data',v=>serverLog+=v);
     const port=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Integrated backend timeout')),15000);server.once('error',reject);server.once('exit',code=>{clearTimeout(timer);reject(new Error('Integrated backend exited '+code+'\n'+serverLog));});server.on('message',m=>{if(m?.type==='hive-ready'){clearTimeout(timer);resolve(m.port);}});});
-    const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;const child=spawn((await import('electron')).default,[fileURLToPath(import.meta.url),'--integrated-worker',String(port),temp],{cwd:project,windowsHide:true,env,stdio:['ignore','pipe','pipe']});let log='';child.stdout.on('data',v=>log+=v);child.stderr.on('data',v=>log+=v);
+    const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;const child=spawn((await import('electron')).default,[fileURLToPath(import.meta.url),'--integrated-worker',...(packaged?['--package']:[]),String(port),temp],{cwd:project,windowsHide:true,env,stdio:['ignore','pipe','pipe']});let log='';child.stdout.on('data',v=>log+=v);child.stderr.on('data',v=>log+=v);
     const code=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{child.kill();reject(new Error('Integrated UI timeout'));},45000);child.once('error',reject);child.once('exit',code=>{clearTimeout(timer);resolve(code);});});await fs.writeFile(path.join(output,prefix+'-app.log'),log);console.log(log);assert.equal(code,0);
   }finally{await fs.writeFile(path.join(output,prefix+'-server.log'),serverLog);if(server&&server.exitCode===null)await new Promise(resolve=>{server.once('exit',resolve);server.kill();});const resolved=path.resolve(temp);assert.equal(path.dirname(resolved),path.resolve(output));assert.ok(path.basename(resolved).startsWith('.app-check-'));await fs.rm(resolved,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
 }

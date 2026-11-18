@@ -7,7 +7,10 @@ import {
   makePrompt,
   mapAnchor,
   minimalReplacement,
+  parseAnswer,
   parseSuggestion,
+  readAnswer,
+  streamPreview,
   visibleCount,
   type Anchor,
 } from "./core";
@@ -116,6 +119,17 @@ describe("range ownership and review", () => {
     expect(change.from).toBe(6);
     expect(change.to).toBe(7);
   });
+  it("keeps a change minimal when the reply drops the selection's trailing newline", () => {
+    const doc = "台灯在桌面投下一小圈暖黄。\n雨点敲在青石板上。\n";
+    const change = minimalReplacement(
+      anchor(doc, 0, doc.length),
+      "路灯在桌面投下一小圈暖黄。\n雨点敲在青石板上。",
+    );
+    expect(change.original).toBe("台");
+    expect(change.text).toBe("路");
+    expect(change.from).toBe(0);
+    expect(change.to).toBe(1);
+  });
   it("does not split Unicode surrogate pairs when computing minimal changes", () => {
     const doc = "前文😀后文",
       change = minimalReplacement(anchor(doc, 0, doc.length), "前文😁后文");
@@ -180,7 +194,10 @@ describe("outline and generation contract", () => {
       [],
       { continuationLimit: 42 },
     );
-    expect(messages[0].content).toContain("最多42个可见字符");
+    expect(messages.at(-1)!.content).toContain("最多42个可见字符");
+    expect(messages[0].content).toBe(
+      makePrompt("edit", "正文", "选区", "本节", "改一下", [])[0].content,
+    );
     const outlineMessages = makePrompt(
       "outline",
       "最新正文",
@@ -215,5 +232,50 @@ describe("outline and generation contract", () => {
     expect(result[1].content).toBe("不要使用比喻。");
     expect(result.at(-1)!.content).toContain("用户手改后的最新正文。");
     expect(result.at(-1)!.content).toContain("使用更口语");
+  });
+});
+
+
+describe("条目式协议", () => {
+  it("按 [编号] 切块，逐条取出正文", () => {
+    const items = parseAnswer("[1]\n雨点砸在瓦片上。\n\n[2]\n他坐了很久。");
+    expect(items).toEqual([
+      { id: 1, text: "雨点砸在瓦片上。" },
+      { id: 2, text: "他坐了很久。" },
+    ]);
+  });
+  it("（空）表示这条不改，不是删除", () => {
+    expect(parseAnswer("[1]\n（空）")[0].text).toBe("");
+    expect(() => readAnswer("[1]\n（空）", "edit")).toThrow("没有返回可用的正文");
+  });
+  it("容忍代码围栏与整段纯文本", () => {
+    expect(parseAnswer("```\n[1]\n正文\n```")[0].text).toBe("正文");
+    expect(parseAnswer("直接一段正文")[0]).toBeUndefined();
+    expect(readAnswer("直接一段正文", "edit").text).toBe("直接一段正文");
+  });
+  it("旧 JSON 契约仍然可用，作为回退", () => {
+    expect(readAnswer(JSON.stringify({ text: "候选", reason: "旧契约" }), "edit")).toEqual({ text: "候选", reason: "旧契约" });
+  });
+  it("续写仍然只接受一个短段并守住字数上限", () => {
+    expect(() => readAnswer("[1]\n第一段。\n\n第二段。", "continue")).toThrow("多段");
+    expect(() => readAnswer("[1]\n" + "字".repeat(101), "continue")).toThrow("超过 100 字");
+    expect(readAnswer("[1]\n" + "字".repeat(99) + "。", "continue").text).toHaveLength(100);
+  });
+  it("流式预览不显示编号行与（空）占位", () => {
+    expect(streamPreview("[1]\n雨点砸在")).toBe("雨点砸在");
+    expect(streamPreview("[1]\n（空）")).toBe("");
+  });
+  it("文档里的行首编号和箭头会被转义，不会伪装成条目", () => {
+    const messages = makePrompt("continue", "[1] 文档里的一行\n→ 这一行", "", "本节", "接着写", []);
+    const body = messages.at(-1)!.content;
+    expect(body).toContain("\\[1] 文档里的一行");
+    expect(body).toContain("\\→ 这一行");
+    expect(body).toContain("[1] 续写");
+  });
+  it("system 提示词与模式无关，可稳定命中前缀缓存", () => {
+    const a = makePrompt("continue", "正文", "上文", "本节", "接着写", [], { modelLabel: "M" });
+    const b = makePrompt("edit", "正文", "选区", "本节", "改一下", [], { modelLabel: "M" });
+    expect(a[0].content).toBe(b[0].content);
+    expect(a[0].content).toContain("（M）");
   });
 });

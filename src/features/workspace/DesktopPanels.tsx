@@ -4,6 +4,7 @@ import {EditorView} from '@codemirror/view';
 import {PanelDocumentContext} from '../../shared/panelDocument';
 import type {Rect} from './panelLayout';
 import type {DragControl} from './PanelControl';
+import {openPanelContextMenu} from './PanelControl';
 import {NativeHostRuntime,type NativePanelHandle,type NativeFloatOptions,type LiveNativeHost} from './nativeHostRuntime';
 import {latestGestureFrame,gestureFrameClock} from './gestureFrame';
 import './desktop-panels.css';
@@ -14,6 +15,7 @@ import type {AboutInfo} from '../../shared/buildInfo';
 declare global {
   interface Window {hiveDesktop?:{
     readonly isDesktop:boolean;readonly platform:string;
+    startupThemeReady?:(background:string)=>void;
     chooseRepositoryDirectory:()=>Promise<string|null>;
     getAboutInfo:()=>Promise<AboutInfo>;openAppDataDirectory:()=>Promise<void>;
     onCloseRequested:(callback:()=>void)=>()=>void;finishClose:(allow:boolean)=>void;
@@ -47,7 +49,7 @@ function NativeGroupTabs({host,runtime,onDrag}:{host:LiveNativeHost;runtime:Nati
     if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();
     const index=host.members.indexOf(host.active),next=event.key==='Home'?0:event.key==='End'?host.members.length-1:(index+(event.key==='ArrowRight'?1:host.members.length-1))%host.members.length;
     runtime.select(host.id,host.members[next]);event.currentTarget.querySelectorAll<HTMLButtonElement>('button')[next]?.focus();
-  }}>{host.members.map(id=><button type="button" key={id} role="tab" data-panel-tab={id} aria-selected={host.active===id} tabIndex={host.active===id?0:-1}
+  }}>{host.members.map(id=><button type="button" key={id} role="tab" data-panel-tab={id} data-panel-context={id} onContextMenu={event=>{event.preventDefault();event.stopPropagation();runtime.select(host.id,id);openPanelContextMenu(event.currentTarget.ownerDocument,id,event.clientX,event.clientY);}} aria-selected={host.active===id} tabIndex={host.active===id?0:-1}
     onPointerDown={event=>{event.stopPropagation();dragged.current.delete(id);host.resource.options.tabDrag?.(id,event,{fromTab:true,onFinish:value=>{if(value)dragged.current.add(id);}});}}
     onClick={event=>{if(event.detail&&dragged.current.has(id)){dragged.current.delete(id);return;}runtime.select(host.id,id);}}>{runtime.handles.get(id)?.title()||id}{runtime.handles.get(id)?.dirty()&&<i className="dirty-dot"/>}</button>)}</div>;
 }
@@ -118,3 +120,4 @@ export function DesktopPanel({id,title,open,visible=open,children}:{id:string;ti
   const active=panelIsVisible(open,visible,owner!==document,nativeActive,desktop.hiddenWindows.has(id),documentHidden);
   return <><div className="desktop-panel-home" ref={home}/>{createPortal(<PanelDocumentContext.Provider value={owner}><PanelActivityContext.Provider value={active}>{children}</PanelActivityContext.Provider></PanelDocumentContext.Provider>,container)}</>;
 }
+

@@ -50,7 +50,7 @@ export function PanelControls({ chrome, id, groupMembers }: { chrome: PanelChrom
         if(detached){workspace.returnNativePanel(id);return;}
         if(groupMembers&&groupMembers.length>1)workspace.groupFloat(id);else workspace.floatNativePanel(id);
     };
-    const controls = <PanelControl label={label} floating={panel.floating} primary={primary} movable={groupMembers ? groupMembers.every(member => workspace.panel(member).movable) : panel.movable} canDock={panel.canDock} onToggleFloat={groupMembers ? () => workspace.groupFloat(id) : panel.toggleFloat} onOpen={groupMembers ? () => workspace.groupDock(id) : panel.openDocked} collapseEdge={panel.collapseEdge}
+    const controls = <PanelControl panelId={id} label={label} floating={panel.floating} primary={primary} movable={groupMembers ? groupMembers.every(member => workspace.panel(member).movable) : panel.movable} canDock={panel.canDock} onToggleFloat={groupMembers ? () => workspace.groupFloat(id) : panel.toggleFloat} onOpen={groupMembers ? () => workspace.groupDock(id) : panel.openDocked} collapseEdge={panel.collapseEdge}
         onClose={close} onMinimize={minimize}
         floatAction={desktop.enabled ? { label: detached ? '移回主窗口' : groupMembers&&groupMembers.length>1 ? '整组浮动' : '浮动面板', icon: detached ? <PanelLeftOpen size={14}/> : <Maximize2 size={14}/>, run: float, disabled:!detached&&(primary||!panel.movable||!!groupMembers?.some(member=>!workspace.panel(member).movable)) } : undefined}
         memberActions={groupMembers ? [

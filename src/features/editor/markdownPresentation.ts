@@ -10,7 +10,7 @@ import {longTokenSpans} from '../typography/longToken';
 type Span={from:number;to:number};
 type Node=SyntaxNode;
 export type PreviewCell=Span&{text:string;virtual?:number;trailing?:boolean};
-export type PreviewReplacement=Span&{reveal:Span;block?:boolean;kind?:'bullet'|'task'|'image'|'rule'|'table'|'properties'|'math';text?:string;src?:string;rows?:PreviewCell[][];columns?:number;rowEnds?:{to:number;trailing:boolean}[];tableOrdinal?:number};
+export type PreviewReplacement=Span&{reveal:Span;block?:boolean;kind?:'bullet'|'task'|'image'|'rule'|'table'|'properties'|'math'|'mermaid';text?:string;src?:string;rows?:PreviewCell[][];columns?:number;rowEnds?:{to:number;trailing:boolean}[];tableOrdinal?:number};
 export type PreviewStyle=Span&{className?:string;line?:boolean;align?:'left'|'center'|'right';title?:string};
 export type PreviewPlan={replacements:PreviewReplacement[];styles:PreviewStyle[]};
 const cache=new WeakMap<Text,PreviewPlan>();
@@ -102,8 +102,11 @@ export function previewPlan(state:EditorState):PreviewPlan{
       }
     }
     if(node.name==='FencedCode'){
+      const info=parts.find(item=>item.name==='CodeInfo');
+      if(info&&/^mermaid(?:\s|$)/i.test(text.slice(info.from,info.to))){hide(node.from,node.to,span,{kind:'mermaid',block:true,text:parts.find(item=>item.name==='CodeText')?text.slice(parts.find(item=>item.name==='CodeText')!.from,parts.find(item=>item.name==='CodeText')!.to):''});return;}
       const code=parts.find(item=>item.name==='CodeText');if(code)lineStyles(code.from,code.to,'cm-preview-code-line');
-      for(const mark of parts.filter(item=>item.name==='CodeMark'))hideLine(mark.from);
+      // Selecting any line in the block reveals its opening language fence as well.
+      for(const mark of parts.filter(item=>item.name==='CodeMark'))hideLine(mark.from,span);
       return;
     }
     if(node.name==='CodeBlock'){lineStyles(node.from,node.to,'cm-preview-code-line');return;}

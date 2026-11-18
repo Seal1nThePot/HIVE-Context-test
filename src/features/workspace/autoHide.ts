@@ -1,6 +1,9 @@
 import type {DockEdge,Rect} from './panelLayout';
 import type {WorkspaceLayout} from './workspaceState';
-export type AutoHidePlacement={edge:DockEdge;offset:number;rect:Rect};
+export type AutoHidePlacement={edge:DockEdge;offset:number;rect:Rect;host?:'main'|'native'};
+// Old saved layouts carry a dock restore anchor for panels shelved from the
+// main window. Native shelves created now record their host explicitly.
+export function autoHideIsNative(layout:WorkspaceLayout,id:string){const placement=layout.autoHide?.[id];return !!placement&&(placement.host?placement.host==='native':!layout.restore[id]);}
 const clamp=(value:number,min:number,max:number)=>Math.max(min,Math.min(max,value));
 export function nearestPanelEdge(rect:Rect,bounds:Rect,docked=false):DockEdge {
   const left=Math.abs(rect.x-bounds.x),right=Math.abs(rect.x+rect.width-bounds.x-bounds.width);

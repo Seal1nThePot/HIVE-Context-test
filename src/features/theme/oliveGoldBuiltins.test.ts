@@ -1,6 +1,5 @@
 import {describe,expect,it} from 'vitest';
-import templateColors from '../../../templates/olive-gold/colors.json';
-import {brightness,colorRoles,defaultColorsForBase,defaultTheme,mix,normalizeTheme,readDefaultTheme,readTheme,resetThemeBase,rgb,switchThemeBase,themeTokens,updateThemeColors} from './themePreferences';
+import {brightness,colorRoles,defaultTheme,mix,normalizeTheme,readDefaultTheme,readTheme,resetThemeBase,rgb,switchThemeBase,themeTokens,updateThemeColors} from './themePreferences';
 import {oliveGrayColors,oliveGraySurfaces,oliveGrayWritingDock,oliveWhiteColors,oliveWhiteSurfaces,oliveWhiteWritingDock} from './oliveGoldBuiltins';
 import {surfaceColorGroups} from './surfaceAppearance';
 
@@ -101,11 +100,5 @@ describe('青苔鎏金 light variants',()=>{
     const reset=resetThemeBase(gray);
     expect(reset.colors).toEqual(oliveGrayColors);expect(themeTokens(reset).surfaces).toEqual(oliveGraySurfaces);expect(reset.writingDock).toEqual(oliveGrayWritingDock);
     expect(reset.surfaceColors.black).toEqual({document:'#283124'});expect(switchThemeBase(reset,'black').colors.accent).toBe('#bfb178');
-  });
-  it('ships a safe complete JSON template with the same black, gray and white defaults',()=>{
-    const template=normalizeTheme(templateColors);expect(template).toEqual({...templateColors,dockingProfiles:{},editorProfiles:{}});
-    expect(Object.keys(template.colorProfiles).sort()).toEqual(['black','gray','white']);
-    for(const base of ['black','gray','white'] as const){const active=switchThemeBase(template,base),builtin=switchThemeBase(defaultTheme,base);expect(active.colors).toEqual(defaultColorsForBase(base));expect(themeTokens(active).surfaces).toEqual(themeTokens(builtin).surfaces);expect(active.writingDock).toEqual(builtin.writingDock);expect(Object.keys(template.surfaceColors[base]!)).toHaveLength(29);}
-    expect(Object.keys(template).sort()).toEqual(Object.keys(defaultTheme).sort());
   });
 });

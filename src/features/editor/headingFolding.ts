@@ -49,3 +49,4 @@ export const headingFolding:Extension=[foldingMarker,codeFolding(),ViewPlugin.fr
   constructor(view:EditorView){this.decorations=decorations(view);}
   update(update:import('@codemirror/view').ViewUpdate){if(update.docChanged||update.viewportChanged||update.transactions.some(tr=>tr.effects.some(isFoldingEffect)))this.decorations=decorations(update.view);}
 },{decorations:value=>value.decorations})];
+

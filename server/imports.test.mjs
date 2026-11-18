@@ -38,6 +38,14 @@ describe('external import HTTP',()=>{
   const response=await fetch(base+'/api/import/references?path='+encodeURIComponent('导入的图片/图.png'),{headers:{'X-Hive-Workspace':workspace.id}});
   expect(response.ok).toBe(true);expect((await response.json()).matches).toContainEqual({path:'引用.md',lines:[1]});
  });
+ it('serves direct image tabs through the scoped HTTP routes and preserves path/type boundaries',async()=>{
+  const headers={'X-Hive-Workspace':workspace.id},query='?workspace='+workspace.id+'&path='+encodeURIComponent('导入的图片/图.png');
+  const info=await fetch(base+'/api/image-file/info?path='+encodeURIComponent('导入的图片/图.png'),{headers});expect(info.ok).toBe(true);expect(await info.json()).toMatchObject({mime:'image/png',bytes:png.length});
+  const image=await fetch(base+'/api/image-file'+query);expect(image.ok).toBe(true);expect(Buffer.from(await image.arrayBuffer())).toEqual(png);
+  expect((await fetch(base+'/api/image-file?workspace=old&path='+encodeURIComponent('导入的图片/图.png'))).status).toBe(409);
+  expect((await fetch(base+'/api/image-file/info?path='+encodeURIComponent('../图.png'),{headers})).status).toBe(400);
+  expect((await fetch(base+'/api/image-file/info?path='+encodeURIComponent('引用.md'),{headers})).status).toBe(400);
+ });
  it('rejects a stale workspace and refuses a linked image destination',async()=>{
   const other=path.join(temp,'other');await fs.mkdir(other);const switchResponse=await fetch(base+'/api/workspace',{method:'POST',headers:{'Content-Type':'application/json','X-Hive-Workspace':workspace.id},body:JSON.stringify({root:other,revision:workspace.revision})});expect(switchResponse.ok).toBe(true);
   const next=await switchResponse.json();expect((await post('stale.md',Buffer.from('old'))).status).toBe(409);expect(await fs.readdir(other)).toEqual([]);

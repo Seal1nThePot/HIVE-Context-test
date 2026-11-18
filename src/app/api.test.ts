@@ -15,4 +15,12 @@ describe('application API migration',()=>{
   it('retains backend error messages',async()=>{
     await expect(requestApi(vi.fn<typeof fetch>().mockResolvedValue(Response.json({error:'文件已变化'},{status:409})),'/file')).rejects.toThrow('文件已变化');
   });
+  it('keeps probe responses independent of configuration and forwards cancellation',async()=>{
+    const result={kind:'catalog',configurationLimit:100,models:[{id:'manual',name:'manual'}]};
+    const body={revision:0,service:{endpoint:'http://localhost:4000/prefix/v1'}};
+    const request=vi.fn<typeof fetch>().mockResolvedValue(Response.json(result));
+    const {signal}=new AbortController();
+    expect(await requestApi(request,'/model-services/probe',body,signal)).toEqual(result);
+    expect(request).toHaveBeenCalledWith('/api/model-services/probe',expect.objectContaining({signal}));
+  });
 });

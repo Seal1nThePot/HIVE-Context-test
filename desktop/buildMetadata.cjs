@@ -12,3 +12,4 @@ function validBuildInfo(value, pkg) {
   return !!value && typeof value === 'object' && value.appName === (pkg.build?.productName || pkg.name) && value.version === pkg.version && typeof value.buildNumber === 'string' && SAFE_NUMBER.test(value.buildNumber) && typeof value.buildTime === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(value.buildTime) && !Number.isNaN(Date.parse(value.buildTime)) && new Date(value.buildTime).toISOString() === value.buildTime && CHANNELS.has(value.channel);
 }
 module.exports = {createBuildInfo, validBuildInfo};
+

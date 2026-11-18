@@ -11,6 +11,7 @@ import {frontmatterVisible,subscribeFrontmatterVisibility} from './frontmatterVi
 import {typographyUpdateQueue} from '../typography/typographyUpdateQueue';
 import {isolateHistory} from '@codemirror/commands';
 import {codeBlockViewport} from './codeBlockViewport';
+import {MermaidWidget} from './mermaidWidget';
 
 export type DisplayMode='live'|'source';
 export const setDisplayMode=StateEffect.define<DisplayMode>(),setPreviewFocus=StateEffect.define<boolean>();
@@ -85,6 +86,8 @@ function build(state:EditorState){
       const segments=tableSegments(item,state.doc);
       if(!segments.length){ranges.push(Decoration.widget({widget:new WideTableNotice(),block:true,side:-1}).range(item.from));continue;}
       for(const segment of segments)ranges.push(Decoration.replace({block:true,widget:new TableWidget(item,state.field(imageContext,false)||null,marks.filter(mark=>mark.from<segment.to&&mark.to>segment.from),segment.fromRow,segment.toRow)}).range(segment.from,segment.to));
+    }else if(item.kind==='mermaid'){
+      ranges.push(Decoration.replace({block:true,widget:new MermaidWidget(item)}).range(item.from,item.to));
     }else if(item.kind==='math'){
       const widget=new MathWidget(item,state.doc);
       if(item.text){
@@ -108,7 +111,7 @@ export const markdownDisplayTheme=EditorView.baseTheme({
   '.cm-preview-image':{display:'inline-block',maxWidth:'100%',boxSizing:'border-box',padding:'5px 12px',border:'1px solid var(--hive-surface-border)',borderRadius:'4px',color:'var(--hive-document-text, var(--text))'},
   '.cm-preview-image img':{display:'block',maxWidth:'100%',maxHeight:'360px',objectFit:'contain'},
   '.cm-preview-properties':{whiteSpace:'pre-wrap',overflowWrap:'anywhere',fontSize:'.8em',color:'var(--hive-document-text, var(--text))',padding:'5px 12px',marginBottom:'8px',borderBottom:'1px solid var(--hive-surface-border)',cursor:'text'},
-  '.cm-preview-rule':{border:'0',borderTop:'1px solid var(--hive-surface-border)',margin:'14px 50px'},
+  '.cm-preview-rule':{border:'0',borderTop:'1px solid var(--hive-document-text, var(--text))',margin:'14px 50px'},
   '.cm-table-widget':{overflowX:'auto'},
   '.cm-table-source-notice':{padding:'5px 50px',color:'var(--hive-document-text, var(--text))',fontSize:'.85em'},
   '.cm-table-widget[data-table-segment] .cm-preview-table':{marginTop:'0',marginBottom:'0'},
@@ -123,7 +126,11 @@ export const markdownDisplayTheme=EditorView.baseTheme({
   '.cm-table-resize-col':{position:'absolute',right:'-4px',top:'0',height:'100%',width:'8px',cursor:'col-resize',zIndex:'2'},
   '.cm-table-resize-row':{position:'absolute',bottom:'-4px',left:'0',width:'100%',height:'8px',cursor:'row-resize',zIndex:'2'},
   '.cm-preview-table':{borderCollapse:'collapse',margin:'12px 50px',maxWidth:'calc(100% - 100px)',fontSize:'.95em'},
-  '.cm-preview-table td,.cm-preview-table th':{border:'1px solid var(--hive-surface-border)',padding:'6px 12px',textAlign:'left'},
+  '.cm-preview-table td,.cm-preview-table th':{border:'1px solid color-mix(in srgb, var(--hive-document-text, var(--text)) 20%, transparent)',padding:'6px 12px',textAlign:'left'},
+  '.cm-mermaid-widget':{margin:'12px clamp(12px, 6.4%, 50px)',maxWidth:'100%',overflow:'auto',position:'relative'},
+  '.cm-mermaid-widget svg':{display:'block',maxWidth:'100%',height:'auto'},
+  '.cm-mermaid-widget button':{display:'block',marginBottom:'6px',font:'inherit',fontSize:'.8em',color:'var(--hive-document-text, var(--text))',background:'transparent',border:'1px solid var(--hive-surface-border)',borderRadius:'4px',cursor:'pointer'},
+  '.cm-mermaid-widget pre':{whiteSpace:'pre-wrap',overflowWrap:'anywhere',fontSize:'.85em'},
   '.cm-preview-table th':{background:'color-mix(in srgb, var(--hive-document-text) 4%, transparent)',fontWeight:'600'},
 });
 const frontmatterVisibilityPlugin=ViewPlugin.define(view=>{

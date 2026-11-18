@@ -1,8 +1,0 @@
-{
-  "version": 1,
-  "id": "olive-gold",
-  "name": "青苔鎏金",
-  "description": "低饱和青苔绿与灰金，包含黑、浅灰、白三档配色。",
-  "bases": ["black", "gray", "white"],
-  "colorsFile": "colors.json"
-}

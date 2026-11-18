@@ -7,7 +7,8 @@ import { modelConfigStore } from "./model-config.mjs";
 import {imageStore,MAX_IMAGE_BYTES} from './images.mjs';
 import {importStore} from './imports.mjs';
 import {resolveReferences} from './references.mjs';
-import {reasoningOptions} from './generation-options.mjs';
+import {generationPayload} from './generation-options.mjs';
+import {probeModelService,sendChatCompletion,upstreamHttpError,upstreamJson} from './model-probe.mjs';
 import {templateStore} from './templates.mjs';
 import {desktopShell} from './desktop-shell.mjs';
 import {fileProbe} from './file-probe.mjs';
@@ -48,7 +49,7 @@ app.get('/api/templates/:id',async(req,res)=>res.json(await templates.read(req.p
 app.post('/api/templates/:id',async(req,res)=>res.json(await templates.save(req.params.id,req.body)));
 app.post('/api/templates/:id/open',async(req,res)=>res.json(await templates.open(req.params.id)));
 app.get('/api/workspace', (_req,res)=>res.json(spaces.read()));
-const workspaceRoutes = new Set(['writing-outline','annotations','scratch','outline','tree','file','folder','rename','workspace','explorer','images','references','import']);
+const workspaceRoutes = new Set(['writing-outline','annotations','scratch','outline','tree','file','folder','rename','workspace','explorer','images','image-file','references','import']);
 const mutationQueues=new Map();
 let probeOwner, activeProbe;
 app.use('/api', (req,res,next)=>{
@@ -167,10 +168,11 @@ app.get('/api/tree',async(req,res)=>{
 app.get('/api/explorer/trash',async(req,res)=>res.json(await req.workspace.explorer.listTrash()));
 app.post('/api/explorer/trash/preview',async(req,res)=>res.json(await req.workspace.explorer.previewTrash(req.body.days)));
 app.post('/api/explorer/trash/purge',async(req,res)=>res.json(await req.workspace.explorer.purgeTrash(req.body.token)));
+app.post('/api/explorer/trash/delete',async(req,res)=>res.json(await req.workspace.explorer.deleteTrash(req.body?.ids)));
 app.get('/api/explorer/search',async(req,res)=>res.json(await req.workspace.explorer.search(req.query.folder,req.query.query)));
 app.post('/api/explorer',async(req,res)=>res.json(await req.workspace.explorer.manage(req.body)));
 app.post('/api/import',express.raw({type:'application/octet-stream',limit:MAX_IMAGE_BYTES}),async(req,res)=>{
-  res.json(await importStore(req.workspace).store(req.query.name,req.body));
+  res.json(await importStore(req.workspace).store(req.query.name,req.body,req.query.parent));
 });
 app.get('/api/import',async(req,res)=>res.json(await importStore(req.workspace).list()));
 app.get('/api/import/references',async(req,res)=>res.json(await importStore(req.workspace).references(req.query.path)));
@@ -181,6 +183,16 @@ app.get('/api/import/image',async(req,res)=>{
 });
 app.post('/api/images',express.raw({type:'application/octet-stream',limit:MAX_IMAGE_BYTES}),async(req,res)=>{
   res.json(await imageStore(req.workspace).store(req.query.document,req.query.name,req.body));
+});
+app.get('/api/image-file/info',async(req,res)=>{
+  const image=await imageStore(req.workspace).readFile(req.query.path);
+  res.json({path:req.query.path,mime:image.mime,bytes:image.buffer.length});
+});
+app.get('/api/image-file',async(req,res)=>{
+  if(!req.query.workspace||req.query.workspace!==req.workspace.id)return res.status(409).json({error:'图片所属写作空间已变化。'});
+  const image=await imageStore(req.workspace).readFile(req.query.path);
+  res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Security-Policy',"default-src 'none'; sandbox");
+  res.type(image.mime).send(image.buffer);
 });
 app.get('/api/images',async(req,res)=>{
   if(!req.query.workspace||req.query.workspace!==req.workspace.id)return res.status(409).json({error:'图片所属写作空间已变化。'});
@@ -203,47 +215,42 @@ app.get("/api/config", (_req, res) => res.json(modelSettings.read()));
 app.post("/api/config", async (req, res) => res.json(await modelSettings.update(req.body)));
 app.post("/api/model-services", async (req, res) => res.json(await modelSettings.upsert(req.body)));
 app.post("/api/model-services/remove", async (req, res) => res.json(await modelSettings.remove(req.body)));
+app.post("/api/model-services/reorder", async (req, res) => res.json(await modelSettings.reorder(req.body)));
+app.post("/api/model-services/probe", async (req, res) => {
+  const route = modelSettings.resolveProbe(req.body);
+  const abort = new AbortController();
+  const stop = () => abort.abort();
+  res.once('close', stop);
+  try {
+    const result = await probeModelService(route, {signal: abort.signal});
+    modelSettings.checkRevision(req.body.revision);
+    if (!res.destroyed) res.json(result);
+  } catch (error) {
+    if (!res.destroyed) throw error;
+  } finally {
+    res.off('close', stop);
+  }
+});
 app.post("/api/generate", async (req, res) => {
-  const reasoning=reasoningOptions(req.body.reasoningEffort);
   const route = modelSettings.resolve(req.body.selection);
-  const messages = req.body.messages;
-  if (
-    !Array.isArray(messages) ||
-    messages.length > 160 ||
-    messages.some(
-      (m) =>
-        !["system", "user", "assistant"].includes(m.role) ||
-        typeof m.content !== "string",
-    ) ||
-    JSON.stringify(messages).length > 120000
-  )
-    return res.status(400).json({
-      error:
-        "本轮上下文无效或过长（上限 12 万字符），请缩小当前文档或新开会话。",
-    });
+  const {payload, outputLimit} = generationPayload(route, req.body);
   const abort = new AbortController();
   res.on("close", () => abort.abort());
   const timeout = setTimeout(() => abort.abort(), 120000);
   let headersSent = false;
   const emit = (event, data) =>
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  function checkFinish(reason) {
+    if (reason === 'length') throw new Error('本轮已达到最大输出长度，请调整后重试。');
+    if (reason && reason !== 'stop') throw new Error('生成未完整结束，请重试。');
+  }
   try {
-    const url = /\/chat\/completions$/.test(route.endpoint)
-      ? route.endpoint
-      : route.endpoint + "/chat/completions";
-    const upstream = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(route.key ? { Authorization: `Bearer ${route.key}` } : {}),
-      },
-      body: JSON.stringify({ model: route.model, messages, stream: true,...reasoning }),
-      signal: abort.signal,
-    });
-    if (!upstream.ok)
-      throw new Error(
-        `模型端点返回 HTTP ${upstream.status}。请检查地址、模型、凭据或额度。${Object.keys(reasoning).length?'也可将推理强度调回默认后重试。':''}`,
-      );
+    const upstream = await sendChatCompletion(route, payload, abort.signal, outputLimit);
+    if (!upstream.ok) {
+      if (!upstream.bodyUsed) void upstream.body?.cancel().catch(() => {});
+      const hint = payload.reasoning_effort || payload.reasoning || payload.thinking ? '可将推理强度调回默认后重试。' : '';
+      throw new Error(upstreamHttpError(upstream.status, false) + hint);
+    }
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
     res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders();
@@ -253,10 +260,12 @@ app.post("/api/generate", async (req, res) => {
         "text/event-stream",
       )
     ) {
-      const value = await upstream.json();
-      const text = value.choices?.[0]?.message?.content;
-      if (typeof text !== "string" || !text)
+      const value = await upstreamJson(upstream, 8 * 1024 * 1024);
+      const choice = value?.choices?.[0];
+      const text = choice?.message?.content;
+      if (value?.error || typeof text !== "string" || !text)
         throw new Error("端点未返回可用正文。");
+      checkFinish(choice.finish_reason);
       emit("chunk", text);
       emit("done", {});
       return res.end();
@@ -276,7 +285,9 @@ app.post("/api/generate", async (req, res) => {
         finished = true;
         return;
       }
-      const value = JSON.parse(data);
+      let value;
+      try { value = JSON.parse(data); }
+      catch { throw new Error('模型端点返回了无法解析的流式响应。'); }
       if (value.error) throw new Error("模型端点返回错误，请检查配置后重试。");
       const delta = value.choices?.[0]?.delta?.content;
       if (typeof delta === "string" && delta) {
@@ -284,10 +295,7 @@ app.post("/api/generate", async (req, res) => {
         emit("chunk", delta);
       }
       if (value.choices?.[0]?.finish_reason) {
-        if (value.choices[0].finish_reason !== "stop")
-          throw new Error(
-            `生成未完整结束（${value.choices[0].finish_reason}），请重试。`,
-          );
+        checkFinish(value.choices[0].finish_reason);
         finished = true;
       }
     }

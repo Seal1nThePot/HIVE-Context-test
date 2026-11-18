@@ -1,6 +1,5 @@
 import {colorRoles,normalizeTheme,type BaseColor,type ThemePreferences} from './themePreferences';
 import {surfaceColorGroups} from './surfaceAppearance';
-import oliveDefaults from '../../../templates/olive-gold/colors.json';
 
 export type TemplateIdentity={id:string;name:string;bases:BaseColor[]};
 export type TemplateBinding=TemplateIdentity&{defaults:ThemePreferences};
@@ -31,8 +30,8 @@ export function createTemplateBinding(identity:TemplateIdentity,raw:unknown):Tem
   const bases=identity.bases.filter((base,index,all)=>['black','gray','white','custom'].includes(base)&&all.indexOf(base)===index);
   if(!bases.length)throw new Error('当前模板没有声明可用的基础颜色。');
   const supplied=object(raw)?raw:{};
-  if(identity.id!=='olive-gold')for(const base of bases){const profiles=object(supplied.colorProfiles)?supplied.colorProfiles:{},entry=profiles[base];if(!object(entry)||colorRoles.some(role=>typeof entry[role]!=='string'||!/^#[0-9a-f]{6}$/i.test(entry[role] as string)))throw new Error(`${identity.name}的${base}语义色不完整，不能回退到其他模板。`);}
-  const defaults=normalizeTheme(identity.id==='olive-gold'?mergeThemePatch(oliveDefaults,supplied):supplied);
+  for(const base of bases){const profiles=object(supplied.colorProfiles)?supplied.colorProfiles:{},entry=profiles[base];if(!object(entry)||colorRoles.some(role=>typeof entry[role]!=='string'||!/^#[0-9a-f]{6}$/i.test(entry[role] as string)))throw new Error(`${identity.name}的${base}语义色不完整，不能回退到其他模板。`);}
+  const defaults=normalizeTheme(supplied);
   const surfaceKeys=surfaceColorGroups.flatMap(group=>group.fields.map(([key])=>key));
   for(const base of bases){
     const colors=defaults.colorProfiles[base],surfaces=defaults.surfaceColors[base],dock=defaults.writingDockProfiles[base];
@@ -46,14 +45,14 @@ export function templateBaseDefaults(binding:TemplateBinding,requested:BaseColor
   const colorProfiles=Object.fromEntries(binding.bases.map(name=>[name,{...defaults.colorProfiles[name]}]));
   const surfaceColors=Object.fromEntries(binding.bases.map(name=>[name,{...defaults.surfaceColors[name]}]));
   const writingDockProfiles=Object.fromEntries(binding.bases.map(name=>[name,structuredClone(defaults.writingDockProfiles[name])]));
-  return normalizeTheme({...defaults,base,editorProfiles:Object.fromEntries(binding.bases.filter(name=>defaults.editorProfiles[name]).map(name=>[name,defaults.editorProfiles[name]])),dockingProfiles:Object.fromEntries(binding.bases.filter(name=>defaults.dockingProfiles[name]).map(name=>[name,defaults.dockingProfiles[name]])),colorProfiles,surfaceColors,writingDockProfiles,colors:colorProfiles[base],writingDock:writingDockProfiles[base]});
+  return normalizeTheme({...defaults,base,reasoningTrackProfiles:Object.fromEntries(binding.bases.filter(name=>defaults.reasoningTrackProfiles?.[name]).map(name=>[name,defaults.reasoningTrackProfiles?.[name]])),editorProfiles:Object.fromEntries(binding.bases.filter(name=>defaults.editorProfiles[name]).map(name=>[name,defaults.editorProfiles[name]])),dockingProfiles:Object.fromEntries(binding.bases.filter(name=>defaults.dockingProfiles[name]).map(name=>[name,defaults.dockingProfiles[name]])),colorProfiles,surfaceColors,writingDockProfiles,colors:colorProfiles[base],writingDock:writingDockProfiles[base]});
 }
 export function normalizeWithinTemplate(value:ThemePreferences,binding:TemplateBinding):ThemePreferences{
   const base=allowedTemplateBase(binding,value.base),reference=templateBaseDefaults(binding,base);
   const colors=Object.fromEntries(binding.bases.map(name=>[name,safeOverlay(reference.colorProfiles[name],value.colorProfiles[name])]));
   const surfaces=Object.fromEntries(binding.bases.map(name=>[name,safeOverlay(reference.surfaceColors[name],value.surfaceColors[name])]));
   const docks=Object.fromEntries(binding.bases.map(name=>[name,safeOverlay(reference.writingDockProfiles[name],value.writingDockProfiles[name])]));
-  return normalizeTheme({...value,base,editorProfiles:Object.fromEntries(binding.bases.filter(name=>value.editorProfiles?.[name]).map(name=>[name,value.editorProfiles[name]])),dockingProfiles:Object.fromEntries(binding.bases.filter(name=>value.dockingProfiles?.[name]).map(name=>[name,value.dockingProfiles[name]])),colorProfiles:colors,surfaceColors:surfaces,writingDockProfiles:docks,colors:colors[base],writingDock:docks[base]});
+  return normalizeTheme({...value,base,reasoningTrackProfiles:Object.fromEntries(binding.bases.filter(name=>value.reasoningTrackProfiles?.[name]).map(name=>[name,value.reasoningTrackProfiles?.[name]])),editorProfiles:Object.fromEntries(binding.bases.filter(name=>value.editorProfiles?.[name]).map(name=>[name,value.editorProfiles[name]])),dockingProfiles:Object.fromEntries(binding.bases.filter(name=>value.dockingProfiles?.[name]).map(name=>[name,value.dockingProfiles[name]])),colorProfiles:colors,surfaceColors:surfaces,writingDockProfiles:docks,colors:colors[base],writingDock:docks[base]});
 }
 export function userProfileFor(binding:TemplateBinding,preferences:ThemePreferences,defaultScheme:ThemePreferences):TemplateUserProfile{
   const current=normalizeWithinTemplate(preferences,binding),saved=normalizeWithinTemplate(defaultScheme,binding);
