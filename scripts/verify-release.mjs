@@ -10,7 +10,7 @@ const bundle=path.resolve(process.argv[2]||path.join(project,'release'));
 const output=path.resolve(process.env.HIVE_VERIFY_OUTPUT||path.join(project,'.runtime/checks'));
 const archive=path.join(bundle,'win-unpacked/resources/app.asar');
 const hash=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
-const files=['LICENSE','assets/brand/hive.png'];
+const files=['LICENSE',path.join('assets','brand','hive.png')];
 function walk(relative){
   for(const item of fs.readdirSync(path.join(project,relative),{withFileTypes:true})){
     const file=path.join(relative,item.name);
