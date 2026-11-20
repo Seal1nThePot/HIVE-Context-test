@@ -1,13 +1,30 @@
 import {useRef,useState} from 'react';
-export type ReferenceSource={path:string;type:'file'|'folder'};
+export type WorkspaceReferenceSource={path:string;type:'file'|'folder'};
+export type AttachmentReferenceSource={path:string;type:'attachment';id:string};
+export type ReferenceSource=WorkspaceReferenceSource|AttachmentReferenceSource;
+export function referenceSourceKey(source:ReferenceSource){
+  return source.type==='attachment'?'attachment:'+source.id:'workspace:'+source.path.toLocaleLowerCase();
+}
 export type ReferenceFile={path:string;source:string;text:string;characters:number;truncated?:boolean;unsaved?:boolean};
 export type ResolvedReferences={sources:ReferenceSource[];files:ReferenceFile[];warnings:string[]};
 export function normalizeReferenceSources(value:unknown):ReferenceSource[]{
   if(!Array.isArray(value))return [];
   const result:ReferenceSource[]=[],seen=new Set<string>();
-  for(const item of value){if(!item||typeof item!=='object'||!['file','folder'].includes(item.type)||typeof item.path!=='string')continue;
-    const path=item.path.replace(/\\/g,'/');if(!path||path.length>2000||path.startsWith('/')||path.split('/').some((part:string)=>!part||part==='.'||part==='..')||/[\0:*?"<>|]/.test(path))continue;
-    const key=path.toLocaleLowerCase();if(seen.has(key))continue;seen.add(key);result.push({path,type:item.type});if(result.length===32)break;
+  for(const item of value){
+    if(!item||typeof item!=='object'||typeof item.path!=='string')continue;
+    let source:ReferenceSource;
+    if(item.type==='attachment'){
+      if(typeof item.id!=='string'||!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(item.id)||
+        item.path.length>1000||/[\\/\x00-\x1f\x7f]/.test(item.path)||!/\.md$/i.test(item.path))continue;
+      source={path:item.path,type:'attachment',id:item.id};
+    }else{
+      if(item.type!=='file'&&item.type!=='folder')continue;
+      const path=item.path.replace(/\\/g,'/');if(!path||path.length>2000||path.startsWith('/')||path.split('/').some((part:string)=>!part||part==='.'||part==='..')||/[\0:*?"<>|]/.test(path))continue;
+      source={path,type:item.type};
+    }
+    const key=referenceSourceKey(source);
+    if(seen.has(key))continue;
+    seen.add(key);result.push(source);if(result.length===32)break;
   }return result;
 }
 export function readReferenceSources(raw:string|null):ReferenceSource[]{try{const value=JSON.parse(raw||'null');return value?.version===1?normalizeReferenceSources(value.sources):[];}catch{return [];}}
@@ -17,16 +34,18 @@ export function appendReferenceSources(existing:ReferenceSource[],candidates:Ref
   for(const candidate of candidates){
     const source=normalizeReferenceSources([candidate])[0];
     if(!source){results.push({path:candidate?.path||'',ok:false,error:'依据路径无效。'});continue;}
-    if(sources.some(item=>item.path.toLocaleLowerCase()===source.path.toLocaleLowerCase())){results.push({path:source.path,ok:true,warning:'已在依据列表中。'});continue;}
+    if(sources.some(item=>referenceSourceKey(item)===referenceSourceKey(source))){results.push({path:source.path,ok:true,warning:'已在依据列表中。'});continue;}
     if(sources.length>=32){results.push({path:source.path,ok:false,error:'依据最多容纳 32 项，请先移除不再使用的资料。'});continue;}
     sources.push(source);results.push({path:source.path,ok:true});
   }
   return {sources,results};
 }
-export function remapReferenceSources(sources:ReferenceSource[],from:string,to:string){return normalizeReferenceSources(sources.map(source=>({...source,path:source.path===from||source.path.startsWith(from+'/')?to+source.path.slice(from.length):source.path})));}
+export function remapReferenceSources(sources:ReferenceSource[],from:string,to:string){return normalizeReferenceSources(sources.map(source=>source.type!=='attachment'&&(source.path===from||source.path.startsWith(from+'/'))?{...source,path:to+source.path.slice(from.length)}:source));}
 export function referenceOverrides(sources:ReferenceSource[],buffers:{path:string;text:string}[],currentFile:string,budget=60000){
   const available=new Map(buffers.map(buffer=>[buffer.path,buffer])),seen=new Set<string>(),result:{path:string;text:string;characters:number}[]=[];let remaining=budget;
-  for(const source of sources){const paths=source.type==='file'?[source.path]:[...available.keys()].filter(path=>path.startsWith(source.path+'/')).sort((a,b)=>a.localeCompare(b,'zh-CN',{numeric:true}));
+  for(const source of sources){
+    if(source.type==='attachment')continue;
+    const paths=source.type==='file'?[source.path]:[...available.keys()].filter(path=>path.startsWith(source.path+'/')).sort((a,b)=>a.localeCompare(b,'zh-CN',{numeric:true}));
     for(const path of paths){if(path===currentFile||seen.has(path))continue;seen.add(path);const buffer=available.get(path);if(!buffer)continue;
       const text=buffer.text.slice(0,remaining);result.push({path,text,characters:buffer.text.length});remaining-=text.length;
     }
@@ -42,7 +61,7 @@ export function useReferenceSources(workspaceId:string,owner:string){
     for(const target of keys){let oldOwner:string;try{oldOwner=decodeURIComponent(target.slice(prefix.length));}catch{continue;}const nextOwner=oldOwner===from||oldOwner.startsWith(from+'/')?to+oldOwner.slice(from.length):oldOwner;const nextKey=prefix+encodeURIComponent(nextOwner);put(nextKey,remapReferenceSources(get(target),from,to));if(nextKey!==target){cache.current.delete(target);try{localStorage.removeItem(target);}catch{}}}
     redraw(value=>value+1);
   }
-  return {sources:get(key),setSources:(sources:ReferenceSource[])=>{put(key,sources);redraw(value=>value+1);},addSources:(candidates:ReferenceSource[])=>{
+  return {sources:get(key),setSources:(sources:ReferenceSource[])=>{const saved=put(key,sources);redraw(value=>value+1);return saved;},addSources:(candidates:ReferenceSource[])=>{
     const next=appendReferenceSources(get(key),candidates),saved=put(key,next.sources);redraw(value=>value+1);
     return next.results.map(result=>!saved&&result.ok?{...result,warning:[result.warning,'已加入本次列表，但无法持久保存。'].filter(Boolean).join(' ')}:result);
   },remap,saveError};

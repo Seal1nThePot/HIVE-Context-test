@@ -89,10 +89,33 @@ async function browserChecks(){
   const outlineProps=()=>({items:[{title:'标题',level:1,from:0,to:4}],nodes,selectedId:selected,onSelect:id=>{selected=id;drawOutline();},onLocate:()=>{},onWrite:id=>{written=id;},onSave:async next=>{nodes=next;drawOutline();},busy:false,ready:true,onRetry:()=>{}});
   const drawOutline=()=>outlineRoot.render(el(Outline,outlineProps()));drawOutline();await pause(80);
   const click=async label=>{const button=[...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')===label);if(!button)throw Error('Missing button '+label);button.click();await pause(80);};
-  await click('修改大纲节点：甲');check('BUG-019 edit opens form',!!document.querySelector('[aria-label="大纲节点标题"]'));document.querySelector('[aria-label="大纲节点标题"]').value='修订';document.querySelector('.outline-node-modal').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await pause(80);check('BUG-019 edit saves existing node',nodes.length===2);
-  await click('下移大纲节点：甲');check('BUG-019 moving node changes order',nodes[1].id==='a');await click('删除大纲节点：甲');check('BUG-019 delete preserves other node',nodes.length===1&&nodes[0].id==='b');await click('撤回删除大纲节点');check('BUG-019 undo delete restores position',nodes.length===2&&nodes[1].id==='a');
-  await click('新建大纲节点');check('BUG-019 create opens empty form',document.querySelector('[aria-label="大纲节点标题"]').value==='');await click('关闭大纲编辑');await click('按此节点完成：甲');check('BUG-019 write action routes selected node without calling AI',written==='a');
-  outlineRoot.unmount();outlineMount.remove();
+  const editorTitle=()=>document.querySelector('[aria-label="大纲节点标题"]');
+  const submitOutline=()=>document.querySelector('.outline-node-editor').requestSubmit();
+  const outlineTitles=()=>[...document.querySelectorAll('.outline-row-title')].map(button=>button.textContent);
+  check('BUG-050 compact outline rows contain four controls or values',Array.from(document.querySelectorAll('.writing-outline-row')).every(row=>row.children.length===4));
+  document.querySelector('.writing-outline-row').dispatchEvent(new MouseEvent('mouseover',{bubbles:true,clientX:5,clientY:5}));
+  await pause(100);
+  check('BUG-050 hovering a node no longer opens the old requirements tooltip',!document.querySelector('.outline-description-tooltip'));
+  check('BUG-049 the outline has no embedded table-of-contents tab',!Array.from(document.querySelectorAll('.outline-view-switch button')).some(button=>button.textContent.trim()==='目录')&&!!document.querySelector('.writing-nodes'));
+  await click('编辑大纲节点：甲');
+  check('BUG-019 title opens a child dialog with saved writing requirements',!!document.querySelector('dialog[open] .outline-node-editor')&&document.querySelector('[aria-label="大纲节点写作要求"]').value==='要求');
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(editorTitle(),'修订');editorTitle().dispatchEvent(new Event('input',{bubbles:true}));
+  await pause(50);submitOutline();await wait(()=>!editorTitle(),'outline edit saved');
+  check('BUG-019 edit saves existing node',nodes.length===2&&nodes[0].title==='修订');
+  const firstHandle=document.querySelector('.outline-sort-handle'),targetRow=document.querySelectorAll('.writing-outline-row')[1],transfer=new DataTransfer();
+  firstHandle.dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:transfer}));
+  targetRow.dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:transfer}));
+  targetRow.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer}));
+  firstHandle.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:transfer}));
+  await wait(()=>outlineTitles()[1]==='修订','outline drag order');
+  check('BUG-050 drag handle persists new order and renumbers rows',nodes[1].id==='a'&&[...document.querySelectorAll('.outline-row-number')].map(node=>node.textContent).join(',')==='01,02');
+  await click('删除大纲节点：修订');check('BUG-019 delete preserves other node',nodes.length===1&&nodes[0].id==='b');
+  await click('撤回删除大纲节点');check('BUG-019 undo delete restores position',nodes.length===2&&nodes[1].id==='a');
+  await click('新建大纲节点');check('BUG-019 create opens empty form',editorTitle().value==='');
+  await click('关闭新建大纲节点');await click('编辑大纲节点：修订');
+  document.querySelector('.outline-node-actions button').click();await pause(80);
+  check('BUG-019 write action routes selected node without calling AI',written==='a');
+    outlineRoot.unmount();outlineMount.remove();
   return checks;
 }
 async function appChecks(){
@@ -109,20 +132,38 @@ async function appChecks(){
   get('.explorer-row[data-path="验收.md"]').click();await wait(()=>get('.document-pane .cm-content')?.textContent.includes('验收正文'),'return main file');
   await click('面板');await click('大纲显示');await click('关闭面板管理');await wait(()=>get('[aria-label="新建大纲节点"]')&&!get('[aria-label="新建大纲节点"]').disabled,'outline ready');
   const originalCount=(await outline()).length;
-  await click('新建大纲节点');input('[aria-label="大纲节点标题"]','测试新增');input('[aria-label="大纲节点写作要求"]','隔离资料写作要求');get('.outline-node-modal').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await wait(()=>!get('.outline-node-modal'),'outline create save');
+  await click('新建大纲节点');input('[aria-label="大纲节点标题"]','测试新增');input('[aria-label="大纲节点写作要求"]','隔离资料写作要求');get('.outline-node-editor').requestSubmit();await wait(()=>!get('.outline-node-editor'),'outline create save');
   check('BUG-019 actual App creates and persists a new node',(await outline()).length===originalCount+1&&(await outline()).at(-1).title==='测试新增');
-  await click('修改大纲节点：测试新增');input('[aria-label="大纲节点标题"]','测试修改');input('[aria-label="大纲节点写作要求"]','修改后的写作要求');get('.outline-node-modal').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await wait(()=>!get('.outline-node-modal'),'outline edit save');
+  await click('编辑大纲节点：测试新增');input('[aria-label="大纲节点标题"]','测试修改');input('[aria-label="大纲节点写作要求"]','修改后的写作要求');get('.outline-node-editor').requestSubmit();await wait(()=>!get('.outline-node-editor'),'outline edit save');
   check('BUG-019 actual App edits title and requirements',(await outline()).at(-1).title==='测试修改'&&(await outline()).at(-1).description==='修改后的写作要求');
-  await click('上移大纲节点：测试修改');await pause(120);check('BUG-019 actual App reorders persisted nodes',(await outline()).at(-2).title==='测试修改');
+  get('[aria-label="调整大纲节点顺序：测试修改"]').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));await pause(120);check('BUG-019 actual App reorders persisted nodes',(await outline()).at(-2).title==='测试修改');
   await click('删除大纲节点：测试修改');await pause(120);check('BUG-019 actual App deletes node without deleting body',!(await outline()).some(node=>node.title==='测试修改')&&editor().state.doc.toString().includes('验收正文'));
   await click('撤回删除大纲节点');await pause(120);check('BUG-019 actual App undo restores persisted node',(await outline()).some(node=>node.title==='测试修改'));
-  const view=editor(),source=view.state.doc.toString(),from=source.indexOf('验收正文');
-  for(const text of ['文件链接','第一节','用于实际']){const start=source.indexOf(text);view.dispatch({selection:{anchor:start,head:start+text.length}});view.dom.dispatchEvent(new KeyboardEvent('keydown',{key:'m',ctrlKey:true,altKey:true,bubbles:true}));await pause(90);}
-  view.dispatch({selection:{anchor:from,head:from+4}});view.dom.dispatchEvent(new KeyboardEvent('keydown',{key:'m',ctrlKey:true,altKey:true,bubbles:true}));await wait(()=>get('.annotation-bubble'),'annotation creation');await pause(150);
-  const annotation=[...document.querySelectorAll('.annotation-bubble')].at(-1);annotation.click();await wait(()=>get('[data-panel-id="annotations"] [data-annotation-list-id]'),'annotation panel focus');
-  const focused=get('[data-panel-id="annotations"] [aria-current="true"]');check('BUG-011 annotation bubble opens and selects its global list entry',!!focused);
-  const list=focused.parentElement;list.style.cssText='height:80px;max-height:80px;overflow:auto';list.scrollTop=0;annotation.click();annotation.click();await pause(100);const fr=focused.getBoundingClientRect(),lr=list.getBoundingClientRect();check('BUG-011 repeated bubble clicks scroll to offscreen selected entry',list.scrollTop>0&&fr.top>=lr.top-1&&fr.bottom<=lr.bottom+1,{entry:fr.toJSON(),list:lr.toJSON(),scrollTop:list.scrollTop});
-  if(!get('[aria-label="删除此标注"]'))annotation.click();await wait(()=>get('[aria-label="删除此标注"]'),'inline delete entry');
+  const view=editor(),source=view.state.doc.toString();
+  async function markSelection(text){
+    const from=source.indexOf(text),count=new Set([...view.dom.querySelectorAll('[data-annotation-id]')].map(node=>node.dataset.annotationId)).size;
+    view.dispatch({selection:{anchor:from,head:from+text.length}});
+    const box=view.coordsAtPos(from+1),node=view.domAtPos(from+1).node,target=node.nodeType===1?node:node.parentElement;
+    const coordinates={button:0,ctrlKey:true,clientX:box.left,clientY:(box.top+box.bottom)/2,bubbles:true,cancelable:true,detail:1};
+    target.dispatchEvent(new PointerEvent('pointerdown',{...coordinates,pointerId:1,isPrimary:true}));
+    target.dispatchEvent(new MouseEvent('click',coordinates));
+    await wait(()=>new Set([...view.dom.querySelectorAll('[data-annotation-id]')].map(node=>node.dataset.annotationId)).size>count,'create text annotation '+text);
+  }
+  for(const text of ['第一节','用于实际','写作大纲','验收正文'])await markSelection(text);
+  await wait(()=>[...document.querySelectorAll('.annotation-bubble')].some(button=>button.title==='标注：验收正文'),'annotation bubble');
+  const annotation=[...document.querySelectorAll('.annotation-bubble')].find(button=>button.title==='标注：验收正文');
+  if(get('.inline-annotation-editor')){annotation.click();await wait(()=>!get('.inline-annotation-editor'),'close existing local annotation popup');}
+  annotation.click();await wait(()=>get('.inline-annotation-editor'),'annotation bubble opens local requirements');
+  check('BUG-046 bubble opens local requirements while the global panel stays closed',!get('[data-panel-id="annotations"] .annotation-title-list')?.checkVisibility());
+  await click('打开全局标注栏');await wait(()=>get('[data-panel-id="annotations"] [aria-current="true"]'),'explicit global annotation action');
+  const focused=get('[data-panel-id="annotations"] [aria-current="true"]');
+  check('BUG-011 explicit global annotation action selects its entry',focused.dataset.annotationListId===annotation.dataset.annotationKey);
+  const list=focused.closest('.annotation-title-list');
+  list.style.cssText='height:64px;max-height:64px;overflow:auto';list.scrollTop=0;
+  annotation.click();await wait(()=>list.scrollTop>0,'open panel follows the selected annotation');
+  const fr=focused.getBoundingClientRect(),lr=list.getBoundingClientRect();
+  check('BUG-011 clicking a bubble scrolls the already open list to the selected entry',fr.top>=lr.top-1&&fr.bottom<=lr.bottom+1,{entry:fr.toJSON(),list:lr.toJSON(),scrollTop:list.scrollTop});
+  await wait(()=>get('[aria-label="删除此标注"]'),'inline delete entry');
   const removed=focused.dataset.annotationListId;view.dispatch({changes:{from:view.state.doc.length,insert:'撤销测试'},userEvent:'input.type'});await click('删除此标注');await wait(()=>![...document.querySelectorAll('[data-annotation-list-id]')].some(node=>node.dataset.annotationListId===removed),'annotation removal');
   check('BUG-013 inline delete removes annotation without changing text',view.state.doc.toString()===source+'撤销测试');undo(view);check('BUG-013 annotation deletion preserves editor undo history',view.state.doc.toString()===source);
   await pause(600);const data=await(await fetch('/api/annotations?source=document&file='+encodeURIComponent('验收.md'))).json();check('BUG-013 deletion persists and preserves other annotations',data.items.length===3&&!data.items.some(item=>item.id===removed),data);
@@ -131,8 +172,8 @@ async function appChecks(){
 async function recoveryChecks(){
   const checks=[],pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),get=s=>document.querySelector(s),wait=async(fn,label)=>{for(let i=0;i<180;i++){if(fn())return;await pause(50);}throw Error('Timeout '+label);};
   const check=(name,ok)=>{checks.push({name,passed:!!ok});if(!ok)throw Error(name);};
-  await wait(()=>get('.explorer-row[data-path="验收.md"]'),'reloaded App');get('.explorer-row[data-path="验收.md"]').click();await wait(()=>get('.document-pane .cm-content')?.textContent.includes('验收正文'),'reloaded document');get('[aria-label="面板"]').click();await pause(70);get('[aria-label="大纲显示"]').click();get('[aria-label="关闭面板管理"]').click();await wait(()=>get('[aria-label="修改大纲节点：测试修改"]'),'restored outline');
-  check('BUG-019 reloading App restores saved outline node and requirements',get('.writing-nodes').textContent.includes('修改后的写作要求'));
+  await wait(()=>get('.explorer-row[data-path="验收.md"]'),'reloaded App');get('.explorer-row[data-path="验收.md"]').click();await wait(()=>get('.document-pane .cm-content')?.textContent.includes('验收正文'),'reloaded document');get('[aria-label="面板"]').click();await pause(70);get('[aria-label="大纲显示"]').click();get('[aria-label="关闭面板管理"]').click();await wait(()=>get('[aria-label="编辑大纲节点：测试修改"]'),'restored outline');get('[aria-label="编辑大纲节点：测试修改"]').click();await wait(()=>get('[aria-label="大纲节点写作要求"]'),'restored outline editor');
+  check('BUG-019 reloading App restores saved outline node and requirements',get('[aria-label="大纲节点写作要求"]').value==='修改后的写作要求');
   const annotations=await(await fetch('/api/annotations?source=document&file='+encodeURIComponent('验收.md'))).json();check('BUG-013 reloading preserves other saved annotations after deletion',annotations.items.length===3);
   return checks;
 }

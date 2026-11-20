@@ -1,12 +1,12 @@
 import {describe,it,expect,vi} from 'vitest';
 import {EditorState} from '@codemirror/state';
 import {previewPlan} from './markdownPresentation';
-import {cellContent,decodeCell,encodeCell,encodeCellSource,tableSizeKey,tableRectangle} from './tableWidget';
+import {cellContent,decodeCell,encodeCell,encodeCellSource,tableSizeKey,tableRectangle,isTableSourceSelected,selectTableSource} from './tableWidget';
 import {markdownDisplayExtensions,markdownPreview} from './markdownDisplay';
 import {annotationHighlights,setAnnotationMarks} from '../annotations/annotationDecorations';
 import {history,undo,redo} from '@codemirror/commands';
 import {tableOperation,type TableAction} from './tableOperations';
-import {tableSegments} from './tableViewport';
+import {defaultTableWidths,tableSegments} from './tableViewport';
 
 describe('table source editing',()=>{
   it('normalizes a rectangular drag in either direction',()=>{expect(tableRectangle({row:4,col:3},{row:1,col:0})).toEqual({top:1,bottom:4,left:0,right:3});});
@@ -34,11 +34,59 @@ describe('table source editing',()=>{
     const tables=previewPlan(EditorState.create({doc:'***\n\n| A |\n| --- |\n\n---\n\n| B |\n| --- |'})).replacements.filter(x=>x.kind==='table');
     expect(tables.map(t=>t.tableOrdinal)).toEqual([0,1]);const context={workspace:'workspace',file:'file.md'};expect(tableSizeKey(context,tables[0])).not.toBe(tableSizeKey(context,tables[1]));expect(tableSizeKey({...context,file:'other.md'},tables[0])).not.toBe(tableSizeKey(context,tables[0]));
   });
+  it('records the exact Markdown bounds for one complete, segmented table',()=>{
+    const row=(text:string)=>`| ${text} | 乙 |`;
+    const tableText=[row('甲'), '| --- | --- |',...Array.from({length:44},(_,index)=>row('数据'+index))].join('\n');
+    const doc='前文\n\n'+tableText+'\n\n另外一张表\n\n'+tableText+'\n\n后文';
+    const state=EditorState.create({doc,extensions:markdownDisplayExtensions});
+    const [first,second]=previewPlan(state).replacements.filter(item=>item.kind==='table');
+    expect(tableSegments(second,state.doc).length).toBeGreaterThan(1);
+    const selected=state.update({selection:{anchor:second.from,head:second.to},userEvent:selectTableSource}).state;
+    expect(selected.sliceDoc(selected.selection.main.from,selected.selection.main.to)).toBe(tableText);
+    expect(selected.doc).toBe(state.doc);
+    expect(isTableSourceSelected(selected,first)).toBe(false);
+    expect(isTableSourceSelected(selected,second)).toBe(true);
+    const moved=selected.update({selection:{anchor:first.from}}).state;
+    expect(isTableSourceSelected(moved,second)).toBe(false);
+  });
   it('updates table widget marks when annotation effects change',()=>{
     const doc='| A |\n| --- |',state=EditorState.create({doc,extensions:[annotationHighlights,markdownDisplayExtensions]});const updated=state.update({effects:setAnnotationMarks.of([{id:'id-1',from:2,to:3,note:'note'}])}).state;let marks:unknown;updated.field(markdownPreview).between(0,doc.length,(_from,_to,decoration)=>{const widget=decoration.spec.widget;if(widget?.constructor.name==='TableWidget')marks=(widget as unknown as {marks:unknown}).marks;});expect(marks).toEqual([{id:'id-1',from:2,to:3,note:'note'}]);
   });
   it('locates padded missing cells at the end of their own row',()=>{
     const doc='| A | B | C |\n| --- | --- | --- |\n| x |';const table=previewPlan(EditorState.create({doc})).replacements.find(x=>x.kind==='table')!;expect(table.rows![1]).toHaveLength(3);expect(table.rows![1][1].virtual).toBe(1);expect(table.rows![1][1].from).toBe(doc.length);
+  });
+});
+
+describe('automatic table widths',()=>{
+  const longStatus='已完成旧版及 WPF 预检，样本待制作';
+  const row=(cells:string[])=>'| '+cells.join(' | ')+' |';
+  function parsedTable(headers:string[],data:string[][]){
+    const doc=[row(headers),row(headers.map(()=> '---')),...data.map(row)].join('\n');
+    const state=EditorState.create({doc});
+    const table=previewPlan(state).replacements.find(item=>item.kind==='table')!;
+    return {table,doc:state.doc};
+  }
+  it.each([2,3,4])('caps a single long status in a table with %s data rows',count=>{
+    const data=[[longStatus],...Array.from({length:count-1},()=>['待执行'])];
+    expect(defaultTableWidths(parsedTable(['状态'],data).table)).toEqual([8]);
+  });
+  it('keeps the header contribution bounded and allows a sole populated value to guide a column',()=>{
+    const headers=['编号','用于查看跨分栏滚动对齐和显示模式的很长说明标题',''];
+    expect(defaultTableWidths(parsedTable(headers,[]).table)).toEqual([6,12,6]);
+    const {table}=parsedTable(headers,[['R1'],['R2','','此处有较长的可用说明文字需要保留其阅读空间']]);
+    expect(defaultTableWidths(table)).toEqual([6,12,20]);
+  });
+  it('keeps common prose wide and shares narrow status widths across table segments',()=>{
+    const headers=['编号','任务','前置','承办人','状态','验收条件'];
+    const data=Array.from({length:225},(_,index)=>[
+      'R'+index,'核对旧版窗口布局及快捷操作的恢复流程','-','甲',
+      index===0||index===224?longStatus:'待执行','在不同宽度和显示模式下确认文本与界面操作的表现',
+    ]);
+    const {table,doc}=parsedTable(headers,data);
+    expect(tableSegments(table,doc).length).toBeGreaterThan(1);
+    const widths=defaultTableWidths(table);
+    expect(widths).toEqual([6,20,6,6,8,20]);
+    expect(defaultTableWidths(table)).toBe(widths);
   });
 });
 

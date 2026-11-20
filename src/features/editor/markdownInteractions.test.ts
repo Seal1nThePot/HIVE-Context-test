@@ -11,8 +11,12 @@ function task(state:EditorState){
 }
 function fixture(initial:EditorState){
   const listeners:Record<string,(event:any)=>void>={};
-  const element:any={setAttribute(){},addEventListener(name:string,fn:any){listeners[name]=fn;}};
-  const view:any={state:initial,dom:{ownerDocument:{createElement:()=>element}},scrollSnapshot:()=>[],dispatch(spec:any){view.state=view.state.update(spec).state;}};
+  const element={setAttribute(){},append(){},addEventListener(name:string,fn:any){listeners[name]=fn;}};
+  const ownerDocument={
+    createElement:()=>element,
+    createElementNS():object{return {ownerDocument,setAttribute(){},removeAttribute(){},replaceChildren(){}};},
+  };
+  const view:any={state:initial,dom:{ownerDocument},scrollSnapshot:()=>[],dispatch(spec:any){view.state=view.state.update(spec).state;}};
   const elementFor=()=>task(view.state).toDOM(view);
   const click=()=>{elementFor();listeners.click({preventDefault(){},stopPropagation(){}});};
   return {view,click};

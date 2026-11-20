@@ -92,6 +92,10 @@ export async function generateWriting(context: GenerationContext, options?: Gene
         (requestMode !== 'discuss' && (!v || !requestDisk)) ||
         (!submitted && !prompt.trim() && !options?.allowEmptyPrompt))
         return;
+    if(requestMode!=='discuss'&&v?.state.readOnly){
+        setError('当前正文只读，请切换到可编辑的显示模式。');
+        return;
+    }
     if (proposal.current && requestMode !== "discuss") {
         setError("请先采纳或放弃当前建议；需要调整时点击「继续调整」。");
         return;
@@ -270,6 +274,8 @@ export async function generateWriting(context: GenerationContext, options?: Gene
         const latest = requestAnchor.current;
         if (!latest || !v || v!==view.current || requestSessionId!==activeSession.current || latest.file !== disk.current?.path)
             return;
+        if(v.state.readOnly)
+            throw new Error('当前正文只读，请切换到可编辑的显示模式后重新生成。');
         const now = v.state.doc.toString();
         let text = result.text;
         if (requestMode !== "edit") {

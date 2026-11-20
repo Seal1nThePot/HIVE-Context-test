@@ -62,12 +62,12 @@ describe('nearby panel icons',()=>{
     next=openWorkspacePanel(next,'conversation',rect);next=collapseAutoHidePanel(next,'conversation');
     expect(next.autoHideActive).toBeNull();expect(next.minimized).toContain('conversation');expect(next.autoHide?.conversation.rect).toEqual(rect);expect(next.restore.conversation).toEqual(anchor);
   });
-  it('switches popups while retaining icons on both edges',()=>{
+  it('leaves the AI panel open when expanding another shelf panel',()=>{
     const right=make(),leftRect=measureDockTree(right.layout.tree,bounds).panels.files;
     let next=hideWorkspacePanel(right.layout,'conversation',right.rect,true,right.placement);
     next=hideWorkspacePanel(next,'files',leftRect,true,panelAutoHidePlacement(leftRect,bounds,true));
     next=openWorkspacePanel(next,'conversation',right.rect);next=openWorkspacePanel(next,'files',leftRect);
-    expect(next.autoHideActive).toBe('files');expect(next.minimized).toContain('conversation');expect(Object.keys(next.autoHide||{})).toEqual(['conversation','files']);
+    expect(next.autoHideActive).toBe('files');expect(next.open).toContain('conversation');expect(next.minimized).not.toContain('conversation');expect(Object.keys(next.autoHide||{})).toEqual(['conversation','files']);
   });
   it('removes the icon when the panel is explicitly placed in a new dock column',()=>{
     const {layout,rect,placement}=make();let next=hideWorkspacePanel(layout,'conversation',rect,true,placement);next=openWorkspacePanel(next,'conversation',rect);

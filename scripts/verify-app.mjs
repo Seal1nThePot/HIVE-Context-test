@@ -22,9 +22,78 @@ async function worker(){
       await wait(()=>get('.explorer-row[data-path="整合验收.md"]'),'file explorer');
       check('file tree initially collapses nested folders',!get('.explorer-row[data-path="章节/一.md"]'));
       check('permanent batch action bar is absent',!get('.explorer-selection'));
+      get('.explorer-row[data-path="编辑显示验收.md"]').click();
+      await wait(()=>get('.active-editor .cm-format-highlight'),'editor display fixture');
+      const fontGroup=get('.home-ribbon [data-ribbon-group="字体"]');
+      const fontButtons=[...fontGroup.querySelectorAll('.ribbon-tool-trigger > button')];
+      const inlineCode=fontGroup.querySelector('[aria-label="行内代码"]');
+      const settingsRoot=document.documentElement.style;
+      const priorScale=settingsRoot.getPropertyValue('--ui-scale');
+      try{
+        for(const scale of ['1','1.5']){
+          settingsRoot.setProperty('--ui-scale',scale);
+          const box=fontGroup.closest('.ribbon-body').getBoundingClientRect();
+          const rows=fontButtons.map(button=>button.getBoundingClientRect());
+          const hit=inlineCode.getBoundingClientRect();
+          check('font ribbon keeps all six commands visible at scale '+scale,
+            rows.length===6&&rows.every(row=>Math.abs(row.top-rows[0].top)<1&&row.bottom<=box.bottom)&&inlineCode.contains(document.elementFromPoint(hit.x+hit.width/2,hit.y+hit.height/2)));
+        }
+      }finally{settingsRoot.setProperty('--ui-scale',priorScale);}
+      const fixtureEditor=get('.active-editor .split-main .cm-content').cmTile.root.view;
+      const codeLines=()=>[...document.querySelectorAll('.active-editor .cm-line.cm-preview-code-line')];
+      check('hidden code fences leave a framed code body',codeLines().length===3
+        &&getComputedStyle(codeLines()[0]).borderTopLeftRadius==='5px'
+        &&getComputedStyle(codeLines().at(-1)).borderBottomLeftRadius==='5px'
+        &&getComputedStyle(codeLines()[1]).boxShadow!=='none');
+      const insideCode=fixtureEditor.state.sliceDoc().indexOf('log 1');
+      fixtureEditor.focus();
+      fixtureEditor.dispatch({selection:{anchor:insideCode+1},userEvent:'select.widget'});
+      check('both visible fences join the same code frame',
+        codeLines().length===5&&codeLines()[0].classList.contains('cm-preview-code-opening')
+        &&codeLines().at(-1).classList.contains('cm-preview-code-closing')
+        &&getComputedStyle(codeLines()[0]).borderTopLeftRadius==='5px'
+        &&getComputedStyle(codeLines()[1]).borderTopLeftRadius==='0px'
+        &&getComputedStyle(codeLines().at(-1)).borderBottomLeftRadius==='5px',
+        codeLines().map(line=>[line.textContent,line.className,getComputedStyle(line).borderRadius]));
+      get('.home-ribbon [aria-label="居中"]').click();
+      await wait(()=>get('.error-toast'),'formatting error toast');
+      const errorToast=get('.error-toast'),toastStart=performance.now();
+      check('editor error toast has no close button',errorToast.textContent.includes('代码区域')&&!errorToast.querySelector('button'));
+      await wait(()=>!errorToast.isConnected,'automatic error toast dismissal');
+      check('editor error toast disappears after about two seconds',performance.now()-toastStart>=1600&&performance.now()-toastStart<2800);
+      const enter=()=>fixtureEditor.contentDOM.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true,cancelable:true}));
+      const listStart=fixtureEditor.state.doc.length;
+      for(const [marker,expected] of [['-','-\\n'],['1. ','1. \\n'],['1. 已有内容','1. 已有内容\\n2. ']]){
+        fixtureEditor.dispatch({changes:{from:listStart,to:fixtureEditor.state.doc.length,insert:'\\n\\n'+marker},selection:{anchor:listStart+2+marker.length},userEvent:'input.type'});
+        enter();
+        const actual=fixtureEditor.state.sliceDoc(listStart+2);
+        check('Enter retains or continues Markdown list marker '+marker,actual===expected,{actual,expected});
+      }
+      fixtureEditor.dispatch({changes:{from:listStart,to:fixtureEditor.state.doc.length,insert:'\\n\\n'},
+        selection:{anchor:listStart+2},userEvent:'select.widget'});
+      const tab=label=>[...document.querySelectorAll('.ribbon-tabs [role="tab"]')].find(button=>button.textContent===label);
+      tab('插入').click();
+      await wait(()=>get('.ribbon-body [aria-label="折叠块"]'),'details insertion command');
+      get('.ribbon-body [aria-label="折叠块"]').click();
+      const detailsToggle=()=>get('.active-editor .cm-preview-details-toggle');
+      await wait(()=>detailsToggle()?.dataset.detailsAction==='收起','details control while the title is being edited');
+      check('inserted details have a title hint and a visible collapse button',
+        detailsToggle().textContent==='折叠块'&&get('.cm-preview-details-hint')?.textContent==='编辑下方标题');
+      const summaryStart=fixtureEditor.state.selection.main.from;
+      fixtureEditor.dispatch({changes:{from:summaryStart,insert:'自定义折叠块'},userEvent:'input.type'});
+      await wait(()=>detailsToggle()?.textContent==='自定义折叠块','live details title');
+      detailsToggle().click();
+      await wait(()=>detailsToggle()?.dataset.detailsAction==='展开','collapse details while editing the title');
+      check('collapse hides the details body',!fixtureEditor.contentDOM.textContent.includes('折叠块内容'));
+      detailsToggle().click();
+      await wait(()=>detailsToggle()?.dataset.detailsAction==='收起'&&fixtureEditor.contentDOM.textContent.includes('折叠块内容'),'reopen details');
+      tab('开始').click();
       get('.explorer-row[data-path="整合验收.md"]').click();await wait(()=>get('.cm-preview-image img')?.naturalWidth>0,'wiki image');
       check('wiki image decodes through packaged image API',get('.cm-preview-image img').naturalWidth>0);
-      await wait(()=>get('.cm-preview-task'),'task');get('.cm-preview-task').click();await wait(()=>get('.cm-preview-task')?.getAttribute('aria-checked')==='true','task toggle');check('task toggles in integrated app',true);
+      await wait(()=>get('.cm-preview-task'),'task');
+      const task=get('.cm-preview-task');
+      check('task box uses the document text color',getComputedStyle(task).color===getComputedStyle(task.closest('.cm-content')).color);
+      task.click();await wait(()=>get('.cm-preview-task')?.getAttribute('aria-checked')==='true','task toggle');check('task toggles in integrated app',true);
       const mode=async text=>{get('[aria-label="正文 1显示模式"]').click();await wait(()=>get('.display-mode-menu'),'mode menu');[...document.querySelectorAll('.display-mode-menu button')].find(b=>b.textContent.includes(text)).click();await pause();};
       await mode('代码模式');await wait(()=>get('.document-pane .cm-editor[data-display-mode=source]'),'code mode');
       const editor=()=>get('.document-pane .split-main .cm-editor');
@@ -32,19 +101,44 @@ async function worker(){
       check('code mode shows original Markdown',editor().querySelector('.cm-content').textContent.includes('![[示例 图.png]]'));
       await mode('左右分栏');await wait(()=>get('.split-source .cm-content'),'source pane');await new Promise(r=>setTimeout(r,800));
       check('split source has line numbers and preview hides them',getComputedStyle(get('.split-source .cm-gutters')).display!=='none'&&getComputedStyle(get('.split-main .cm-gutters')).display==='none');
-      check('split projects actual visual breaks',get('.split-source').querySelectorAll('.cm-split-projected-break').length>0);
+      check('split source wraps independently of the preview',!get('.split-source .cm-split-projected-break'));
       const wordRect=(root,text)=>{const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);for(let node;node=walker.nextNode();){const at=node.textContent.indexOf(text);if(at>=0){const range=document.createRange();range.setStart(node,at);range.setEnd(node,at+text.length);return range.getClientRects()[0];}}return null;};
-      for(const text of ['整合验收','最终入口：']){const a=wordRect(get('.split-source .cm-content'),text),b=wordRect(get('.split-main .cm-content'),text);check('split character alignment '+text,!!a&&!!b&&Math.abs(a.top-b.top)<=3,{source:a?.top,preview:b?.top});}
-      check('source prose wraps at its own boundary in addition to projected breaks',getComputedStyle(get('.split-source .cm-content')).whiteSpace==='pre-wrap');
+      for(const text of ['整合验收','最终入口：']){const a=wordRect(get('.split-source .cm-content'),text),b=wordRect(get('.split-main .cm-content'),text);check('split paragraph start alignment '+text,!!a&&!!b&&Math.abs(a.top-b.top)<=3,{source:a?.top,preview:b?.top});}
+      check('source prose wraps at its own boundary',getComputedStyle(get('.split-source .cm-content')).whiteSpace==='pre-wrap');
       const sourceBounds=get('.split-source .cm-scroller').getBoundingClientRect();let sourceRight=0;
       const sourceText=document.createTreeWalker(get('.split-source .cm-content'),NodeFilter.SHOW_TEXT);
       for(let node;node=sourceText.nextNode();){if(node.parentElement?.closest('.cm-code-nowrap'))continue;const range=document.createRange();range.selectNodeContents(node);for(const rect of range.getClientRects())sourceRight=Math.max(sourceRight,rect.right);}
       check('source prose remains inside its split pane',sourceRight<=sourceBounds.right+1,{sourceRight,paneRight:sourceBounds.right});
       const table=()=>get('.split-main [data-table-widget]');await wait(()=>table()?.querySelector('[data-table-action="column-after"]'),'table actions');table().querySelector('textarea[data-row="1"][data-col="0"]').focus();table().querySelector('[data-table-action="column-after"]').click();await pause();check('table quick insert renders three columns',table().querySelectorAll('th').length===3);
       const editableCell=table().querySelector('[data-cell="1:0"]');editableCell.querySelector('.cm-table-cell-preview').dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));await pause();const input=editableCell.querySelector('textarea');check('table preview enters source editing on double click',!input.hidden);Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'整合联动内容');input.dispatchEvent(new Event('input',{bubbles:true}));await pause();check('live table edit updates source',get('.split-source .cm-content').textContent.includes('整合联动内容'));input.blur();input.dispatchEvent(new FocusEvent('blur'));await pause();check('table returns to rendered cell on synthetic blur',!table().querySelector('[data-cell="1:0"] .cm-table-cell-preview').hidden);
-      get('[aria-label="设置"]').click();await wait(()=>get('.settings-page'),'settings');[...document.querySelectorAll('[aria-label="设置分类"] button')].find(b=>b.textContent==='外观').click();await wait(()=>get('.editor-color-settings'),'editor colors');
-      check('editor page colors and alpha controls are integrated',get('.editor-color-settings').querySelectorAll('input[type=color]').length===15&&get('.editor-color-settings').querySelectorAll('input[type=range]').length===8);
+      get('[aria-label="设置"]').click();
+      await wait(()=>get('.settings-page'),'settings');
+      [...document.querySelectorAll('[aria-label="设置分类"] button')].find(button=>button.textContent==='外观').click();
+      await wait(()=>get('.theme-current-scheme'),'current color scheme');
+      const currentScheme=get('.theme-current-scheme'),schemeName=currentScheme.textContent;
+      currentScheme.textContent='较长的主题方案名称'.repeat(14);
+      try{
+        check('a long scheme name can use its whole row and wrap',currentScheme.clientWidth>=currentScheme.parentElement.clientWidth-1&&currentScheme.scrollWidth<=currentScheme.clientWidth+1&&getComputedStyle(currentScheme).textAlign==='right');
+      }finally{currentScheme.textContent=schemeName;}
+      const customColors=()=>[...document.querySelectorAll('.theme-settings button')]
+        .find(button=>button.textContent.includes('进入自定义配色'));
+      await wait(customColors,'custom colors entry');
+      customColors().click();
+      const editorColors=()=>get('.theme-custom-colors .editor-color-settings');
+      await wait(()=>get('dialog.child-window-custom-color-settings[open]')&&editorColors(),'custom color child dialog');
+      check('appearance settings remain behind the custom color dialog',!!get('.theme-current-scheme'));
+      const editorColorGroup=editorColors().closest('details');
+      editorColorGroup.querySelector('summary').click();
+      await wait(()=>editorColorGroup.open,'expanded editor colors');
+      check('editor page colors and alpha controls are integrated',get('.editor-color-settings').querySelectorAll('input[type=color]').length===16&&get('.editor-color-settings').querySelectorAll('input[type=range]').length===9);
+      const highlight=get('[aria-label="正文高亮颜色值"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(highlight,'#bb6d3277');highlight.dispatchEvent(new Event('input',{bubbles:true}));
+      await wait(()=>document.documentElement.style.getPropertyValue('--hive-editor-text-highlight-background')==='#bb6d3277','apply scheme-specific text highlight color');
+      check('text highlighting has its own theme color',document.documentElement.style.getPropertyValue('--hive-editor-selection-background')!=='#bb6d3277');
       const field=get('[aria-label="选中文字高亮颜色值"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(field,'#b374d977');field.dispatchEvent(new Event('input',{bubbles:true}));await pause();check('editor highlight changes independently',document.documentElement.style.getPropertyValue('--hive-editor-selection-background')==='#b374d977');
+      get('[aria-label="关闭自定义配色"]').click();
+      await wait(()=>!get('dialog.child-window-custom-color-settings'),'close custom color child');
+      check('closing custom colors returns to the appearance settings',!!get('.theme-current-scheme'));
       get('[aria-label="关闭设置"]').click();await pause();
       get('[aria-label="仓库管理"]').click();await wait(()=>get('.repository-card'),'repository manager');check('shared repository manager is integrated',!!get('.repository-current')&&!!get('.repository-rename')&&!get('.repository-auto-save'));
       [...get('.repository-card-actions').querySelectorAll('button')].find(b=>b.textContent.includes('返回写作')).click();await pause();
@@ -145,6 +239,8 @@ else{
     await fs.writeFile(path.join(docs,'删除当前.md'),'删除当前唯一内容。');await fs.writeFile(path.join(docs,'删除其他.md'),'删除其他唯一内容。');await fs.mkdir(path.join(docs,'删除文件夹'));await fs.writeFile(path.join(docs,'删除文件夹/子稿.md'),'后代删除唯一内容。');
     await fs.writeFile(path.join(docs,'对话甲.md'),'# 对话甲\n\n甲稿原句。');await fs.writeFile(path.join(docs,'对话乙.md'),'# 对话乙\n\n乙稿原句。');
     await fs.writeFile(path.join(docs,'示例 图.png'),fixtureImage);
+    const fence=String.fromCharCode(96).repeat(3);
+    await fs.writeFile(path.join(docs,'编辑显示验收.md'),['正文 <mark>主题高亮</mark>。','',fence+'csharp','log 1','','log 2',fence,'','代码后正文。'].join('\n'));
     const paragraph='这是用于整合验证的中文与 English mixed text，数字 12345、标点和很长的网址 https://example.org/research/2026/notes?language=English&version=12345 都保持原文。';
     await fs.writeFile(path.join(docs,'整合验收.md'),'# 整合验收\n\n> **最终入口：** '+paragraph.repeat(2)+'\n\n![[示例 图.png]]\n\n- [ ] 整合待办\n\n| 标题甲 | 标题乙 |\n| :--- | ---: |\n| 内容甲 | 内容乙 |\n\n这是本轮合成资料，不含用户文稿。\n');
     const appRoot=packaged?path.join(bundle,'win-unpacked'):null,backend=appRoot?path.join(appRoot,'resources/app.asar/server/index.mjs'):path.join(project,'server/index.mjs');

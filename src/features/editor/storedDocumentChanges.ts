@@ -1,5 +1,5 @@
 import type {RefObject} from 'react';
-import type {EditorState,Transaction} from '@codemirror/state';
+import type {Transaction} from '@codemirror/state';
 import {headings,mapAnchor,type Anchor,type Proposal,type UndoEdit} from '../../shared/core';
 import type {EditorSession} from './editorSessionTypes';
 
@@ -11,9 +11,8 @@ export function mapStoredSessionContext(context:EditorSession['context'],transac
 
 /** App retains these owners while its EditorView sleeps. Apply the real transaction,
  * including overlap invalidation, rather than waiting for a nonexistent ViewUpdate. */
-export function applyStoredDocumentChange(owners:{editorState:RefObject<EditorState|null>;proposal:RefObject<Proposal|null>;requestAnchor:RefObject<Anchor|null>;undo:RefObject<UndoEdit[]>},transaction:Transaction){
+export function applyStoredDocumentChange(owners:{proposal:RefObject<Proposal|null>;requestAnchor:RefObject<Anchor|null>;undo:RefObject<UndoEdit[]>},transaction:Transaction){
   if(!transaction.docChanged)return null;
-  owners.editorState.current=transaction.state;
   if(owners.proposal.current)owners.proposal.current=mapAnchor(owners.proposal.current,transaction.changes);
   if(owners.requestAnchor.current)owners.requestAnchor.current=mapAnchor(owners.requestAnchor.current,transaction.changes);
   owners.undo.current=owners.undo.current.map(anchor=>mapAnchor(anchor,transaction.changes));

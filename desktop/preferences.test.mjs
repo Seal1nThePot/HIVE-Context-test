@@ -20,6 +20,14 @@ describe('desktop preference persistence', () => {
     const value=JSON.stringify({version:1,preset:'novel',maxWidth:760,lineHeight:2.05,paragraphSpacing:.35,firstLineIndent:true}),dir=await mkdtemp(path.join(os.tmpdir(),'hive-typography-'));
     try{const file=path.join(dir,'prefs.json');await prefs.preferenceStore(file).save({'hive.appearance.v1':'{"version":1,"editorSize":18}','hive.typography.v1':value,'hive.theme.v1':value,'hive.frontmatter-visible.v1':'false'});const saved=await prefs.preferenceStore(file).read();expect(saved['hive.typography.v1']).toBe(value);expect(saved['hive.theme.v1']).toBe(value);expect(saved['hive.frontmatter-visible.v1']).toBe('false');}finally{await rm(dir,{recursive:true,force:true});}
   });
+  it('persists every supported reasoning level through the desktop preference allowlist',()=>{
+    const key='hive.reasoning.["service","model"]';
+    const levels=['default','off','minimal','low','medium','high','xhigh','max'];
+    const preload=readFileSync(new URL('./preload.cjs',import.meta.url),'utf8');
+    const included=preload.match(/(\['default'[^\n]+?\])\.includes\(value\)/)?.[1];
+    expect(included).toBe('['+levels.map(level=>"'"+level+"'").join(',')+']');
+    for(const level of levels)expect(prefs.normalize({[key]:level})[key]).toBe(level);
+  });
   it('atomically saves changed snapshots, preserves deletions and skips repeated snapshots', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(),'hive-prefs-'));
     try {

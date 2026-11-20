@@ -6,6 +6,7 @@ export type WritingNode = {
   level: number;
   targetHeading: string | null;
 };
+export type WritingOutlineSnapshot = {revision:number;initialized:boolean;nodes:WritingNode[]};
 export function headingKey(items: Heading[], item: Heading) {
   const ancestors: Heading[] = [];
   for (const node of items) {

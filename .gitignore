@@ -22,6 +22,7 @@ documents/
 
 # Local verification, archives and publishing workspaces
 .test-tmp/
+.vitest/
 .backups/
 .publish/
 performance/
@@ -32,12 +33,21 @@ test-results/
 __pycache__/
 *.pyc
 
-# Publish only documentation imported by the application
+# Track current contracts and documentation imported by the application
 /docs/*
 !/docs/help.md
 !/docs/CHANGELOG.md
+!/docs/backend-contract.md
+!/docs/panel-lifecycle.md
+!/docs/architecture.md
+!/docs/current-features.md
+!/docs/frontend-map.md
+!/docs/runbook.md
+!/docs/README.md
+!/docs/build-info.md
+!/docs/packaging.md
+!/docs/workspace-ui.md
 /agent.md
-/AGENTS.md
 /HANDOFF.md
 /newhandoff.md
 /VALIDATION.md

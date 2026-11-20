@@ -2,14 +2,14 @@ import {describe,it,expect,vi} from 'vitest';
 import {createPanelReadyHandler} from './panelReady.cjs';
 import {createPanelGeometry} from './panelGeometry.cjs';
 
-function fixture({authorized=true,registered=true,throwOnShow=false}={}){
+function fixture({authorized=true,registered=true,throwOnShow=false,canPresent}={}){
   const id='native-group:test',replies=[];
   // Electron consumes its sync reply callback on the first setter invocation.
   let firstReply;const event={};Object.defineProperty(event,'returnValue',{set(value){replies.push(value);if(replies.length===1)firstReply=value;}});
   const child={setContentBounds:vi.fn(),getContentBounds:()=>({x:0,y:0,width:400,height:300}),showInactive:vi.fn(),show:vi.fn(()=>{if(throwOnShow)throw new Error('show failed');}),getBounds:()=>({x:0,y:0,width:400,height:300})};
   const readyPanelIds=new Set(),sizeTargets=new WeakMap(),onRejected=vi.fn(),onAccepted=vi.fn();
   const geometry=createPanelGeometry({mainWindow:()=>({getContentBounds:()=>({x:100,y:80,width:1200,height:800}),webContents:{getZoomFactor:()=>1}})});
-  const handler=createPanelReadyHandler({isMainOrigin:()=>authorized,panelWindows:new Map(registered?[[id,child]]:[]),geometry,readyPanelIds,sizeTargets,onRejected,onAccepted});
+  const handler=createPanelReadyHandler({isMainOrigin:()=>authorized,panelWindows:new Map(registered?[[id,child]]:[]),geometry,readyPanelIds,sizeTargets,canPresent,onRejected,onAccepted});
   return {id,event,replies,reply:()=>firstReply,child,handler,readyPanelIds,sizeTargets,onRejected,onAccepted};
 }
 describe('panel-ready single synchronous reply',()=>{
@@ -17,6 +17,14 @@ describe('panel-ready single synchronous reply',()=>{
     const f=fixture();f.handler(f.event,f.id,{x:-400,y:200,width:500,height:350},true);
     expect(f.reply()).toBe(true);expect(f.replies).toEqual([true]);expect(f.child.setContentBounds).toHaveBeenCalledWith({x:-300,y:280,width:500,height:350});
     expect(f.child.showInactive).toHaveBeenCalledOnce();expect(f.readyPanelIds.has(f.id)).toBe(true);expect(f.onRejected).not.toHaveBeenCalled();
+  });
+  it('acknowledges readiness for a host that must wait for the themed first frame',()=>{
+    const f=fixture({canPresent:()=>false});
+    f.handler(f.event,f.id);
+    expect(f.replies).toEqual([true]);
+    expect(f.readyPanelIds.has(f.id)).toBe(true);
+    expect(f.child.show).not.toHaveBeenCalled();
+    expect(f.child.showInactive).not.toHaveBeenCalled();
   });
   it.each([
     [{authorized:false},'origin-rejected',undefined],

@@ -1,5 +1,5 @@
 /** A synchronous IPC reply is sent by the setter, so assign returnValue once. */
-function createPanelReadyHandler({isMainOrigin,panelWindows,geometry,readyPanelIds,sizeTargets,onAccepted=()=>{},onRejected=()=>{}}){
+function createPanelReadyHandler({isMainOrigin,panelWindows,geometry,readyPanelIds,sizeTargets,canPresent=()=>true,onAccepted=()=>{},onRejected=()=>{}}){
   return (event,id,placement,inactive)=>{
     let accepted=false,reason='origin-rejected',error,child,addedReady=false;
     try{
@@ -14,7 +14,9 @@ function createPanelReadyHandler({isMainOrigin,panelWindows,geometry,readyPanelI
           }
           if(!reason){
             addedReady=!readyPanelIds.has(id);readyPanelIds.add(id);
-            if(inactive===true)child.showInactive();else child.show();
+            if(canPresent(id)){
+              if(inactive===true)child.showInactive();else child.show();
+            }
             if(!sizeTargets.has(child)){const {width,height}=child.getBounds();sizeTargets.set(child,{width,height});}
             accepted=true;
           }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Sparkles } from "lucide-react";
+import { Sparkles } from "../../shared/icons";
 export default function FloatingOrb({
   busy,
   onOpen,

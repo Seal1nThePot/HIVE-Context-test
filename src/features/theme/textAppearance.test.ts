@@ -22,8 +22,8 @@ describe('editable surface text',()=>{
       expect(values['--muted']).toBe('#654321');expect(values['--hive-document-text']).toBe('#102938');expect(values['--hive-ribbon-title-text']).toBe('#abcdef');expect(values['--hive-ribbon-content-text']).toBe('#fedcba');
     }
   });
-  it('renders editable color and HEX inputs for all five formerly automatic fields in the custom color page',()=>{
-    const html=renderToStaticMarkup(createElement(CustomColorSettings,{preferences:defaultTheme,onChange:()=>{},onBack:()=>{}}));
+  it('renders editable color and HEX inputs for all five formerly automatic fields in custom color settings',()=>{
+    const html=renderToStaticMarkup(createElement(CustomColorSettings,{preferences:defaultTheme,onChange:()=>{}}));
     for(const label of ['界面文字与图标','辅助文字','正文文字','编辑栏标题文字','编辑栏工具区图标与文字']){expect(html).toContain(`aria-label="${label}颜色选择"`);expect(html).toContain(`aria-label="${label}颜色值"`);}
     expect(html).not.toContain('自动 ·');expect(html).not.toContain('自动黑白');
   });

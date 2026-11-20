@@ -29,6 +29,18 @@ function connectionFixture(){
   return {...f,children,timeouts,open,panelReady};
 }
 describe('native host lifecycle without a browser',()=>{
+  it('reveals an existing tab when another panel opens it by name',()=>{
+    const {runtime,source}=fixture();
+    const focus=vi.fn();
+    Object.assign(window.hiveDesktop!,{windowCommand:focus});
+    runtime.open('b');
+    expect(runtime.registry.get('b')?.active).toBe('b');
+    expect(runtime.handles.get('a')?.active).toHaveBeenLastCalledWith(false);
+    expect(runtime.handles.get('b')?.active).toHaveBeenLastCalledWith(true);
+    expect(source.select).not.toHaveBeenCalled();
+    expect(focus).toHaveBeenCalledOnce();
+    expect(focus).toHaveBeenCalledWith('focus','native-group:independent');
+  });
   it('reads grouped host content geometry through the main bridge and saves it before return',()=>{
     const f=fixture(),rect={x:-320,y:140,width:480,height:360};f.panelRect.mockReturnValue(rect);
     expect(f.runtime.rect('b')).toEqual(rect);expect(f.panelRect).toHaveBeenLastCalledWith('native-group:independent');

@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import {catalogCapabilities, configurationLimit} from './model-capabilities.mjs';
 import {modelEndpoints} from './model-config.mjs';
 
@@ -77,9 +78,23 @@ function unsupportedCompletionLimit(error) {
 }
 
 export async function sendChatCompletion(route, payload, signal, outputLimit, request = fetch) {
-  const send = parameters => request(modelEndpoints(route.endpoint).chat, {
+  const endpoint = new URL(modelEndpoints(route.endpoint).chat);
+  const headers = {
+    ...upstreamHeaders(route.key), 'Content-Type': 'application/json',
+    Accept: payload.stream ? 'text/event-stream, application/json' : 'application/json',
+  };
+  if (endpoint.origin === 'https://opencode.ai' &&
+      /^\/(?:zen\/go\/v1|inference\/go\/openai\/v1)\/chat\/completions$/.test(endpoint.pathname)) {
+    // Go uses this as a routing/cache key, so use a conversation UUID rather
+    // than a repository, file, or account identifier.
+    const suppliedId = route.sessionId;
+    headers['User-Agent'] = 'HIVE-markdown-editor';
+    headers['x-opencode-session'] = typeof suppliedId === 'string' &&
+      /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(suppliedId) ? suppliedId : randomUUID();
+  }
+  const send = parameters => request(endpoint.href, {
     method: 'POST',
-    headers: {...upstreamHeaders(route.key), 'Content-Type': 'application/json', Accept: payload.stream ? 'text/event-stream, application/json' : 'application/json'},
+    headers,
     body: JSON.stringify({...payload, ...parameters}),
     redirect: 'manual',
     signal,

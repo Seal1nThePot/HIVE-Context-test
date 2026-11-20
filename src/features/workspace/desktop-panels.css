@@ -8,10 +8,11 @@
 .desktop-panel-window:not(.desktop-toolbar-window) .desktop-panel-surface > .workspace-panel { border:1px solid var(--hive-surface-border)!important; }
 .desktop-panel-window .desktop-panel-surface > .workspace-panel > .panel-drag-header { display:flex!important; cursor:default!important; }
 .desktop-panel-window .desktop-panel-surface[data-native-active="false"] > .workspace-panel { display:none!important; }
-.desktop-panel-window .desktop-panel-surface[data-native-active] > .workspace-panel > .panel-drag-header > b,
-.desktop-panel-window .desktop-panel-surface[data-native-active] > .workspace-panel > .panel-drag-header > .document-tab { visibility:hidden; }
-.native-group-tabs { position:fixed;left:4px;right:110px;top:0;height:calc(28px * var(--ui-scale,1));display:flex;align-items:stretch;gap:2px;z-index:20;overflow:hidden; }
-.native-group-tabs > button { display:flex;align-items:center;gap:7px;min-width:0;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:transparent;border:0;border-bottom:2px solid transparent;color:var(--hive-header-text);padding:2px 10px;font:inherit;cursor:pointer; }
+.desktop-panel-window .desktop-panel-surface[data-native-active] > .workspace-panel > .panel-drag-header { padding-inline-start:var(--group-tabs-width); }
+.desktop-panel-window .desktop-panel-surface[data-native-active] > .workspace-panel > .panel-drag-header > :is(b,.document-tab) { display:none; }
+.native-group-tabs { position:fixed;left:1px;top:1px;width:calc(var(--group-tabs-width) - 1px);height:calc(var(--panel-header-height) - 2px);display:flex;align-items:stretch;z-index:20;overflow:auto hidden;scrollbar-width:none; }
+.native-group-tabs > button { display:flex;align-items:center;gap:var(--panel-header-inset);flex:0 0 auto;min-width:0;max-width:100%;white-space:nowrap;background:var(--hive-header-bg);border:0;border-inline-end:1px solid var(--hive-panel-inner-border);border-bottom:2px solid transparent;color:var(--hive-header-text);padding:0 calc(10px * var(--ui-scale));cursor:pointer; }
+.native-group-tabs > button > span { overflow:hidden;text-overflow:ellipsis; }
 .native-group-tabs > button[aria-selected="true"] { background:var(--hive-raised-bg);color:var(--hive-raised-text);border-bottom-color:var(--hive-accent); }
 .desktop-panel-window .panel-resize { display:block!important;z-index:30; }
 .desktop-panel-window .panel-resize-n,.desktop-panel-window .panel-resize-s {height:4px;}

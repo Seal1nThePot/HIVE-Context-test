@@ -7,6 +7,7 @@ export type TextAnnotation = Anchor & {
   note: string;
   createdAt: string;
   respondedSignature?: string;
+  order?: number;
 };
 export type SubmittedAnnotation = Pick<
   TextAnnotation,
@@ -55,9 +56,27 @@ export function mergeAnnotationRecords(
       throw new Error(
         "同一条标注在其他窗口也被修改，已保留当前备注。请导出备份后核对。",
       );
-    if (chosen) result.push({ ...chosen });
+    if(chosen){
+      const previous=before?.order,localOrder=left?.order,remoteOrder=right?.order;
+      if(left&&right&&localOrder!==remoteOrder&&localOrder!==previous&&remoteOrder!==previous){
+        throw new Error('其他窗口也调整了标注排序。当前列表仍然保留，请重试或先导出备份。');
+      }
+      const order=left&&right?(localOrder===previous?remoteOrder:localOrder):chosen.order;
+      result.push(order===undefined?{...chosen}:{...chosen,order});
+    }
   }
   return result.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+export function orderedAnnotations(items:TextAnnotation[]){
+  return items.slice().sort((a,b)=>(a.order??Number.MAX_SAFE_INTEGER)-(b.order??Number.MAX_SAFE_INTEGER));
+}
+export function reorderAnnotations(items:TextAnnotation[],id:string,before:string|null){
+  const ordered=orderedAnnotations(items),item=ordered.find(entry=>entry.id===id);
+  if(!item||id===before||before&&!ordered.some(entry=>entry.id===before))return ordered;
+  const visible=ordered.filter(entry=>entry.id!==id);
+  visible.splice(before===null?visible.length:visible.findIndex(entry=>entry.id===before),0,item);
+  if(visible.every((entry,index)=>entry.id===ordered[index].id))return ordered;
+  return visible.map((entry,order)=>entry.order===order?entry:{...entry,order});
 }
 export function subtractAnnotationRanges(items: TextAnnotation[], ranges: {from:number;to:number}[], text:string): TextAnnotation[] {
   return items.flatMap(item => {

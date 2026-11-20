@@ -16,8 +16,8 @@ async function worker(base,temporary) {
   const errors=[];window.webContents.on('console-message',event=>{if(event.level==='error'||event.level===3)errors.push(event.message);});
   try {
     await window.loadURL(base);
-    const blue=JSON.parse(await fs.readFile(path.join(project,'templates/mediterranean-blue/colors.json'),'utf8'));
-    const lightTheme={...blue,base:'white',colors:blue.colorProfiles.white,templateId:'mediterranean-blue'};
+    const blue=JSON.parse(await fs.readFile(path.join(project,'templates/claude-mediterranean-blue/colors.json'),'utf8'));
+    const lightTheme={...blue,base:'white',colors:blue.colorProfiles.white,templateId:'claude-mediterranean-blue'};
     await window.webContents.executeJavaScript(`localStorage.setItem('hive.theme.v1',${JSON.stringify(JSON.stringify(lightTheme))});`);
     const themed=new Promise(resolve=>window.webContents.once('did-finish-load',resolve));window.reload();await themed;
     // Keep browser-mode layout while exercising the desktop chooser result flow.
@@ -57,17 +57,17 @@ async function worker(base,temporary) {
       await wait(()=>cards().length===10,'initial repository cards');
       check('management is a separate workspace panel',!!get('[data-panel-id="repositories"] .repository-page')&&!get('.settings-page'));
       check('current repository cannot be removed',get('.repository-current .repository-order button:last-child').disabled);
-      check('duplicate add heading removed',!get('.repository-add > label'));
+      check('header contains total count and no duplicate list heading',get('.repository-count')?.textContent==='10'&&!get('.repository-page').textContent.includes('我的仓库'));
       check('auto save controls removed from repository panel',!get('.repository-autosave')&&!get('.repository-page [aria-label="自动保存文稿"]'));
-      check('add button works without a typed path',!get('.repository-add button').disabled&&get('#repository-root').readOnly);
+      check('add button works without a typed path',!get('.repository-add-button').disabled&&!get('#repository-root'));
       const initialAutoSave=(await info()).autoSave,initialRevision=(await info()).revision;
-      click('.repository-add button');await wait(()=>window.repositoryPickerCalls===1&&get('.repository-page').getAttribute('aria-busy')==='false','cancel chooser');
+      click('.repository-add-button');await wait(()=>window.repositoryPickerCalls===1&&get('.repository-page').getAttribute('aria-busy')==='false','cancel chooser');
       check('cancel leaves repository list and revision unchanged',cards().length===10&&(await info()).revision===initialRevision);
-      window.repositoryPickerResult=${JSON.stringify(extra)};click('.repository-add button');
+      window.repositoryPickerResult=${JSON.stringify(extra)};click('.repository-add-button');
       await wait(()=>cards().length===11&&!get('.repository-page').ariaBusy.includes('true'),'select and add repository');
-      check('selected folder is shown without manual entry',get('#repository-root').value===${JSON.stringify(extra)});
+      check('selected folder is shown without manual entry',cards().some(card=>card.querySelector('.repository-path')?.title===${JSON.stringify(extra)}));
       check('adding does not switch current repository',(await info()).root.endsWith('初始仓库'));
-      click('.repository-add button');await wait(()=>window.repositoryPickerCalls===3&&get('.repository-feedback')?.textContent.includes('已在列表')&&get('.repository-page').getAttribute('aria-busy')==='false','duplicate selection');
+      click('.repository-add-button');await wait(()=>window.repositoryPickerCalls===3&&get('.repository-feedback')?.textContent.includes('已在列表')&&get('.repository-page').getAttribute('aria-busy')==='false','duplicate selection');
       check('choosing an existing repository does not duplicate it',cards().length===11);
       const newCard=cards().at(-1);newCard.querySelector('.repository-order button').click();
       await wait(()=>cards().at(-2).querySelector('h3').textContent==='新项目','reorder');
@@ -75,7 +75,7 @@ async function worker(base,temporary) {
       input('.repository-search input','新项目');await wait(()=>cards().length===1,'search');
       check('search finds repository by name',cards()[0].querySelector('h3').textContent==='新项目');
       input('.repository-search input','');await wait(()=>cards().length===11,'clear search');
-      window.repositoryPickerResult=${JSON.stringify(missing)};click('.repository-add button');
+      window.repositoryPickerResult=${JSON.stringify(missing)};click('.repository-add-button');
       await wait(()=>get('.repository-error'),'invalid folder');check('invalid path keeps all repositories',cards().length===11);
       check('removing the switch preserves automatic save preference',(await info()).autoSave===initialAutoSave);
       const target=cards().find(card=>card.querySelector('h3').textContent==='新项目');target.querySelector('.repository-card-actions > button').click();
@@ -99,8 +99,8 @@ async function worker(base,temporary) {
       const page=get('.repository-page'),grid=get('.repository-grid');await new Promise(resolve=>setTimeout(resolve,120));page.scrollTop=0;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
       check('wide panel displays multiple columns',getComputedStyle(grid).gridTemplateColumns.split(' ').length>=2);
       check('no horizontal panel overflow',page.scrollWidth<=page.clientWidth+1);
-      const heading=get('.repository-heading').getBoundingClientRect(),add=get('.repository-add').getBoundingClientRect(),card=cards()[0].getBoundingClientRect();
-      check('add repository form is in the upper right',add.left>=heading.right&&add.top<heading.bottom);
+      const heading=get('.repository-heading').getBoundingClientRect(),add=get('.repository-add-button').getBoundingClientRect(),card=cards()[0].getBoundingClientRect();
+      check('add repository button is in the upper right',add.left>=heading.right&&add.top<heading.bottom);
       check('compact cards stay under 150px tall',card.height<150);
       check('repository icons use readable UI foreground',getComputedStyle(get('.repository-card-icon')).color===getComputedStyle(get('.repository-card h3')).color);
       check('icon strokes are clear',parseFloat(getComputedStyle(get('.repository-card-icon svg')).strokeWidth)>=2.2);

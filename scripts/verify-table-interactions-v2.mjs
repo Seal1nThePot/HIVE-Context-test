@@ -60,10 +60,25 @@ if(process.argv.includes('--worker')){
  await check('rowToLogicalSourceAlignment',()=>details.initialGeometry.rows.every(r=>r.source&&Math.abs(r.source.top-r.input.top)<2));
  await check('separatorHasOwnLogicalLine',()=>{const g=details.initialGeometry;return g.separator&&g.rows[0].input.bottom<=g.separator.top+2&&g.separator.bottom<=g.rows[1].top+2;});
  await check('sourceGutterDoesNotOcclude',()=>{const g=details.initialGeometry;return g.sourceLines.every(r=>!r.coords||r.coords.left>=g.gutterRight-1);});
- await check('sourceHorizontalScroll',async()=>{await mount('| '+('Header'.repeat(50))+' | B |\\n| --- | --- |\\n| x | y |');const s=t.source().scrollDOM;s.scrollLeft=150;s.dispatchEvent(new Event('scroll'));await wait();details.horizontal={scrollWidth:s.scrollWidth,clientWidth:s.clientWidth,scrollLeft:s.scrollLeft,gutter:t.geometry().gutter};return s.scrollWidth>s.clientWidth+100&&s.scrollLeft>100;});
+ // Table source wraps normally. Fenced code creates real horizontal overflow
+ // in the same source pane while the rendered table remains available to edit.
+ const fence=String.fromCharCode(96).repeat(3);
+ const horizontalSample='| '+('Header'.repeat(50))+' | B |\\n| --- | --- |\\n| x | y |\\n\\n'+fence+'text\\n'+('code-column '.repeat(160))+'END\\n'+fence;
+ function wrappedSourceHeader(){
+   const source=t.source(),node=source.domAtPos(source.state.doc.line(1).from).node;
+   const line=(node.nodeType===Node.TEXT_NODE?node.parentElement:node).closest('.cm-line');
+   if(!line)return false;
+   const tops=new Set(),walker=document.createTreeWalker(line,NodeFilter.SHOW_TEXT);
+   for(let text=walker.nextNode();text;text=walker.nextNode()){
+     const range=document.createRange();range.selectNodeContents(text);
+     for(const bounds of range.getClientRects())if(bounds.width>0)tops.add(Math.round(bounds.top));
+   }
+   return tops.size>1;
+ }
+ await check('sourceHorizontalScroll',async()=>{await mount(horizontalSample);const s=t.source().scrollDOM;s.scrollLeft=150;s.dispatchEvent(new Event('scroll'));await wait();details.horizontal={scrollWidth:s.scrollWidth,clientWidth:s.clientWidth,scrollLeft:s.scrollLeft,headerWraps:wrappedSourceHeader(),gutter:t.geometry().gutter};return details.horizontal.headerWraps&&s.scrollWidth>s.clientWidth+100&&s.scrollLeft>100;});
  await check('largeTableViewportAndGlobalRows',async()=>{await mount('| A | B | C |\\n| --- | --- | --- |\\n'+Array.from({length:150},(_,i)=>'| row'+i+' | b'+i+' | c'+i+' |').join('\\n'));const p=t.plan();main().dispatch({selection:{anchor:p.rows[70][0].from},scrollIntoView:true});await wait(900);details.largeGeometry=t.geometry();const input=cell(70,1);if(!input)return false;const before=doc();const b=button(70,2,'.cm-table-add-column');b?.click();await wait();const changed=t.plan().columns===4;return details.largeGeometry.rows.length>0&&changed&&t.undo()&&doc()===before;});
  await check('largeSourceLocateAndBidirectionalScroll',async()=>{await mount('| A | B | C |\\n| --- | --- | --- |\\n'+Array.from({length:150},(_,i)=>'| row'+i+' | b'+i+' | c'+i+' |').join('\\n'));const p=t.plan(),source=t.source();source.dispatch({selection:{anchor:p.rows[70][0].from},scrollIntoView:true});await wait(900);const collect=()=>{const g=t.geometry(),rows=g.rows.filter(r=>r.input.bottom>g.mainScroll.top&&r.input.top<g.mainScroll.bottom);return {sourceTop:source.scrollDOM.scrollTop,mainTop:main().scrollDOM.scrollTop,rows:rows.map(r=>({row:r.row,top:r.input.top,source:r.source?.top,delta:r.source?r.source.top-r.input.top:null}))}};details.largeScroll=[collect()];const located=visual(70,0)?.getBoundingClientRect(),pane=main().scrollDOM.getBoundingClientRect();details.locatedRow70=located&&{top:located.top,bottom:located.bottom,paneTop:pane.top,paneBottom:pane.bottom};checks.largeProgrammaticLocateTargetVisible=!!located&&located.top>=pane.top&&located.bottom<=pane.bottom;source.scrollDOM.scrollTop+=260;source.scrollDOM.dispatchEvent(new Event('scroll'));await wait(800);details.largeScroll.push(collect());main().scrollDOM.scrollTop+=240;main().scrollDOM.dispatchEvent(new Event('scroll'));await wait(800);details.largeScroll.push(collect());return details.largeScroll.every(g=>g.rows.length&&g.rows.every(r=>r.delta!==null&&Math.abs(r.delta)<2));});
- await check('horizontalEndFocusAndReturn',async()=>{await mount('| '+('Header'.repeat(50))+' | B |\\n| --- | --- |\\n| x | y |');const s=t.source().scrollDOM;s.scrollLeft=s.scrollWidth;s.dispatchEvent(new Event('scroll'));await wait();const end=s.scrollLeft;cell(1,0).focus();await wait();const afterFocus=s.scrollLeft;s.scrollLeft=0;s.dispatchEvent(new Event('scroll'));await wait();details.horizontalReturn={end,afterFocus,atStart:s.scrollLeft,geometry:t.geometry()};return end>100&&afterFocus===end&&s.scrollLeft===0;});
+ await check('horizontalEndFocusAndReturn',async()=>{await mount(horizontalSample);const s=t.source().scrollDOM;s.scrollLeft=s.scrollWidth;s.dispatchEvent(new Event('scroll'));await wait();const end=s.scrollLeft;const input=edit(1,0);await wait();const focused=!input.hidden&&input.ownerDocument.activeElement===input,afterFocus=s.scrollLeft;s.scrollLeft=0;s.dispatchEvent(new Event('scroll'));await wait();details.horizontalReturn={end,focused,afterFocus,atStart:s.scrollLeft,geometry:t.geometry()};return end>100&&focused&&afterFocus===end&&s.scrollLeft===0;});
  await mount();return {checks,details};
  })()`);
  const pause=ms=>new Promise(r=>setTimeout(r,ms));

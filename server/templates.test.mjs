@@ -4,14 +4,68 @@ import path from 'node:path';
 import os from 'node:os';
 import {EventEmitter} from 'node:events';
 import {fileURLToPath} from 'node:url';
+import {createHash} from 'node:crypto';
 import {templateStore,validateTemplateColors} from './templates.mjs';
 
 const sourceFixture=fileURLToPath(new URL('../templates/claude-olive-gold',import.meta.url));
+const templateId='claude-olive-gold';
+const icon=n=>({viewBox:'0 0 24 24',shapes:[{tag:'path',attrs:{d:`M1 1h${n}`}}]});
+const iconFile=(root,id='')=>path.join(root,id,'icons.json');
+const writeIcons=(file,icons)=>fs.writeFile(file,JSON.stringify({version:1,icons}));
 let directory,temporary,bundled,store,fixture,initialRevision;
 beforeEach(async()=>{temporary=await fs.mkdtemp(path.join(os.tmpdir(),'hive-template-files-'));directory=path.join(temporary,'runtime');bundled=path.join(temporary,'bundled');await fs.cp(sourceFixture,path.join(bundled,'claude-olive-gold'),{recursive:true});store=await templateStore(directory,bundled);fixture=JSON.parse(await fs.readFile(path.join(bundled,'claude-olive-gold','colors.json'),'utf8'));initialRevision=(await store.read('claude-olive-gold')).revision;});
 afterEach(async()=>{await store?.close();if(temporary&&path.resolve(temporary).startsWith(path.resolve(os.tmpdir())+path.sep)&&path.basename(temporary).startsWith('hive-template-files-'))await fs.rm(temporary,{recursive:true,force:true});});
 
 describe('local template folders',()=>{
+  it('persists reasoning styles and restores them from a repaired legacy cache',async()=>{
+    const reasoningTrackProfiles={white:{left:'#123456',middle:'#456789',right:'#789abc'}};
+    const reasoningEffects={max:{color:'#abddee',glow:.85,particles:6,duration:470,easing:'cubic-bezier(.18,0,.39,1)'}};
+    const saved=await store.save(templateId,{revision:initialRevision,colors:{...fixture,reasoningTrackProfiles,reasoningEffects}});
+    expect(saved.colors).toMatchObject({reasoningTrackProfiles,reasoningEffects});
+    expect(saved.defaults).toMatchObject({reasoningTrackProfiles,reasoningEffects});
+    const cacheFile=path.join(directory,templateId,'colors.baseline.json');
+    const cache=JSON.parse(await fs.readFile(cacheFile,'utf8'));
+    delete cache.colors.reasoningTrackProfiles;
+    delete cache.colors.reasoningEffects;
+    await fs.writeFile(cacheFile,JSON.stringify(cache));
+    expect((await store.read(templateId)).defaults).toMatchObject({reasoningTrackProfiles,reasoningEffects});
+    await fs.unlink(path.join(directory,templateId,'colors.json'));
+    expect((await store.read(templateId)).colors).toMatchObject({reasoningTrackProfiles,reasoningEffects});
+  });
+  it('keeps the same fallbacks for absent or invalid optional reasoning fields',()=>{
+    const legacy=validateTemplateColors(fixture);
+    expect(legacy).not.toHaveProperty('reasoningTrackProfiles');
+    expect(legacy).not.toHaveProperty('reasoningEffects');
+    const colors=validateTemplateColors({...fixture,reasoningTrackProfiles:{
+      white:{left:'#123456',middle:'#456789',right:'#789ABC'},black:{left:'bad',middle:'#112233',right:'#112233'},
+    },reasoningEffects:{
+      off:[],low:{color:'bad',glow:2,particles:4.6,duration:-1,easing:'linear'},high:{glow:'bad',duration:9000},unknown:{particles:8},
+    }});
+    expect(colors.reasoningTrackProfiles).toEqual({white:{left:'#123456',middle:'#456789',right:'#789abc'}});
+    expect(colors.reasoningEffects).toEqual({low:{glow:1,particles:5,duration:0},high:{duration:2000}});
+  });
+  it('fills styles dropped from an unchanged source revision and retains local track colors',async()=>{
+    await store.close();
+    const source=path.join(temporary,'source');
+    await fs.cp(bundled,source,{recursive:true});
+    store=await templateStore(directory,bundled,{sourceDirectory:source});
+    await store.close();
+    const sourceTracks={white:{left:'#112233',middle:'#223344',right:'#334455'},black:{left:'#445566',middle:'#556677',right:'#667788'}};
+    const localWhite={left:'#998877',middle:'#887766',right:'#776655'};
+    const reasoningEffects={high:{color:'#abcfef',particles:4}};
+    const sourceBytes=JSON.stringify({...fixture,reasoningTrackProfiles:sourceTracks,reasoningEffects});
+    await fs.writeFile(path.join(source,templateId,'colors.json'),sourceBytes);
+    const stateFile=path.join(directory,'.source-state.json');
+    const state=JSON.parse(await fs.readFile(stateFile,'utf8'));
+    state.templates[templateId].colors=createHash('sha256').update(sourceBytes).digest('hex');
+    await fs.writeFile(stateFile,JSON.stringify(state));
+    await fs.writeFile(path.join(directory,templateId,'colors.json'),JSON.stringify({...fixture,customBase:'#123456',reasoningTrackProfiles:{white:localWhite}}));
+
+    store=await templateStore(directory,bundled,{sourceDirectory:source});
+    const read=await store.read(templateId);
+    expect(read.colors).toMatchObject({customBase:'#123456',reasoningTrackProfiles:{...sourceTracks,white:localWhite},reasoningEffects});
+    expect(read.defaults).toMatchObject({reasoningTrackProfiles:sourceTracks,reasoningEffects});
+  });
   it('persists optional editor highlights on explicit save and reconstructs the saved baseline',async()=>{
     const colors={...fixture,editorProfiles:{black:{selectionBackground:'#aabbcc66',selectionText:'#123456'},white:{annotationBackground:'#11223344'}}};
     const saved=await store.save('claude-olive-gold',{revision:initialRevision,colors});expect(saved.defaults.editorProfiles).toEqual(colors.editorProfiles);
@@ -113,5 +167,91 @@ describe('local template folders',()=>{
     const authored=structuredClone(fixture);authored.surfaceColors.black.document='#293847';const saved=await store.save('claude-olive-gold',{revision:initialRevision,colors:authored});
     expect(saved.defaults.surfaceColors.black.document).toBe('#293847');expect(JSON.parse(await fs.readFile(path.join(directory,'claude-olive-gold','colors.before-save.json'),'utf8')).surfaceColors.black.document).toBe(fixture.surfaceColors.black.document);
     await fs.unlink(path.join(directory,'claude-olive-gold','colors.json'));await store.close();store=await templateStore(directory,path.join(temporary,'missing-bundle'));const restored=await store.read('claude-olive-gold');expect(restored.colors.surfaceColors.black.document).toBe('#293847');expect(restored.defaults.surfaceColors.black.document).toBe('#293847');
+  });
+});
+
+describe('template icon packs',()=>{
+  it('merges per-template packs before each global pack and falls back by key when files are removed',async()=>{
+    await store.close();
+    const source=path.join(temporary,'source');
+    await fs.cp(bundled,source,{recursive:true});
+    store=await templateStore(directory,bundled,{sourceDirectory:source});
+    const first=(await store.read(templateId)).revision;
+    const layers=[iconFile(directory,templateId),iconFile(source,templateId),iconFile(bundled,templateId),iconFile(directory),iconFile(source),iconFile(bundled)];
+    const distinct=['Camera','Check','Copy','Folder','Save','Search'];
+    await Promise.all(layers.map((file,index)=>writeIcons(file,{X:icon(index+1),[distinct[index]]:icon(index+1)})));
+
+    let pack=await store.readIcons(templateId);
+    expect(Object.keys(pack.icons).sort()).toEqual([...distinct,'X'].sort());
+    expect(pack.localIcons).toEqual({X:icon(1),Camera:icon(1)});
+    expect(pack.packRevision).toBe((await store.readIcons(templateId)).packRevision);
+    for(const [index,file] of layers.entries()){
+      expect(pack.icons.X).toEqual(icon(index+1));
+      await fs.unlink(file);
+      const previous=pack.packRevision;
+      pack=await store.readIcons(templateId);
+      expect(pack.packRevision).not.toBe(previous);
+      expect(pack.icons).not.toHaveProperty(distinct[index]);
+      expect(pack.revision).toBeNull();
+      expect(pack.warning).toBe('');
+    }
+    expect(pack.icons).toEqual({});
+    expect((await store.read(templateId)).revision).toBe(first);
+  });
+
+  it('omits unsafe entries, deduplicates identical directories, and tolerates a missing local template folder',async()=>{
+    await store.close();
+    store=await templateStore(directory,bundled,{sourceDirectory:bundled});
+    const userFile=iconFile(directory,templateId),broken=iconFile(bundled,templateId);
+    await writeIcons(iconFile(bundled),{X:icon(1),Search:icon(2)});
+    await fs.writeFile(broken,'{"version":');
+    await writeIcons(userFile,{Search:icon(3),X:{viewBox:'0 0 24 24',shapes:[{tag:'script',attrs:{}}]},UnknownIcon:icon(4)});
+
+    const partial=await store.readIcons(templateId);
+    expect(partial.icons).toEqual({X:icon(1),Search:icon(3)});
+    expect(partial.localIcons).toEqual({Search:icon(3)});
+    expect(partial.warning).toContain('2 项未知或无效');
+    expect(partial.warning.split(broken)).toHaveLength(2);
+    expect((await store.read(templateId)).colors.version).toBe(1);
+
+    await fs.unlink(userFile);
+    const userFolder=path.join(directory,templateId);
+    for(const name of await fs.readdir(userFolder))await fs.unlink(path.join(userFolder,name));
+    await fs.rmdir(userFolder);
+    expect((await store.readIcons(templateId)).icons).toEqual({X:icon(1),Search:icon(2)});
+    await store.close();
+    store=await templateStore(directory,bundled);
+    expect((await store.read(templateId)).colors.version).toBe(1);
+  });
+
+  it('writes only explicit local definitions and rejects unknown, unsafe and stale writes',async()=>{
+    await writeIcons(iconFile(bundled),{X:icon(1),Search:icon(2)});
+    const base=await store.readIcons(templateId);
+    const file=iconFile(directory,templateId);
+    expect(base.localIcons).toEqual({});
+    await expect(store.saveIcons(templateId,{version:1,revision:null,icons:base.icons})).rejects.toMatchObject({status:400});
+    for(const localIcons of [{UnknownIcon:icon(2)},{X:{...icon(2),fill:'url(https://example.com)'}}]){
+      await expect(store.saveIcons(templateId,{version:1,revision:null,localIcons})).rejects.toMatchObject({status:400});
+    }
+    await expect(fs.stat(file)).rejects.toMatchObject({code:'ENOENT'});
+
+    const request={version:1,revision:base.revision,localIcons:{X:icon(3)}};
+    const results=await Promise.allSettled([store.saveIcons(templateId,request),store.saveIcons(templateId,request)]);
+    expect(results.map(result=>result.status)).toEqual(['fulfilled','rejected']);
+    expect(results[1].reason).toMatchObject({status:409});
+    const saved=results[0].value;
+    expect(saved.icons).toEqual({X:icon(3),Search:icon(2)});
+    expect(JSON.parse(await fs.readFile(file,'utf8'))).toEqual({version:1,icons:{X:icon(3)}});
+    await writeIcons(iconFile(bundled),{X:icon(1),Search:icon(4)});
+    expect((await store.readIcons(templateId)).icons.Search).toEqual(icon(4));
+
+    await fs.writeFile(file,'{"version":');
+    await expect(store.saveIcons(templateId,{...request,revision:saved.revision})).rejects.toMatchObject({status:409});
+    const corrupt=await store.readIcons(templateId);
+    expect(corrupt.icons).toEqual({X:icon(1),Search:icon(4)});
+    expect(corrupt.warning).toContain('JSON 无法解析');
+    const repaired=await store.saveIcons(templateId,{...request,revision:corrupt.revision});
+    expect(repaired.warning).toBe('');
+    expect(repaired.icons.X).toEqual(icon(3));
   });
 });

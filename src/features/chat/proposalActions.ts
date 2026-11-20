@@ -1,6 +1,6 @@
 import type { RefObject } from 'react';
 import type { EditorView } from '@codemirror/view';
-import { Transaction } from '@codemirror/state';
+import { Transaction,type Text } from '@codemirror/state';
 import { canApply, headings, modeLabels, previewIntact, type Mode, type Proposal, type UndoEdit } from '../../shared/core';
 import type { DiskFile } from '../../shared/fileTypes';
 import { headingKey, type WritingNode } from '../outline/writingNodes';
@@ -21,13 +21,16 @@ type ProposalContext = {
     setMode: (mode: Mode) => void;
     openChat: () => void;
     promptRef: RefObject<HTMLTextAreaElement | null>;
+    onAccepted?: (proposal:Proposal, doc:Text)=>string;
+    onReverted?: (historyId:string)=>void;
 };
-export function createProposalActions({ view, disk, proposal, undo, writingOutline, add, setError, inform, redraw, setMode, openChat, promptRef }: ProposalContext) {
+export function createProposalActions({ view, disk, proposal, undo, writingOutline, add, setError, inform, redraw, setMode, openChat, promptRef,onAccepted,onReverted }: ProposalContext) {
     // 建议已经在正文里了（未落盘）。✓ = 就留着这段，✗ = 把这段换回原文。
     function accept() {
         const a = proposal.current, v = view.current;
         if (!a || !v || !disk.current)
             return;
+        if(v.state.readOnly){setError('当前正文只读，请切换到可编辑的显示模式。');return;}
         if (!previewIntact(a, v.state.doc, disk.current.path)) {
             proposal.current = { ...a, stale: true };
             setError("这段文字已经被手改或位置变了，请先核对再决定保留还是撤掉。");
@@ -43,6 +46,7 @@ export function createProposalActions({ view, disk, proposal, undo, writingOutli
             before: a.original,
             stale: false,
             file: a.file,
+            historyId: onAccepted?.(a,v.state.doc),
         });
         if (a.mode === "outline" && a.creatingHeading && a.writingNodeId) {
             const nodes = writingOutline.nodes;
@@ -65,6 +69,7 @@ export function createProposalActions({ view, disk, proposal, undo, writingOutli
         const a = proposal.current, v = view.current;
         if (!a)
             return;
+        if(v?.state.readOnly){setError('当前正文只读，请切换到可编辑的显示模式。');return;}
         proposal.current = null;
         const removable = !!v && !!disk.current && previewIntact(a, v.state.doc, disk.current.path);
         if (removable)
@@ -88,6 +93,7 @@ export function createProposalActions({ view, disk, proposal, undo, writingOutli
         const a = undo.current.at(-1), v = view.current;
         if (!a || !v || !disk.current)
             return;
+        if(v.state.readOnly){setError('当前正文只读，请切换到可编辑的显示模式。');return;}
         if (!canApply(a, v.state.doc.toString(), disk.current.path)) {
             setError("这处 AI 修改之后又被手改，已阻止自动撤回。请手动核对该位置。");
             return;
@@ -96,7 +102,9 @@ export function createProposalActions({ view, disk, proposal, undo, writingOutli
         v.dispatch({
             changes: { from: a.from, to: a.to, insert: a.before },
             userEvent: "input.ai.undo",
+            annotations: Transaction.addToHistory.of(false),
         });
+        if(a.historyId)onReverted?.(a.historyId);
         add("system", "用户撤回了最近一次 AI 修改，范围外的手写内容保留。请以后续最新正文为准。");
         inform("已撤回最近一次 AI 修改。");
         redraw();

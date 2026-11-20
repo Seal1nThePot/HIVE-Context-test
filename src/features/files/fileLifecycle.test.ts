@@ -8,6 +8,7 @@ import {useFileActions} from './useFileActions';
 import {useDocumentPersistence} from './useDocumentPersistence';
 import {makeState} from '../editor/Editor';
 import {applyStoredDocumentChange} from '../editor/storedDocumentChanges';
+import {activeEditor} from '../editor/activeEditor';
 import type {EditorSession} from '../editor/editorSessionTypes';
 import type {DiskFile} from '../../shared/fileTypes';
 import {workspaceTreeSync} from './workspaceSync';
@@ -17,13 +18,14 @@ const data=(path:string,text='original',hash='hash-'+path):DiskFile=>({path,text
 async function tick(){await Promise.resolve();await Promise.resolve();}
 function setup(){
   const callbacks=new Map<string,ReturnType<typeof vi.fn>>(),open=new Set(['editor']),busy:boolean[]=[],errors:string[]=[];
-  let file='',confirm:any,dialog:any=null;
+  let confirm:any,dialog:any=null;
   const noop=()=>{};
-  const opts:any={sessions:{current:new Map<string,EditorSession>([['editor',{id:'editor',disk:null,state:null,view:null,dirty:false}]])},activeSession:{current:'editor'},activeTextSource:{current:'document'},editorState:{current:null},view:{current:null},disk:{current:null},proposal:{current:null},undo:{current:[]},appAlive:{current:true},promptRef:{current:{value:''}},dialogRef:{current:null},prompt:'',dialog:null,file:'',dirty:false,
+  const opts:any={sessions:{current:new Map<string,EditorSession>([['editor',{id:'editor',disk:null,state:null,view:null,dirty:false}]])},activeSession:{current:'editor'},activeTextSource:{current:'document'},proposal:{current:null},undo:{current:[]},appAlive:{current:true},promptRef:{current:{value:''}},dialogRef:{current:null},prompt:'',dialog:null,
     running:{current:false},requestAnchor:{current:null},structuring:{current:false},switching:{current:false},viewApplying:{current:false},creatingNote:{current:false},savingPaths:{current:new Set()},fileWorkspace:{info:{id:'space',root:'synthetic'},flush:async()=>{},update:async()=>{}},annotations:{syncEditor:noop},references:{remap:noop},uid:(()=>{let value=0;return()=>String(++value);})(),stop:noop,redraw:noop,inform:noop,
-    setFile:(value:string)=>{file=value;},setFileBusy:(value:boolean)=>busy.push(value),setError:(value:string)=>errors.push(value),setConfirm:(value:any)=>{confirm=value;},setDialog:(value:any)=>{dialog=value;opts.dialogRef.current=value;},bindings:(id:string)=>{if(!callbacks.has(id))callbacks.set(id,vi.fn());return {onUpdate:callbacks.get(id)!};}};
-  for(const name of ['setDirty','setNewNoteBusy','setEntries','setRoot','setFilter','setRenameRequest','setCollapsed','setTrashRevision','setInlineRequest','setOutline','setSelection','setWritingNodeId'])opts[name]=noop;
-  const activate=(id:string)=>{opts.activeSession.current=id;const session=opts.sessions.current.get(id);opts.disk.current=session?.disk;opts.editorState.current=session?.state;opts.view.current=session?.view;file=session?.disk?.path||'';};
+    setFileBusy:(value:boolean)=>busy.push(value),setError:(value:string)=>errors.push(value),setConfirm:(value:any)=>{confirm=value;},setDialog:(value:any)=>{dialog=value;opts.dialogRef.current=value;},bindings:(id:string)=>{if(!callbacks.has(id))callbacks.set(id,vi.fn());return {onUpdate:callbacks.get(id)!};}};
+  for(const name of ['setNewNoteBusy','setEntries','setRoot','setFilter','setRenameRequest','setCollapsed','setTrashRevision','setInlineRequest','setOutline','setSelection','setWritingNodeId'])opts[name]=noop;
+  const active=activeEditor(opts.sessions,opts.activeSession);
+  const activate=(id:string)=>{opts.activeSession.current=id;};
   opts.workspace={isOpen:(id:string)=>open.has(id),open:(id:string)=>{open.add(id);activate(id);},openDocumentTab:(id:string)=>{open.add(id);activate(id);},close:(id:string)=>open.delete(id),openIds:['editor']};
   opts.finalizeTrashedSessions=(sessions:EditorSession[],safe:(session:EditorSession)=>boolean)=>{let kept=0;for(const session of sessions){const ok=safe(session);session.disk=null;if(ok){session.state=null;session.dirty=false;session.landing=true;if(session.id!=='editor')open.delete(session.id);}else{session.dirty=true;kept++;}}return kept;};
   let handler:(url:string,body?:unknown)=>Promise<any>=async(url)=>url.startsWith('/tree')?{root:'synthetic',entries:[]}:data(decodeURIComponent(url.split('=')[1]||'unknown'));
@@ -36,7 +38,7 @@ function setup(){
     const state=makeState(text,opts.bindings(id).onUpdate),session:EditorSession={id,disk:data(path,text),state,view:null,dirty:false};opts.sessions.current.set(id,session);open.add(id);return session;
   }
   function edit(session:EditorSession,text=' UNSAVED'){session.state=session.state!.update({changes:{from:session.state!.doc.length,insert:text},userEvent:'input.type'}).state;session.dirty=true;session.contentVersion=(session.contentVersion||0)+1;}
-  return {opts,actions,add,edit,activate,open,busy,errors,persistence,callbacks,setHandler:(value:typeof handler)=>{handler=value;},file:()=>file,confirm:()=>confirm,setDialog:(value:any)=>{dialog=value;opts.dialog=value;opts.dialogRef.current=value;},dialog:()=>dialog};
+  return {opts,actions,add,edit,activate,active,open,busy,errors,persistence,callbacks,setHandler:(value:typeof handler)=>{handler=value;},file:()=>active.session?.imagePath||active.disk.current?.path||'',confirm:()=>confirm,setDialog:(value:any)=>{dialog=value;opts.dialog=value;opts.dialogRef.current=value;},dialog:()=>dialog};
 }
 
 describe('forced tree refresh lifecycle',()=>{
@@ -47,7 +49,8 @@ describe('forced tree refresh lifecycle',()=>{
     expect(image).toMatchObject({disk:null,state:null,view:null,dirty:false});expect(draft.state).toBe(state);expect(draft.dirty).toBe(true);expect(undoDepth(draft.state!)).toBe(history);
     expect(t.opts.saveSession).not.toHaveBeenCalled();expect(t.opts.api.mock.calls.map((call:any[])=>call[0])).toEqual(['/image-file/info?path='+encodeURIComponent('资料/图.png')]);
     expect(await t.persistence.saveSession(image.id)).toBe(true);expect(t.opts.api).toHaveBeenCalledTimes(1);
-    t.activate('editor');expect(t.opts.editorState.current).toBe(state);
+    expect(t.active.editorState.current).toBeNull();
+    t.activate('editor');expect(t.active.editorState.current).toBe(state);
   });
   it('does not commit a pending image open after the workspace changes',async()=>{
     const t=setup(),pending=deferred();t.setHandler(()=>pending.promise);const opening=t.actions().openExplorerFile('图.png');await tick();t.opts.switching.current=true;pending.resolve({});await opening;
@@ -271,11 +274,11 @@ describe('stored persistence notifications',()=>{
   it('notifies the App owner with the actual no-View transaction and never revives an overlapped pending result',()=>{
     const t=setup(),session=t.add('editor','same.md','one target three');
     const anchor={from:4,to:10,original:'target',file:'same.md',stale:false};
-    const owners:any={editorState:{current:session.state},proposal:{current:{...anchor,id:'pending',text:'next',reason:'reason',mode:'edit',count:4,node:'node'}},requestAnchor:{current:{...anchor}},undo:{current:[]}};
+    const owners:any={proposal:{current:{...anchor,id:'pending',text:'next',reason:'reason',mode:'edit',count:4,node:'node'}},requestAnchor:{current:{...anchor}},undo:{current:[]}};
     t.opts.onStoredChange=vi.fn((id:string,transaction:Transaction)=>{expect(id).toBe('editor');expect(session.view).toBeNull();expect(session.state).toBe(transaction.state);applyStoredDocumentChange(owners,transaction);});
     t.persistence.applyDiskFile(data('same.md','one changed three','new'));
     t.persistence.applyDiskFile(data('same.md','one target three','restored'));
-    expect(t.opts.onStoredChange).toHaveBeenCalledTimes(2);expect(owners.editorState.current).toBe(session.state);expect(owners.proposal.current.stale).toBe(true);expect(owners.requestAnchor.current.stale).toBe(true);
+    expect(t.opts.onStoredChange).toHaveBeenCalledTimes(2);expect(t.active.editorState.current).toBe(session.state);expect(owners.proposal.current.stale).toBe(true);expect(owners.requestAnchor.current.stale).toBe(true);
   });
 });
 

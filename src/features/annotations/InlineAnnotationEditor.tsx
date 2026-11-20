@@ -1,7 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import type { EditorView } from "@codemirror/view";
-import { Check, Send } from "lucide-react";
+import { Check, List, Send, Trash2 } from "../../shared/icons";
 import "./annotation-bubble.css";
 import type { AnnotationSource, TextAnnotation } from "./annotations";
 import {sameSourceTable} from '../editor/tableViewport';
@@ -43,10 +43,12 @@ export default function InlineAnnotationEditor({
   items,
   request,
   editorFor,
+  onDismiss,
   onEdit,
   onSend,
   onOpenGlobal,
   onFocusGlobal,
+  onReveal,
   onRemove,
   saving,
   busy,
@@ -57,10 +59,12 @@ export default function InlineAnnotationEditor({
   items: TextAnnotation[];
   request: InlineAnnotationRequest | null;
   editorFor: (source: AnnotationSource) => EditorView | null;
+  onDismiss?: (request: InlineAnnotationRequest) => void;
   onEdit: (id: string, note: string) => void;
   onSend: (ids: string[]) => void;
   onOpenGlobal: (id:string) => void;
   onFocusGlobal?: (id:string) => void;
+  onReveal?: () => void;
   onRemove?: (id:string) => void;
   saving: boolean;
   busy: boolean;
@@ -76,6 +80,10 @@ export default function InlineAnnotationEditor({
     } | null>(null),
     [position, setPosition] = useState({ x: 12, y: 180 });
   const box = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => {
+    setShown(null);
+    if (request) onDismiss?.(request);
+  }, [request, onDismiss]);
   const [hovered, setHovered] = useState<string|null>(null);
   const [bubblePosition, setBubblePosition] = useState({x:0,y:0});
   const hoverTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
@@ -105,6 +113,22 @@ export default function InlineAnnotationEditor({
   },[toolActive]);
   const bubbleItem=items.find(value=>value.id===hovered);
   const [choices,setChoices]=useState<string[]>([]);
+  const open = !!shown || choices.length > 0;
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = () => { close(); setChoices([]); };
+    const outside = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (target?.nodeType === 1 && (box.current?.contains(target) || target.closest('.annotation-bubble,.annotation-bubble-choices'))) return;
+      dismiss();
+    };
+    document.addEventListener('pointerdown', outside, true);
+    window.addEventListener('blur', dismiss);
+    return () => {
+      document.removeEventListener('pointerdown', outside, true);
+      window.removeEventListener('blur', dismiss);
+    };
+  }, [open, close, document, window]);
   const [bubbles,setBubbles]=useState<{id:string;ids:string[];candidateIds:string[];source:AnnotationSource;file:string;x:number;y:number;target:ScreenRect}[]>([]);
   function measureAllBubbles(){
     const result:typeof bubbles=[],seen=new Set<string>();
@@ -167,13 +191,19 @@ export default function InlineAnnotationEditor({
     const cells=editor?[...editor.dom.querySelectorAll<HTMLElement>('[data-table-annotation-ids]')]:[];
     const cell=cells.find(el=>el===hoveredCell.current&&tableAnnotationIds(el).includes(bubbleItem.id))||cells.find(el=>el.contains(document.activeElement)&&tableAnnotationIds(el).includes(bubbleItem.id))||cells.find(el=>tableAnnotationIds(el).includes(bubbleItem.id));
     const currentBatch=tableBatchIds(bubbleItem,items,editor,groups.current);
-    if(shown && shown.ids.some(id=>currentBatch.includes(id)||clicked?.candidateIds.includes(id))){setShown(null);setChoices([]);return;}
+    if(shown && shown.ids.some(id=>currentBatch.includes(id)||clicked?.candidateIds.includes(id))){close();setChoices([]);return;}
     const ids=cell?tableAnnotationIds(cell).filter(id=>items.some(item=>item.id===id)):(clicked?.candidateIds||[]);
     const representatives=ids.filter((id,index)=>{const item=items.find(value=>value.id===id)!;return !ids.slice(0,index).some(other=>tableBatchIds(item,items,editor,groups.current).includes(other));});
     if(representatives.length>1){setChoices(representatives);return;}
     setChoices([]);setShown(current=>current?.id===bubbleItem.id?null:{id:bubbleItem.id,ids:tableBatchIds(bubbleItem,items,editor,groups.current),pinned:true,focus:false});
   }
   const item = items.find((value) => value.id === shown?.id);
+  const revealedRequest=useRef<string|null>(null);
+  useLayoutEffect(()=>{
+    if(!request?.focus||item?.id!==request.id||revealedRequest.current===request.nonce)return;
+    revealedRequest.current=request.nonce;
+    onReveal?.();
+  },[item?.id,request,onReveal]);
   const [windowLimit,setWindowLimitState]=useState({width:360,height:window.innerHeight-16});
   const setWindowLimit=(next:{width:number;height:number})=>setWindowLimitState(old=>old.width===next.width&&old.height===next.height?old:next);
   const moved=useRef(false), previousShown=useRef<string|null>(null);
@@ -209,7 +239,7 @@ export default function InlineAnnotationEditor({
       className="inline-annotation-editor"
       role="dialog"
       aria-label="原位标注要求"
-      onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();setShown(null);}}}
+      onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();close();}}}
       style={{ left: position.x, top: position.y, maxWidth:windowLimit.width, maxHeight:windowLimit.height, overflowY:"auto" }}
     >
       <div className="annotation-drag-handle" role="button" tabIndex={0} aria-label="拖动标注要求窗口" onPointerDown={beginDrag} onPointerMove={dragMove} onPointerUp={event=>{if(drag.current?.pointer===event.pointerId)endDrag(false);}} onPointerCancel={()=>endDrag(true)} onLostPointerCapture={()=>{if(drag.current)endDrag(true);}} onKeyDown={event=>{const delta:Record<string,[number,number]>={ArrowLeft:[-10,0],ArrowRight:[10,0],ArrowUp:[0,-10],ArrowDown:[0,10]};if(delta[event.key]){event.preventDefault();moved.current=true;movePosition({x:position.x+delta[event.key][0],y:position.y+delta[event.key][1]});}}}/>
@@ -227,10 +257,10 @@ export default function InlineAnnotationEditor({
         </p>
       )}
       <div className="inline-annotation-footer">
-        <button type="button" className="annotation-open-global" aria-label="打开全局标注栏" onClick={()=>{setShown(null);onOpenGlobal(item.id);}}>全局标注</button>
-        {onRemove&&<button type="button" className="text-button" aria-label={shown.ids.length>1?'删除这组标注':'删除此标注'} disabled={busy} onClick={()=>{for(const id of shown.ids)onRemove(id);setShown(null);}}>删除</button>}
+        <button type="button" className="annotation-open-global" aria-label="打开全局标注栏" onClick={()=>{close();onOpenGlobal(item.id);}}><List size={12} aria-hidden />全局标注</button>
+        {onRemove&&<button type="button" className="text-button annotation-remove" aria-label={shown.ids.length>1?'删除这组标注':'删除此标注'} disabled={busy} onClick={()=>{for(const id of shown.ids)onRemove(id);close();}}><Trash2 size={12} aria-hidden />删除</button>}
         <span className="annotation-save-status" role="status">{saving ? "正在保存…" : "已自动保留要求"}</span>
-        <button className="text-button" onClick={() => setShown(null)}>
+        <button className="text-button" onClick={close}>
           <Check size={12} />
           完成
         </button>
@@ -238,7 +268,7 @@ export default function InlineAnnotationEditor({
           className="gold-button"
           disabled={busy || item.stale}
           onClick={() => {
-            setShown(null);
+            close();
             onSend(shown.ids.filter(id=>items.some(value=>value.id===id)));
           }}
         >

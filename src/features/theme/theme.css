@@ -135,3 +135,7 @@ html body.desktop-toolbar-window .workbench.free-workbench { background:transpar
 .composer-shadow-settings output { font-size:calc(10px * var(--text-scale,1)); color:var(--muted); }
 .composer-shadow-preview { display:inline-block; width:100%; max-width:180px; height:26px; border-radius:6px; border:1px solid var(--hive-input-border); background:var(--hive-input-bg); }
 .theme-color-note { margin:0 0 8px; color:var(--muted); font-size:calc(11px * var(--text-scale,1)); line-height:1.55; }
+
+.child-window-custom-color-settings.child-window-fallback { width: min(680px, calc(100% - 24px)); }
+.settings-page.theme-custom-scroll { display: block; overflow: auto; padding: clamp(10px, 3vw, 20px); }
+.theme-custom-scroll > .theme-custom-colors { margin: 0; }

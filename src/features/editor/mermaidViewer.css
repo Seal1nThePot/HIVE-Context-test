@@ -1,0 +1,20 @@
+.mermaid-viewer { display:flex; flex-direction:column; gap:4px; min-width:0; color:var(--hive-document-text,var(--text)); }
+.mermaid-controls { display:flex; flex-wrap:wrap; gap:4px; align-items:center; font:12px/1.4 "Segoe UI",sans-serif; }
+.mermaid-controls button { font:inherit; color:inherit; background:transparent; border:1px solid var(--hive-surface-border,var(--line)); border-radius:4px; cursor:pointer; padding:3px 7px; }
+.mermaid-controls button:has(> svg) { display:inline-flex; align-items:center; min-height:calc(1.4em + 8px); }
+.mermaid-controls button:hover { background:var(--hive-selection-bg,var(--gold-bg)); }
+.mermaid-controls button[hidden] { display:none!important; }
+.mermaid-zoom-value { min-width:4ch; text-align:center; font-variant-numeric:tabular-nums; }
+.mermaid-viewport { box-sizing:border-box; width:100%; height:min(360px,48vh,var(--diagram-height)); min-height:48px; overflow:auto; position:relative; border:1px solid var(--hive-surface-border,var(--line)); border-radius:4px; direction:ltr; }
+.mermaid-viewport:focus-visible,.mermaid-controls button:focus-visible { outline:2px solid var(--hive-accent,var(--gold)); outline-offset:-2px; }
+.mermaid-canvas { display:grid; place-items:center; width:max-content; height:max-content; min-width:100%; min-height:100%; cursor:grab; touch-action:none; user-select:none; }
+.mermaid-canvas.is-panning { cursor:grabbing; }
+.mermaid-canvas svg { display:block; }
+.mermaid-board { box-sizing:border-box; width:min(96vw,1600px); height:90vh; max-width:96vw; max-height:96vh; padding:12px; border:1px solid var(--hive-surface-border,var(--line)); border-radius:8px; background:var(--hive-document-bg,var(--panel)); color:var(--hive-document-text,var(--text)); }
+.mermaid-board[open] { display:flex; }
+.mermaid-board::backdrop { background:rgb(0 0 0 / .45); }
+.mermaid-board .mermaid-viewer { width:100%; min-height:0; }
+.mermaid-board .mermaid-viewport { flex:1; height:auto; min-height:0; }
+.mermaid-viewport::-webkit-scrollbar { width:12px; height:12px; }
+.mermaid-viewport::-webkit-scrollbar-thumb { border:2px solid transparent; border-radius:6px; background:var(--muted,#808080); background-clip:padding-box; }
+.mermaid-viewport::-webkit-scrollbar-track,.mermaid-viewport::-webkit-scrollbar-corner { background:var(--hive-document-bg,var(--panel)); }

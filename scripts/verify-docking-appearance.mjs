@@ -4,6 +4,7 @@ import path from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createRequire} from 'node:module';
 import {spawn} from 'node:child_process';
+import {dockIconPayload} from '../shared/iconPack.mjs';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
 const output=path.join(root,'delivery/docking-colors-20261118');
@@ -75,7 +76,7 @@ async function electronWorker(fixtureFile){
     const normal={x:480,y:90,width:52,height:52},ready={x:550,y:90,width:52,height:52};
     for(const item of fixture.fixtures){
       const payload=dockFeedback({guides:[{key:'panel:sample:left',label:'内侧左分栏',button:normal},{key:'panel:sample:right',label:'内侧右分栏',button:ready},{key:'workspace:top',label:'外侧新栏',button:{x:620,y:90,width:52,height:52}},{key:'panel:sample:center',label:'合并标签',button:{x:690,y:90,width:52,height:52}}],ready:{preview:{x:120,y:80,width:300,height:330},button:ready},rail:{edge:'left',rect:{x:30,y:80,width:54,height:330}},colors:item.colors});
-      assert.deepEqual(payload.colors,item.colors);native.webContents.send('hive:dock-overlay-data',payload);
+      assert.deepEqual(payload.colors,item.colors);native.webContents.send('hive:dock-overlay-data',{...payload,icons:dockIconPayload()});
       const nativeComputed=await native.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const start=performance.now();function check(){const color=document.documentElement.style.getPropertyValue('--hive-dock-guide-background');if(color!==${JSON.stringify(item.colors.guideBackground)}){if(performance.now()-start>5000)return reject(new Error('Native color IPC timeout'));return requestAnimationFrame(check);}requestAnimationFrame(()=>{function style(selector){const value=getComputedStyle(document.querySelector(selector));return {background:value.backgroundColor,color:value.color,border:value.borderTopColor,shadow:value.boxShadow};}function canonical(value){const probe=document.createElement('span');probe.style.color=value;document.body.append(probe);const answer=getComputedStyle(probe).color;probe.remove();return answer;}resolve({normal:style('.dock-guide.inner-guide:not(.ready):not(.stack-guide)'),ready:style('.dock-guide.ready'),outer:style('.outer-guide'),stack:style('.stack-guide'),preview:style('.dock-placement-preview'),rail:style('.dock-native-rail-preview'),expected:Object.fromEntries(Object.entries(${JSON.stringify(item.colors)}).map(([key,value])=>[key,canonical(value)]))});});}check();})`);
       const e=nativeComputed.expected;
       const nativeChecks=[];

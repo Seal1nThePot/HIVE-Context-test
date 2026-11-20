@@ -50,10 +50,15 @@ async function worker(base,temporary){
       clickRow('alpha.md',{ctrlKey:true});clickRow('gamma.md',{shiftKey:true});await pause();
       check('shift selects every visible row in range',JSON.stringify(selected())===JSON.stringify(['alpha.md','beta.md','delta.md','epsilon.md','gamma.md']));
       check('selection count shares the existing heading',get('.explorer-heading small')?.textContent==='已选 5 项');
-      await contextAction('清除选择','alpha.md');check('clear selection removes all selected rows and its count',selected().length===0&&!get('.explorer-heading small'));
-      await contextAction('全选可见结果');check('select all excludes collapsed descendants',selected().length===document.querySelectorAll('.explorer-row').length&&!selected().includes('章节/一.md'));
+      row('alpha.md').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:110,clientY:340}));
+      await wait(()=>get('[role="menu"][aria-label="文件操作"]'),'context menu');
+      const simplified=get('[role="menu"][aria-label="文件操作"]');
+      check('right-click menu omits creation and selection commands',['新建笔记','新建文件夹','全选可见结果','清除选择'].every(text=>!button(text,simplified)));
+      simplified.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await pause();
+      await moreAction('清除选择');check('clear selection removes all selected rows and its count',selected().length===0&&!get('.explorer-heading small'));
+      await moreAction('全选可见结果');check('select all excludes collapsed descendants',selected().length===document.querySelectorAll('.explorer-row').length&&!selected().includes('章节/一.md'));
       setValue('[aria-label="筛选文件"]','alpha');await pause();check('filter discards hidden selections',selected().includes('alpha.md')&&!selected().includes('epsilon.md')&&selected().every(name=>name==='alpha.md'||name==='目标'));
-      await contextAction('清除选择','alpha.md');setValue('[aria-label="筛选文件"]','');await pause();
+      await moreAction('清除选择');setValue('[aria-label="筛选文件"]','');await pause();
       clickRow('alpha.md',{ctrlKey:true});clickRow('beta.md',{ctrlKey:true});await pause();
       await contextAction('移动到…','alpha.md');await wait(()=>get('dialog[aria-label="批量移动"]'),'batch move dialog');
       check('right click preserves every selected move target',get('dialog[aria-label="批量移动"]').textContent.includes('alpha.md')&&get('dialog[aria-label="批量移动"]').textContent.includes('beta.md'));

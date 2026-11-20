@@ -2,6 +2,18 @@
   position: relative;
   margin-right: 3px;
 }
+.window-tool-targets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.window-tool-targets button {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .annotation-entry > small {
   position: absolute;
   right: -4px;
@@ -15,10 +27,11 @@
   background: color-mix(in srgb,var(--hive-accent) 15%,var(--hive-panel-bg));
   border: 1px solid var(--hive-accent);
 }
-.cm-text-annotation {
-  background: color-mix(in srgb,var(--hive-accent) 14.1%,var(--hive-document-bg));
-  border-bottom: 2px solid var(--hive-accent);
-  border-radius: 2px;
+.cm-text-annotation-frame {
+  box-sizing: border-box;
+  border: 1px solid var(--hive-editor-annotation-underline, var(--hive-accent));
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--hive-editor-annotation-background, var(--hive-accent)) 40%, transparent);
 }
 .chat-view-tabs {
   display: flex;
@@ -349,6 +362,26 @@
   }
 }
 
-/* Neutral entries leave the theme accent for selection and keyboard focus. */
-.annotation-title-panel .annotation-title-list > button {background:var(--hive-panel-bg);color:var(--text);border:1px solid var(--hive-surface-border);}
-.annotation-title-panel .annotation-title-list > button:is(:hover,:focus-visible,.selected) {background:var(--hive-selection-bg);color:var(--hive-selection-text);border-color:var(--hive-accent);}
+.annotation-title-row {
+  background: var(--hive-panel-bg);
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--text) 17%, var(--hive-panel-bg));
+}
+.annotation-title-row:is(:hover,:focus-within) {
+  background: color-mix(in srgb, var(--text) 4%, var(--hive-panel-bg));
+  border-color: color-mix(in srgb, var(--text) 20%, var(--hive-panel-bg));
+}
+.annotation-title-row.selected {
+  background: color-mix(in srgb, var(--text) 9%, var(--hive-panel-bg));
+  border-color: color-mix(in srgb, var(--text) 22%, var(--hive-panel-bg));
+}
+.annotation-title-row:has(:focus-visible) {
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
+}
+.annotation-title-row[data-insert="before"]::before,.annotation-title-row[data-insert="after"]::after {
+  content:""; position:absolute; left:1px; right:1px; height:1px; background:var(--muted); pointer-events:none;
+}
+.annotation-title-row[data-insert="before"]::before {top:-3px;}
+.annotation-title-row[data-insert="after"]::after {bottom:-3px;}
+.annotation-title-row[data-dragging] {opacity:.7;}

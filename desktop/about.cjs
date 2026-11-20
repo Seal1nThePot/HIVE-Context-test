@@ -3,6 +3,7 @@ const path = require('node:path');
 const {createBuildInfo, validBuildInfo} = require('./buildMetadata.cjs');
 function createAboutHandlers({isMainOrigin, app, shell, root, versions, platform, arch, development}) {
   const pkg = require(path.join(root, 'package.json'));
+  const appName = pkg.build?.productName || (app.isPackaged ? app.getName?.() : undefined) || pkg.name;
   const devInfo = development ? createBuildInfo(pkg, {command:'serve', env:{}}) : null;
   const authorize = event => { if (!isMainOrigin(event)) throw new Error('无权执行此操作'); };
   return {
@@ -12,10 +13,10 @@ function createAboutHandlers({isMainOrigin, app, shell, root, versions, platform
       if (!info) {
         try {
           const candidate = JSON.parse(fs.readFileSync(path.join(root, 'dist', 'build-info.json'), 'utf8'));
-          if (validBuildInfo(candidate, pkg)) info = {appName:candidate.appName, version:candidate.version, buildNumber:candidate.buildNumber, buildTime:candidate.buildTime, channel:candidate.channel};
+          if (validBuildInfo(candidate, {...pkg,build:{productName:appName}})) info = {appName:candidate.appName, version:candidate.version, buildNumber:candidate.buildNumber, buildTime:candidate.buildTime, channel:candidate.channel};
         } catch { /* Report unavailable metadata without exposing paths. */ }
       }
-      if (!info) info = {appName: pkg.build?.productName || pkg.name, version: pkg.version, buildNumber:'unavailable', buildTime:'unavailable', channel:'unavailable'};
+      if (!info) info = {appName, version: pkg.version, buildNumber:'unavailable', buildTime:'unavailable', channel:'unavailable'};
       return {...info, runtime: {mode: app.isPackaged ? 'desktop-package' : 'desktop-development', platform, arch, electron: versions.electron, chrome: versions.chrome, node: versions.node, packaged: app.isPackaged}};
     },
     async openAppDataDirectory(event) {

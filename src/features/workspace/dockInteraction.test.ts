@@ -79,7 +79,7 @@ describe('instant preview and release docking',()=>{
   it('offers immediate tab merging for floating targets without merging on a header pass',()=>{
     const state=scene();state.floating=[{id:'scratch',rect:{x:400,y:250,width:400,height:400},layer:100}];
     const intent=new DockIntent(),shown=intent.step({x:500,y:265},state);
-    expect(shown.ready).toBeNull();expect(shown.guides.filter(value=>value.scope==='panel').map(value=>value.edge)).toEqual(['center']);
+    expect(shown.ready).toBeNull();expect(shown.guides.filter(value=>value.scope==='panel').map(value=>value.edge)).toEqual(['left','right','top','bottom','center']);
     const guide=shown.guides.find(value=>value.edge==='center')!;expect(intent.step(center(guide),state).ready?.target).toBe('scratch');
   });
   it('selects the topmost floating target and ignores the dragged panel itself',()=>{

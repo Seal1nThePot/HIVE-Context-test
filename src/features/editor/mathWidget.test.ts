@@ -27,7 +27,7 @@ class FakeDocument{
   createElement(name:string){return new FakeElement(this,name);}
   createTextNode(text:string){return new FakeText(text);}
 }
-function viewFor(doc:string){return {state:EditorState.create({doc}),dom:{ownerDocument:new FakeDocument()},dispatch:vi.fn(),focus:vi.fn(),requestMeasure:vi.fn()} as unknown as EditorView;}
+function viewFor(doc:string,readOnly=false){return {state:EditorState.create({doc,extensions:EditorState.readOnly.of(readOnly)}),dom:{ownerDocument:new FakeDocument()},dispatch:vi.fn(),focus:vi.fn(),requestMeasure:vi.fn()} as unknown as EditorView;}
 function changeDoc(view:EditorView,doc:string){(view as unknown as {state:EditorState}).state=EditorState.create({doc});}
 function widget(view:EditorView){
   const text=view.state.doc.toString(),from=text.indexOf('$'),to=text.indexOf('$',from+1)+1;
@@ -56,8 +56,16 @@ describe('math widget DOM reuse across unrelated edits',()=>{
     const view=viewFor('before $x$ after'),old=widget(view),dom=old.toDOM(view);
     changeDoc(view,'new prefix before $x$ after');const next=widget(view);
     expect(next.updateDOM(dom,view)).toBe(true);(dom as unknown as FakeElement).click();
-    expect(view.dispatch).toHaveBeenLastCalledWith({selection:{anchor:18},userEvent:'select.pointer'});
+    expect(view.dispatch).toHaveBeenLastCalledWith({selection:{anchor:18},userEvent:'select.widget'});
     expect(requests).toHaveLength(1);next.destroy(dom);
+  });
+  it('keeps the rendered formula and selection intact when clicked in read-only mode',()=>{
+    const view=viewFor('before $x$ after',true),formula=widget(view),dom=formula.toDOM(view);
+    (dom as unknown as FakeElement).click();
+    expect(view.dispatch).not.toHaveBeenCalled();
+    expect(view.focus).not.toHaveBeenCalled();
+    expect(requests).toHaveLength(1);
+    formula.destroy(dom);
   });
   it('retains a computed result when a document update precedes updateDOM',()=>{
     const view=viewFor('before $x$ after'),old=widget(view),dom=old.toDOM(view),element=dom as unknown as FakeElement;
@@ -89,7 +97,7 @@ describe('math widget DOM reuse across unrelated edits',()=>{
     changeDoc(view,'prefix\n$$\n'+'x'.repeat(6001)+'\n$$');const readNext=vi.spyOn(view.state.doc,'sliceString');
     const next=new MathWidget({from:7,to:view.state.doc.length,reveal:{from:7,to:view.state.doc.length},kind:'math',block:true,text:old.item.text},view.state.doc);
     expect(next.updateDOM(dom,view)).toBe(true);(dom as unknown as FakeElement).click();
-    expect(readNext).not.toHaveBeenCalled();expect(view.dispatch).toHaveBeenLastCalledWith({selection:{anchor:7},userEvent:'select.pointer'});
+    expect(readNext).not.toHaveBeenCalled();expect(view.dispatch).toHaveBeenLastCalledWith({selection:{anchor:7},userEvent:'select.widget'});
     expect((dom as unknown as FakeElement).textContent).toContain('4096');next.destroy(dom);
   });
 });

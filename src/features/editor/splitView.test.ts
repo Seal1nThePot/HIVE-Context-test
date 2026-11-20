@@ -17,6 +17,14 @@ describe('split view transactions',()=>{
     expect(redo(target)).toBe(true);expect(source.doc.eq(main.doc)).toBe(true);
     const saved=main;main=saved;expect(main.doc.toString()).toBe('B# 标题\n文字 A');
   });
-  it('keeps source scroll requests local while preserving main scroll mirroring',()=>{const state=EditorState.create({doc:'abc'}),tr=state.update({selection:{anchor:2},scrollIntoView:true});expect(sourceTransaction(tr).scrollIntoView).toBe(false);expect(mirrorTransaction(state,tr).scrollIntoView).toBe(true);});
+  it('keeps caret scroll requests local to their originating pane',()=>{const state=EditorState.create({doc:'abc'}),tr=state.update({selection:{anchor:2},scrollIntoView:true});expect(sourceTransaction(tr).scrollIntoView).toBe(false);expect(mirrorTransaction(state,tr).scrollIntoView).toBe(false);});
+  it('keeps the native pointer event on the clicked pane while sharing its selection',()=>{
+    const state=EditorState.create({doc:'abc'});
+    const pointer=state.update({selection:{anchor:2},userEvent:'select.pointer'});
+    const forwarded=state.update(sourceTransaction(pointer));
+    expect(forwarded.newSelection.main.head).toBe(2);
+    expect(forwarded.isUserEvent('select.pointer')).toBe(false);
+    expect(forwarded.isUserEvent('select')).toBe(true);
+  });
   it('uses the live presentation for split mode',()=>{expect(underlyingDisplayMode('split')).toBe('live');expect(underlyingDisplayMode('source')).toBe('source');});
 });

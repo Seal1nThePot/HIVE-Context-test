@@ -24,7 +24,7 @@ export type Proposal = Anchor & {
   writingNodeId?:string;
   creatingHeading?:boolean;
 };
-export type UndoEdit = Anchor & { before: string };
+export type UndoEdit = Anchor & { before: string; historyId?: string };
 export const modeLabels: Record<Mode, string> = {
   discuss: "讨论想法",
   outline: "按大纲节点完成",

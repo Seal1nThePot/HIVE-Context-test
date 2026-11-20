@@ -18,7 +18,7 @@ function walk(relative){
     else if(!/\.test\./.test(item.name))files.push(file);
   }
 }
-for(const dir of ['dist','server','desktop','templates'])walk(dir);
+for(const dir of ['dist','server','desktop','shared','templates'])walk(dir);
 const results=files.map(file=>({
   path:file.replaceAll('\\','/'),
   matches:hash(fs.readFileSync(path.join(project,file)))===hash(extractFile(archive,file)),

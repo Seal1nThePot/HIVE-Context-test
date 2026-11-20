@@ -1,6 +1,7 @@
+import {floatingContent, floatingDropContent, pruneFloatingGroup, type FloatingGroup} from './floatingLayout';
 import { activateDockPanel, dockedPanels, initialDockTree, insertDockPanel, insertDockPanelAtRoot, mergeDockPanel, removeDockPanel, restoreDockAnchor, restoreDockPanel, type DockEdge, type DockPlacementEdge, type DockRestoreAnchor, type DockTree, type PanelGroup, type Rect } from "./panelLayout";
 import {collapseAutoHidePanel,expandAutoHidePanel,releaseAutoHidePanel,type AutoHidePlacement} from './autoHide';
-export type WorkspaceLayout={tree:DockTree|null;open:string[];minimized:string[];rects:Record<string,Rect>;layers:Record<string,number>;floatingGroups:PanelGroup[];restore:Record<string,DockRestoreAnchor>;autoHide?:Record<string,AutoHidePlacement>;autoHideActive?:string|null;locked?:boolean;lockedPanels?:string[];nativePrimaryHidden?:boolean};
+export type WorkspaceLayout={tree:DockTree|null;open:string[];minimized:string[];rects:Record<string,Rect>;layers:Record<string,number>;floatingGroups:FloatingGroup[];restore:Record<string,DockRestoreAnchor>;autoHide?:Record<string,AutoHidePlacement>;autoHideActive?:string|null;locked?:boolean;lockedPanels?:string[];nativePrimaryHidden?:boolean};
 export const defaultWorkspace=():WorkspaceLayout=>({tree:initialDockTree(),open:['files','editor','conversation'],minimized:[],rects:{},layers:{},floatingGroups:[],restore:{}});
 export function completeWorkspace(value:WorkspaceLayout):WorkspaceLayout{return {...value,minimized:value.minimized||[],floatingGroups:value.floatingGroups||[],restore:value.restore||{}};}
 export function findPanelGroup(tree:DockTree|null,panel:string):PanelGroup|undefined{
@@ -9,12 +10,12 @@ export function findPanelGroup(tree:DockTree|null,panel:string):PanelGroup|undef
   return findPanelGroup(tree.a,panel)||findPanelGroup(tree.b,panel);
 }
 export function detachWorkspacePanel(layout:WorkspaceLayout,id:string):WorkspaceLayout{
-  const rects={...layout.rects},floatingGroups:PanelGroup[]=[];
+  const rects={...layout.rects},floatingGroups:FloatingGroup[]=[];
   for(const group of layout.floatingGroups){
     if(!group.panels.includes(id)){floatingGroups.push(group);continue;}
     const panels=group.panels.filter(value=>value!==id);
     if(panels.length===1&&rects[group.id])rects[panels[0]]=rects[group.id];
-    else if(panels.length>1)floatingGroups.push({...group,panels,active:panels.includes(group.active)?group.active:panels[0]});
+    else if(panels.length>1)floatingGroups.push(pruneFloatingGroup(group,panels));
   }
   return {...layout,tree:removeDockPanel(layout.tree,id),rects,floatingGroups};
 }
@@ -34,7 +35,7 @@ export function isolateWorkspacePanel(layout:WorkspaceLayout,id:string):Workspac
   const rect=layout.rects[group.id],next=detachWorkspacePanel(layout,id);
   return {...next,rects:rect?{...next.rects,[id]:{...rect,x:rect.x+20,y:rect.y+20}}:next.rects};
 }
-export function floatWorkspaceGroup(layout:WorkspaceLayout,group:PanelGroup,rect:Rect):WorkspaceLayout {
+export function floatWorkspaceGroup(layout:WorkspaceLayout,group:FloatingGroup,rect:Rect):WorkspaceLayout {
   let next=layout;
   for(const id of group.panels)next=releaseAutoHidePanel(detachWorkspacePanel(next,id),id);
   return {...next,floatingGroups:[...next.floatingGroups,group],rects:{...next.rects,[group.id]:rect},layers:rankedGroupLayer(next.layers,group.id)};
@@ -49,7 +50,7 @@ export function placeWorkspaceGroup(layout:WorkspaceLayout,group:PanelGroup,targ
   return activateWorkspacePanel(next,group.active);
 }
 export function activateWorkspacePanel(layout:WorkspaceLayout,id:string):WorkspaceLayout{
-  return {...layout,tree:activateDockPanel(layout.tree,id),floatingGroups:layout.floatingGroups.map(group=>group.panels.includes(id)?{...group,active:id}:group)};
+  return {...layout,tree:activateDockPanel(layout.tree,id),floatingGroups:layout.floatingGroups.map(group=>group.panels.includes(id)?pruneFloatingGroup(group,group.panels,id):group)};
 }
 export function placeWorkspacePanelAtEdge(layout:WorkspaceLayout,id:string,edge:DockEdge):WorkspaceLayout{
   const next=releaseAutoHidePanel(detachWorkspacePanel(layout,id),id);
@@ -59,9 +60,9 @@ export function placeWorkspacePanel(layout:WorkspaceLayout,id:string,target:stri
   if(id===target)return activateWorkspacePanel(layout,id);
   let next=releaseAutoHidePanel(detachWorkspacePanel(layout,id),id);
   if(next.autoHide?.[target])next={...releaseAutoHidePanel(next,target),rects:{...next.rects,[target]:fallback}};
-  if(edge==='center'&&!dockedPanels(next.tree).includes(target)&&next.open.includes(target)){
+  if(!dockedPanels(next.tree).includes(target)&&next.open.includes(target)){
     const existing=next.floatingGroups.find(group=>group.panels.includes(target));
-    const group:PanelGroup=existing?{...existing,panels:[...existing.panels,id],active:id}:{type:'group',id:'group:'+crypto.randomUUID(),panels:[target,id],active:id};
+    const group=floatingDropContent(existing,target,undefined,id,edge);
     const rect=next.rects[existing?.id||target]||fallback;
     next={...next,floatingGroups:[...next.floatingGroups.filter(value=>value.id!==existing?.id),group],rects:{...next.rects,[group.id]:rect},layers:{...next.layers,[group.id]:Math.max(next.layers[id]||30,next.layers[target]||30)}};
   }else{
@@ -76,7 +77,7 @@ export function hideWorkspacePanel(layout:WorkspaceLayout,id:string,rect:Rect,mi
     const next=releaseAutoHidePanel(layout,id);return {...next,open:next.open.filter(value=>value!==id),minimized:next.minimized.filter(value=>value!==id)};
   }
   const group=layout.floatingGroups.find(value=>value.panels.includes(id));
-  let anchor:DockRestoreAnchor|null=group?{target:group.panels.find(value=>value!==id)!,edge:'center'}:restoreDockAnchor(layout.tree,id);
+  let anchor:DockRestoreAnchor|null=group?.content?restoreDockAnchor(floatingContent(group),id):group?{target:group.panels.find(value=>value!==id)!,edge:'center'}:restoreDockAnchor(layout.tree,id);
   if(anchor?.split){
     // An outer split may already have collapsed because another panel is hidden.
     // Retain that missing ancestry so reopening panels in either order is stable.
@@ -100,6 +101,7 @@ export function openWorkspacePanel(layout:WorkspaceLayout,id:string,rect:Rect):W
   if(layout.autoHide?.[id])return expandAutoHidePanel(layout,id);
   if(layout.open.includes(id))return activateWorkspacePanel(layout,id);
   const anchor=layout.restore[id];
+  if(anchor&&layout.open.includes(anchor.target)&&!dockedPanels(layout.tree).includes(anchor.target))return placeWorkspacePanel(layout,id,anchor.target,anchor.edge,rect);
   if(anchor?.split){
     const tree=restoreDockPanel(layout.tree,id,anchor);
     if(tree)return {...layout,tree,open:[...layout.open,id],minimized:layout.minimized.filter(value=>value!==id)};

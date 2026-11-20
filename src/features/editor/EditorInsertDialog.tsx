@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
 import type {EditorView} from '@codemirror/view';
-import {X} from 'lucide-react';
+import {X} from "../../shared/icons";
 import {useFileWorkspace} from '../files/WorkspaceContext';
 import {imageMarkdown,insertImage,insertTable} from './insertions';
 import './editor-tools.css';

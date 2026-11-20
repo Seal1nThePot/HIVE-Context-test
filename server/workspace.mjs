@@ -1,21 +1,22 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { fileStore } from './files.mjs';
 import { annotationStore } from './annotations.mjs';
 import { writingNodeStore } from './writing-nodes.mjs';
 import { outlineStore } from './outlines.mjs';
 import { explorerStore } from './explorer.mjs';
+import {discardStage,repositoryManifestStore,stageJson} from './repository-manifest.mjs';
+import {readStateObject} from './state-json.mjs';
 
 const fail = (message, status = 400) => Object.assign(new Error(message), {status});
-export async function workspaceStore(local, defaultRoot, {revealFile}={}) {
+export async function workspaceStore(local, defaultRoot, {revealFile,repositoryManifestDirectory=local}={}) {
   await fs.mkdir(local, {recursive:true});
   const configPath = path.join(local, 'workspace.json');
+  const synchronizeManifest=await repositoryManifestStore(repositoryManifestDirectory);
   const canonical = value => process.platform === 'win32' ? value.toLowerCase() : value;
   const idFor = root => createHash('sha256').update(canonical(root)).digest('hex').slice(0,24);
-  let saved;
-  try { saved = JSON.parse(await fs.readFile(configPath,'utf8')); }
-  catch(error) { if(error.code !== 'ENOENT') throw error; }
+  const saved = await readStateObject(configPath, '工作区配置');
   const initialRoot = path.resolve(defaultRoot);
   await fs.mkdir(initialRoot,{recursive:true});
   const defaultId = idFor(await fs.realpath(initialRoot));
@@ -53,7 +54,6 @@ export async function workspaceStore(local, defaultRoot, {revealFile}={}) {
     contexts.set(id,context);return context;
   }
   let current = await prepare(saved?.root || initialRoot, !saved?.root || idFor(path.resolve(saved.root)) === defaultId);
-  current.files.resume();
   let autoSave = saved?.autoSave !== false, revision = Number.isInteger(saved?.revision) ? saved.revision : 0;
   const validName = value => typeof value==='string' && value.trim().length<=80 && !/[\u0000-\u001f\u007f]/.test(value);
   const entryFor = (root,name) => ({id:idFor(root),root,...(validName(name)&&name.trim()?{name:name.trim()}:{})});
@@ -64,31 +64,72 @@ export async function workspaceStore(local, defaultRoot, {revealFile}={}) {
     if(!repositories.some(item=>item.id===normalized.id)) repositories.push(normalized);
   }
   if(!repositories.some(item=>item.id===current.id)) repositories.push(entryFor(current.root));
+  await synchronizeManifest(revision,repositories);
+  current.files.resume();
   let queue = Promise.resolve();
   const read = () => ({id:current.id,root:current.root,autoSave,revision,repositories:repositories.map(item=>({...item}))});
+  function capture(id){
+    if(id && id !== current.id) throw fail('写作空间已在其他窗口切换。请刷新页面后继续；当前内容尚未覆盖磁盘。',409);
+    return current;
+  }
+  function schedule(operation){
+    const task=queue.catch(()=>{}).then(operation);
+    queue=task;
+    return task;
+  }
   function enqueue(input,change) {
-    const task=queue.catch(()=>{}).then(async()=>{
+    return schedule(async()=>{
       if(input.revision !== revision) throw fail('写作空间设置已变化，请刷新后重试。',409);
       const next = await change();
+      if(next.unchanged)return read();
       const value={root:next.current.root,autoSave:next.autoSave,revision:revision+1,repositories:next.repositories};
-      const temp=configPath+'.'+randomUUID()+'.tmp';
-      try {await fs.writeFile(temp,JSON.stringify(value,null,2),{flag:'wx'});await fs.rename(temp,configPath);}
-      finally {await fs.rm(temp,{force:true}).catch(()=>{});}
+      let temp,manifestPublished=false;
+      try {
+        temp=await stageJson(configPath,value);
+        await synchronizeManifest(value.revision,value.repositories);
+        manifestPublished=true;
+        await fs.rename(temp,configPath);
+      }catch(error){
+        // The workspace file is authoritative. If publication is interrupted,
+        // opening the store or reading the list derives the manifest from it again.
+        if(manifestPublished)await synchronizeManifest(revision,repositories).catch(()=>{});
+        await next.rollback?.();
+        throw error;
+      }finally{
+        if(temp)await discardStage(temp);
+      }
       if (current !== next.current) {current.files.suspend(); next.current.files.resume();}
       current=next.current;autoSave=next.autoSave;repositories=next.repositories;revision=value.revision;
       return read();
     });
-    queue=task;return task;
+  }
+  function createRepository(input){
+    let repository;
+    return enqueue(input,async()=>{
+      capture(input.workspaceId);
+      const name=input.name;
+      if(!validName(name)||!name.trim()||name!==name.trim()||name.startsWith('.')||/[\\/:*?"<>|]|[. ]$/.test(name)||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(name)){
+        throw fail('仓库名称需为有效的单个文件夹名称。');
+      }
+      const parent=await resolveRoot(input.parent),candidate=path.join(parent,name);
+      repository=repositories.find(item=>item.id===idFor(candidate));
+      if(repository){
+        await resolveRoot(candidate);
+        return {unchanged:true};
+      }
+      await fs.mkdir(candidate);
+      repository=entryFor(candidate,name);
+      return {current,autoSave,repositories:[...repositories,repository],rollback:()=>fs.rmdir(candidate).catch(()=>{})};
+    }).then(workspace=>({workspace,repository}));
   }
   return {
     read,
+    capture,
+    createRepository,
+    readRepositoryManifest:id=>schedule(()=>{capture(id);return synchronizeManifest(revision,repositories);}),
     async close() {
       await queue.catch(()=>{});
       await Promise.all([...contexts.values()].map(context => context.files.close()));
-    },
-    capture(id) {
-      if(id && id !== current.id) throw fail('写作空间已在其他窗口切换。请刷新页面后继续；当前内容尚未覆盖磁盘。',409);
-      return current;
     },
     update(input) {
       return enqueue(input,async()=>{

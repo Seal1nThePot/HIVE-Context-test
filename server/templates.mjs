@@ -4,16 +4,31 @@ import {createHash,randomUUID} from 'node:crypto';
 import {spawn} from 'node:child_process';
 import dockingColorFields from '../desktop/docking-colors.json' with {type:'json'};
 import editorColorFields from '../desktop/editor-colors.json' with {type:'json'};
+import {normalizeIconOverrides,validateIconPack} from '../shared/iconPack.mjs';
+import {reasoningLevels} from './model-capabilities.mjs';
 
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 const bases=['black','gray','white','custom'];
 const roles=['accent','secondary','link','success','warning','danger'];
 const surfaces=['titleBar','ribbonTitleBackground','ribbonTitleText','ribbon','ribbonContentText','ribbonBorder','leftRailBackground','leftRailIcon','rightRailBackground','rightRailIcon','workspace','panel','panelHeader','panelBorder','panelInnerBorder','document','documentText','selectedTab','settingsBackground','settingsSidebar','settingsCard','settingsBorder','popup','popupBorder','input','inputBorder','uiText','mutedText','selection'];
 const dockFields={frame:['background','border','borderWidth','borderRadius','shadow'],aiButton:['background','icon','hoverIcon','border','borderWidth','borderRadius'],sideButtons:['background','icon','border','borderWidth','borderRadius','activeIcon','activeBackground','activeBorder','hoverIcon','hoverBackground']};
+const reasoningFields=['reasoningEffects','reasoningTrackProfiles'];
+const trackParts=['left','middle','right'];
+const reasoningEasing=/^cubic-bezier\(\s*(?:0(?:\.\d+)?|1(?:\.0+)?|\.\d+)\s*,\s*-?\d+(?:\.\d+)?\s*,\s*(?:0(?:\.\d+)?|1(?:\.0+)?|\.\d+)\s*,\s*-?\d+(?:\.\d+)?\s*\)$/;
 const validId=id=>typeof id==='string'&&/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id)&&!/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(id);
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 const color=(value,alpha=false)=>typeof value==='string'&&(alpha?/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i:/^#[0-9a-f]{6}$/i).test(value);
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
+function missingReasoningFields(current,fallback){
+  return Object.fromEntries(reasoningFields.filter(field=>current?.[field]===undefined&&fallback[field]!==undefined).map(field=>[field,fallback[field]]));
+}
+function restoreSourceReasoning(current,source){
+  const restored={...current};
+  for(const field of reasoningFields){
+    if(source[field]!==undefined)restored[field]={...source[field],...current[field]};
+  }
+  return restored;
+}
 function mergeSourceColors(previous,next,current){
   if(JSON.stringify(previous)===JSON.stringify(next))return current;
   if(object(previous)&&object(next)){
@@ -78,6 +93,28 @@ export function validateTemplateColors(value,allowDefault=true){
       if(Object.keys(profile).length)result.editorProfiles[base]=profile;
     }
   }
+  if(object(value.reasoningTrackProfiles)){
+    result.reasoningTrackProfiles={};
+    for(const base of bases){
+      const track=value.reasoningTrackProfiles[base];
+      if(object(track)&&trackParts.every(part=>color(track[part])))result.reasoningTrackProfiles[base]=Object.fromEntries(trackParts.map(part=>[part,track[part].toLowerCase()]));
+    }
+  }
+  if(object(value.reasoningEffects)){
+    result.reasoningEffects={};
+    for(const level of reasoningLevels){
+      const raw=value.reasoningEffects[level];
+      if(!object(raw))continue;
+      // Omit invalid optional fields so the renderer applies its existing defaults.
+      const effect={};
+      if(color(raw.color))effect.color=raw.color.toLowerCase();
+      if(Number.isFinite(raw.glow))effect.glow=Math.max(0,Math.min(1,raw.glow));
+      if(Number.isFinite(raw.particles))effect.particles=Math.round(Math.max(0,Math.min(8,raw.particles)));
+      if(Number.isFinite(raw.duration))effect.duration=Math.round(Math.max(0,Math.min(2000,raw.duration)));
+      if(typeof raw.easing==='string'&&reasoningEasing.test(raw.easing))effect.easing=raw.easing;
+      result.reasoningEffects[level]=effect;
+    }
+  }
   return result;
 }
 function manifest(value,id){
@@ -100,21 +137,31 @@ export async function templateStore(directory,bundledDirectory,options={}){
     if(!stat.isDirectory()||stat.isSymbolicLink())throw fail('模板目录不能是符号链接或目录联接。');
     return target;
   }
-  async function readFile(target){
+  async function readBytes(target){
     const stat=await fs.lstat(target);
     if(!stat.isFile()||stat.isSymbolicLink()||stat.size>1024*1024)throw fail('模板文件不可用或超过 1 MiB。');
     const bytes=await fs.readFile(target);if(bytes.length>1024*1024)throw fail('模板文件超过 1 MiB。');
-    let value;try{value=JSON.parse(bytes.toString('utf8'));}catch{throw fail('模板 JSON 无法解析。');}
-    return {value,revision:hash(bytes),bytes};
+    return {revision:hash(bytes),bytes};
+  }
+  function parseJSON(bytes){
+    try{return JSON.parse(bytes.toString('utf8'));}catch{throw fail('模板 JSON 无法解析。');}
+  }
+  async function readFile(target){
+    const record=await readBytes(target);
+    return {...record,value:parseJSON(record.bytes)};
   }
   async function transaction(id,action){
     const previous=queues.get(id)||Promise.resolve(),work=previous.catch(()=>{}).then(action);queues.set(id,work);
     try{return await work;}finally{if(queues.get(id)===work)queues.delete(id);}
   }
-  async function replace(target,bytes){
+  async function replace(target,bytes,beforeRename){
     try{const stat=await fs.lstat(target);if(!stat.isFile()||stat.isSymbolicLink())throw fail('模板文件不能是符号链接。');}catch(error){if(error.code!=='ENOENT')throw error;}
     const temporary=path.join(path.dirname(target),`.sync-${randomUUID()}.tmp`);
-    try{await fs.writeFile(temporary,bytes,{flag:'wx'});await fs.rename(temporary,target);}finally{await fs.unlink(temporary).catch(error=>{if(error.code!=='ENOENT')throw error;});}
+    try{
+      await fs.writeFile(temporary,bytes,{flag:'wx'});
+      if(beforeRename)await beforeRename();
+      await fs.rename(temporary,target);
+    }finally{await fs.unlink(temporary).catch(error=>{if(error.code!=='ENOENT')throw error;});}
   }
   async function importFile(target,value,backup){
     if(backup){try{const old=await readFile(target);await replace(target.replace(/\.json$/,'.before-source.json'),old.bytes);}catch(error){if(error.code!=='ENOENT')throw error;}}
@@ -150,7 +197,9 @@ export async function templateStore(directory,bundledDirectory,options={}){
             sourceRecords.set(entry.name,{template,colors});
             const previous=Object.hasOwn(sourceState.templates,entry.name)?sourceState.templates[entry.name]:undefined;
             const destination=path.join(directory,entry.name);
-            if(previous?.metadata===meta.revision&&previous?.colors===raw.revision&&previous.baseline&&await fs.access(path.join(destination,'template.json')).then(()=>true,()=>false)&&await fs.access(path.join(destination,'colors.json')).then(()=>true,()=>false))continue;
+            // Older readers could record the same source revision after dropping these fields.
+            const recoverReasoning=previous?.colors===raw.revision&&previous.baseline&&Object.keys(missingReasoningFields(previous.baseline,colors)).length;
+            if(!recoverReasoning&&previous?.metadata===meta.revision&&previous?.colors===raw.revision&&previous.baseline&&await fs.access(path.join(destination,'template.json')).then(()=>true,()=>false)&&await fs.access(path.join(destination,'colors.json')).then(()=>true,()=>false))continue;
             await transaction(entry.name,async()=>{
               const destination=path.join(directory,entry.name);await fs.mkdir(destination).catch(error=>{if(error.code!=='EEXIST')throw error;});await folder(entry.name);
               let hasMeta=true,hasColors=true;
@@ -159,12 +208,18 @@ export async function templateStore(directory,bundledDirectory,options={}){
               if(!hasMeta||previous&&previous.metadata!==meta.revision)await importFile(path.join(destination,'template.json'),template,hasMeta);
               // First connection preserves existing preferences. New source-only templates
               // can be imported immediately; builtins wait for the renderer's legacy link.
-              if(previous&&previous.colors!==raw.revision||!hasColors){
+              if(previous&&previous.colors!==raw.revision||!hasColors||recoverReasoning){
                 const current=hasColors?(await readFile(path.join(destination,'colors.json'))).value:undefined;
                 let previousDefaults=previous?.baseline;try{previousDefaults=(await readFile(path.join(destination,'colors.baseline.json'))).value.colors;}catch(error){if(error.code!=='ENOENT')throw error;}
-                const incoming=previous?.baseline&&current?validateTemplateColors(mergeSourceColors(previous.baseline,colors,current)):!hasColors&&previousDefaults&&previous?.colors===raw.revision?validateTemplateColors(previousDefaults):colors;
+                let incoming,defaults;
+                if(recoverReasoning){
+                  incoming=validateTemplateColors(restoreSourceReasoning(current??previousDefaults??colors,colors));
+                  defaults=validateTemplateColors(restoreSourceReasoning(previousDefaults??colors,colors),false);
+                }else{
+                  incoming=previous?.baseline&&current?validateTemplateColors(mergeSourceColors(previous.baseline,colors,current)):!hasColors&&previousDefaults&&previous?.colors===raw.revision?validateTemplateColors(previousDefaults):colors;
+                  defaults=previous?.baseline&&previousDefaults?validateTemplateColors(mergeSourceColors(previous.baseline,colors,previousDefaults),false):validateTemplateColors(colors,false);
+                }
                 await importFile(path.join(destination,'colors.json'),incoming,hasColors);
-                const defaults=previous?.baseline&&previousDefaults?validateTemplateColors(mergeSourceColors(previous.baseline,colors,previousDefaults),false):validateTemplateColors(colors,false);
                 const runtime=await readFile(path.join(destination,'colors.json'));await replace(path.join(destination,'colors.baseline.json'),JSON.stringify({version:1,colors:defaults,runtimeRevision:runtime.revision},null,2)+'\n');
               }
             });
@@ -197,16 +252,18 @@ export async function templateStore(directory,bundledDirectory,options={}){
     }
     const cacheFile=path.join(target,'colors.baseline.json');let cache;
     try{cache=(await readFile(cacheFile)).value;}catch(error){if(error.code!=='ENOENT')throw error;}
+    const colors=validateTemplateColors(stored.value);
+    const recovered=missingReasoningFields(cache?.colors,colors);
     let defaults;
-    if(cache?.version===1&&cache.runtimeRevision===stored.revision)defaults=validateTemplateColors(cache.colors,false);
-    else if(cache?.version===1)defaults=validateTemplateColors(stored.value,false);
+    if(cache?.version===1&&cache.runtimeRevision===stored.revision)defaults=validateTemplateColors({...cache.colors,...recovered},false);
+    else if(cache?.version===1)defaults=validateTemplateColors(colors,false);
     else{
       defaults=sourceRecords.get(id)?.colors??sourceState.templates[id]?.baseline;
       if(!defaults)try{defaults=(await readFile(path.join(bundledDirectory,id,'colors.json'))).value;}catch(error){if(error.code!=='ENOENT')throw error;}
       defaults=validateTemplateColors(defaults??stored.value,false);
     }
-    if(!cache||cache.runtimeRevision!==stored.revision)await replace(cacheFile,JSON.stringify({version:1,colors:defaults,runtimeRevision:stored.revision},null,2)+'\n');
-    return {template,directory:target,colors:validateTemplateColors(stored.value),revision:stored.revision,defaults,defaultsRevision:hash(JSON.stringify(defaults))};
+    if(!cache||cache.runtimeRevision!==stored.revision||Object.keys(recovered).length)await replace(cacheFile,JSON.stringify({version:1,colors:defaults,runtimeRevision:stored.revision},null,2)+'\n');
+    return {template,directory:target,colors,revision:stored.revision,defaults,defaultsRevision:hash(JSON.stringify(defaults))};
   }
   async function list(){
     await syncSource();const templates=[],warnings=[...sourceWarnings];
@@ -217,6 +274,60 @@ export async function templateStore(directory,bundledDirectory,options={}){
     }
     templates.sort((a,b)=>a.id==='olive-gold'?-1:b.id==='olive-gold'?1:a.name.localeCompare(b.name,'zh-CN'));
     return {directory,sourceDirectory:source,templates,warnings};
+  }
+  async function readIconBytes(root,id){
+    const target=id?path.join(root,id):root;
+    for(const location of id?[root,target]:[root]){
+      const stat=await fs.lstat(location);
+      if(!stat.isDirectory()||stat.isSymbolicLink())throw fail('模板图标目录不可用或为链接。');
+    }
+    return readBytes(path.join(target,'icons.json'));
+  }
+  async function readIcons(id){
+    if(!validId(id))throw fail('模板标识无效。');
+    const roots=[directory,source,bundledDirectory].filter(Boolean);
+    const candidates=[...roots.map(root=>({root,id})),...roots.map(root=>({root,id:''}))];
+    const seen=new Set(),icons={},warnings=[];
+    let revision=null,localIcons={};
+    for(const candidate of candidates){
+      const file=path.join(candidate.root,candidate.id,'icons.json');
+      const key=process.platform==='win32'?file.toLowerCase():file;
+      if(seen.has(key))continue;
+      seen.add(key);
+      const local=candidate.root===directory&&candidate.id===id;
+      try{
+        const record=await readIconBytes(candidate.root,candidate.id);
+        if(local)revision=record.revision;
+        const raw=parseJSON(record.bytes);
+        if(!object(raw)||raw.version!==1||!object(raw.icons))throw fail('模板图标包格式无效。');
+        const valid=normalizeIconOverrides(raw.icons);
+        const skipped=Object.keys(raw.icons).length-Object.keys(valid).length;
+        if(skipped)warnings.push(`${file} 中有 ${skipped} 项未知或无效的图标，已使用回退。`);
+        if(local)localIcons=valid;
+        for(const [name,definition] of Object.entries(valid))if(!Object.hasOwn(icons,name))icons[name]=definition;
+      }catch(error){
+        if(error.code!=='ENOENT')warnings.push(`无法读取 ${file}：${error.message} 已使用回退。`);
+      }
+    }
+    const pack={version:1,icons,localIcons,revision,warning:warnings.join('；')};
+    return {...pack,packRevision:hash(JSON.stringify(pack))};
+  }
+  async function saveIcons(id,input){
+    if(!validId(id)||!object(input)||!(input.revision===null||typeof input.revision==='string'&&/^[a-f0-9]{64}$/.test(input.revision)))throw fail('图标保存参数无效。');
+    const pack=validateIconPack({version:input.version,icons:input.localIcons}),bytes=JSON.stringify(pack,null,2)+'\n';
+    if(Buffer.byteLength(bytes)>1024*1024)throw fail('模板图标文件超过 1 MiB。');
+    return transaction(id,async()=>{
+      const target=await folder(id);
+      const checkRevision=async()=>{
+        let revision=null;
+        try{revision=(await readIconBytes(directory,id)).revision;}
+        catch(error){if(error.code!=='ENOENT')throw fail(`本地图标文件无法安全写入：${error.message}`,409);}
+        if(revision!==input.revision)throw fail('模板图标已被外部修改，请重新读取后再保存。',409);
+      };
+      await checkRevision();
+      await replace(path.join(target,'icons.json'),bytes,checkRevision);
+      return readIcons(id);
+    });
   }
   async function save(id,input){
     if(!validId(id)||!object(input)||!(input.revision===null||typeof input.revision==='string'&&/^[a-f0-9]{64}$/.test(input.revision)))throw fail('模板保存参数无效。');
@@ -247,5 +358,5 @@ export async function templateStore(directory,bundledDirectory,options={}){
     closing=(async()=>{if(syncing)await Promise.allSettled([syncing]);await Promise.allSettled([...queues.values()]);})();
     return closing;
   }
-  return {list,read,save,open,syncSource,close};
+  return {list,read,save,readIcons,saveIcons,open,syncSource,close};
 }

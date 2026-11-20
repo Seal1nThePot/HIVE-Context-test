@@ -7,7 +7,7 @@ export const codeModeExtensions = [
   codeModeMarker,
   lineNumbers(),
   EditorView.theme({
-    '&[data-display-mode=live] .cm-gutters': {display:'none'},
+    '&:not([data-display-mode=source]) .cm-gutters': {display:'none'},
     '&[data-display-mode=source] .cm-gutters': {
       backgroundColor:'var(--hive-document-bg, var(--bg))',
       color:'var(--muted)',

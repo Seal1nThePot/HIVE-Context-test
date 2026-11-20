@@ -14,10 +14,13 @@ describe('independent text editor colors',()=>{
     expect(normalizeEditorProfiles({black:{selectionBackground:'#ABCDEF66',selectionText:'#12345699',cursor:'#ABCDEF',searchMatchBackground:'url(x)',unknown:'#123456'},white:[]})).toEqual({black:{selectionBackground:'#abcdef66',cursor:'#abcdef'}});
   });
   it('persists edits without changing interface selection and scopes them to each base',()=>{
-    const theme=normalizeTheme({...defaultTheme,editorProfiles:{black:{selectionBackground:'#aa337788',selectionText:'#ffffff'},white:{selectionBackground:'#44556677'}}});
+    const theme=normalizeTheme({...defaultTheme,editorProfiles:{black:{selectionBackground:'#aa337788',selectionText:'#ffffff',textHighlightBackground:'#ab773399'},white:{selectionBackground:'#44556677',textHighlightBackground:'#ffe18866'}}});
     expect(readTheme(JSON.stringify(theme))).toEqual(theme);expect(readDefaultTheme(JSON.stringify({defaultScheme:theme}))).toEqual(theme);
     expect(themeTokens(theme).surfaces.selection).toBe(themeTokens(defaultTheme).surfaces.selection);
     expect(editorColors(switchThemeBase(theme,'white')).selectionBackground).toBe('#44556677');expect(editorColors(switchThemeBase(switchThemeBase(theme,'white'),'black')).selectionBackground).toBe('#aa337788');
+    const reloaded=readTheme(JSON.stringify(theme));
+    expect(editorColors(reloaded).textHighlightBackground).toBe('#ab773399');
+    expect(editorColors(switchThemeBase(reloaded,'white')).textHighlightBackground).toBe('#ffe18866');
     const reset=resetThemeBase(theme);expect(reset.editorProfiles.black).toBeUndefined();expect(reset.editorProfiles.white).toEqual(theme.editorProfiles.white);
   });
   it('freezes personal defaults while inheriting later template fields for current preferences',()=>{

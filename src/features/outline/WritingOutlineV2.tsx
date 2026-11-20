@@ -1,38 +1,11 @@
-import {usePanelDocument} from '../../shared/panelDocument';
-import { useState } from "react";
-import { createPortal } from "react-dom";
-import {
-  ArrowDown,
-  ArrowUp,
-  Check,
-  ChevronRight,
-  FileText,
-  ListTree,
-  PencilLine,
-  Plus,
-  RotateCcw,
-  Trash2,
-  X,
-} from "lucide-react";
-import type { Heading } from "../../shared/core";
-import {
-  headingKey,
-  moveWritingNode,
-  targetForNode,
-  type WritingNode,
-} from "./writingNodes";
-export default function WritingOutlineV2({
-  items,
-  nodes,
-  selectedId,
-  onSelect,
-  onLocate,
-  onWrite,
-  onSave,
-  busy,
-  ready,
-  onRetry,
-}: {
+import {useRef, useState, type FormEvent} from 'react';
+import {Check, ChevronRight, GripVertical, ListTree, LocateFixed, Plus, RotateCcw, Trash2} from "../../shared/icons";
+import type {Heading} from '../../shared/core';
+import ChildWindow from '../workspace/ChildWindow';
+import {headingKey, moveWritingNode, targetForNode, type WritingNode} from './writingNodes';
+import './writing-outline.css';
+
+type Props = {
   items: Heading[];
   nodes: WritingNode[];
   selectedId: string | null;
@@ -43,368 +16,178 @@ export default function WritingOutlineV2({
   busy: boolean;
   ready: boolean;
   onRetry: () => void;
-}) {
-  const document=usePanelDocument(),window=document.defaultView!;
-  const [view, setView] = useState<"nodes" | "toc">("nodes"),
-    [editing, setEditing] = useState<WritingNode | null>(null),
-    [undo, setUndo] = useState<{ node: WritingNode; index: number }[]>([]),
-    [hover, setHover] = useState<{
-      node: WritingNode;
-      x: number;
-      y: number;
-    } | null>(null);
+};
+
+export default function WritingOutlineV2({items, nodes, selectedId, onSelect, onLocate, onWrite, onSave, busy, ready, onRetry}: Props) {
+  const [editor, setEditor] = useState<{draft: WritingNode; original: WritingNode | null} | null>(null);
+  const [undo, setUndo] = useState<{node: WritingNode; index: number}[]>([]);
+  const dragged = useRef<string | null>(null);
+  const [drop, setDrop] = useState<{id: string; side: 'before' | 'after'} | null>(null);
+  const saving = useRef(false);
+  const [editError, setEditError] = useState('');
+
   async function save(next: WritingNode[]) {
+    if (saving.current || busy || !ready) return false;
+    saving.current = true;
     try {
       await onSave(next);
       return true;
-    } catch {
+    } catch (error) {
+      if (editor) setEditError((error as Error).message || '大纲未保存，请重试。');
       return false;
+    } finally {
+      saving.current = false;
     }
   }
-  async function remove(node: WritingNode) {
-    const index = nodes.findIndex((value) => value.id === node.id);
-    if (await save(nodes.filter((value) => value.id !== node.id)))
-      setUndo((stack) => [...stack, { node, index }]);
-    setHover(null);
+
+  function openEditor(node?: WritingNode) {
+    setEditError('');
+    if (node) onSelect(node.id);
+    setEditor({
+      draft: node ? {...node} : {id: crypto.randomUUID(), title: '', description: '', level: 2, targetHeading: null},
+      original: node ?? null,
+    });
   }
-  return (
-    <div className="writing-outline">
-      <div className="outline-view-switch">
-        <button
-          className={view === "nodes" ? "active" : ""}
-          onClick={() => setView("nodes")}
-        >
-          <ListTree size={12} />
-          写作大纲
-        </button>
-        <button
-          className={view === "toc" ? "active" : ""}
-          onClick={() => setView("toc")}
-        >
-          <FileText size={12} />
-          目录
-        </button>
-        {view === "nodes" && (
-          <button
-            className="new-outline-node"
-            aria-label="新建大纲节点"
-            title="新建大纲节点"
-            disabled={busy || !ready}
-            onClick={() =>
-              setEditing({
-                id: crypto.randomUUID(),
-                title: "",
-                description: "",
-                level: 2,
-                targetHeading: null,
-              })
-            }
-          >
-            <Plus size={14} />
-          </button>
-        )}
-      </div>
-      {view === "toc" ? (
-        <nav className="outline-list" aria-label="文档目录">
-          {items.map((item) => (
-            <button
-              key={item.from}
-              onClick={() => onLocate(item.from)}
-              style={{ paddingLeft: 14 + Math.max(0, item.level - 1) * 12 }}
-            >
-              <span className="outline-dot" />
-              <span>{item.title}</span>
-            </button>
-          ))}
-        </nav>
-      ) : (
-        <div className="writing-nodes" aria-label="写作大纲节点">
-          <div className="outline-manage-hint">
-            <span>{ready ? "独立写作节点 · 不删除正文" : "正在载入大纲…"}</span>
-            {!ready && <button onClick={onRetry}>重新载入大纲</button>}
-            {undo.length > 0 && (
-              <button
-                aria-label="撤回删除大纲节点"
-                disabled={busy}
-                onClick={async () => {
-                  const entry = undo.at(-1)!;
-                  const next = [...nodes];
-                  if (!next.some((node) => node.id === entry.node.id))
-                    next.splice(
-                      Math.min(entry.index, next.length),
-                      0,
-                      entry.node,
-                    );
-                  if (await save(next)) setUndo((stack) => stack.slice(0, -1));
-                }}
-              >
-                <RotateCcw size={11} />
-                撤回删除
-              </button>
-            )}
-          </div>
-          {nodes.map((node, index) => {
-            const target = targetForNode(node, items);
-            return (
-              <article
-                key={node.id}
-                className={
-                  "writing-node " + (selectedId === node.id ? "selected" : "")
-                }
-                onMouseEnter={(event) => {
-                  const box = event.currentTarget.getBoundingClientRect();
-                  setHover({
-                    node,
-                    x: Math.max(
-                      8,
-                      Math.min(box.right + 10, window.innerWidth - 302),
-                    ),
-                    y: Math.max(
-                      12,
-                      Math.min(box.top, window.innerHeight - 230),
-                    ),
-                  });
-                }}
-                onMouseLeave={() => setHover(null)}
-              >
-                <div className="node-title">
-                  <span>{String(index + 1).padStart(2, "0")}</span>
-                  <button
-                    onClick={() => {
-                      onSelect(node.id);
-                      if (target) onLocate(target.from);
-                    }}
-                  >
-                    {node.title}
-                  </button>
-                  <button
-                    className="icon-button"
-                    aria-label={"修改大纲节点：" + node.title}
-                    title="修改标题与要求"
-                    disabled={busy}
-                    onClick={() => {
-                      setHover(null);
-                      setEditing({ ...node });
-                    }}
-                  >
-                    <PencilLine size={12} />
-                  </button>
-                </div>
-                <p>{node.description || "还没有写作要求，点击编辑补充。"}</p>
-                <div className="node-management">
-                  <small>{target ? "关联正文章节" : "文末创建本节点"}</small>
-                  <button
-                    className="icon-button"
-                    aria-label={"上移大纲节点：" + node.title}
-                    disabled={busy || index === 0}
-                    onClick={() =>
-                      void save(moveWritingNode(nodes, node.id, -1))
-                    }
-                  >
-                    <ArrowUp size={11} />
-                  </button>
-                  <button
-                    className="icon-button"
-                    aria-label={"下移大纲节点：" + node.title}
-                    disabled={busy || index === nodes.length - 1}
-                    onClick={() =>
-                      void save(moveWritingNode(nodes, node.id, 1))
-                    }
-                  >
-                    <ArrowDown size={11} />
-                  </button>
-                  <button
-                    className="icon-button"
-                    aria-label={"删除大纲节点：" + node.title}
-                    title="删除节点，保留正文；可撤回"
-                    disabled={busy}
-                    onClick={() => void remove(node)}
-                  >
-                    <Trash2 size={11} />
-                  </button>
-                </div>
-                <div className="node-footer">
-                  <span>
-                    {node.description ? "已设写作要求" : "待补充要求"}
-                  </span>
-                  <button
-                    onClick={() => {
-                      setHover(null);
-                      onWrite(node.id);
-                    }}
-                    aria-label={"按此节点完成：" + node.title}
-                  >
-                    按此节点完成
-                    <ChevronRight size={11} />
-                  </button>
-                </div>
-              </article>
-            );
-          })}
-          {ready && !nodes.length && (
-            <div className="empty-outline">
-              <ListTree size={22} />
-              <p>从一个新的写作节点开始。</p>
-              <button
-                className="secondary-button"
-                onClick={() =>
-                  setEditing({
-                    id: crypto.randomUUID(),
-                    title: "",
-                    description: "",
-                    level: 2,
-                    targetHeading: null,
-                  })
-                }
-              >
-                <Plus size={13} />
-                新建节点
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-      {hover &&
-        !editing &&
-        createPortal(
-          <div
-            className="outline-description-tooltip"
-            role="tooltip"
-            style={{ left: hover.x, top: hover.y }}
-          >
-            <small>节点写作要求</small>
-            <strong>{hover.node.title}</strong>
-            <p>
-              {hover.node.description ||
-                "尚未填写。可修改标题、写作要求、层级和对应章节。"}
-            </p>
-          </div>,
-          document.body,
-        )}
-      {editing &&
-        createPortal(
-          <div className="modal-backdrop">
-            <form
-              className="modal outline-node-modal"
-              onSubmit={async (event) => {
-                event.preventDefault();
-                const exists = nodes.some((node) => node.id === editing.id);
-                const next = exists
-                  ? nodes.map((node) =>
-                      node.id === editing.id ? editing : node,
-                    )
-                  : [...nodes, editing];
-                if (await save(next)) {
-                  onSelect(editing.id);
-                  setEditing(null);
-                }
-              }}
-            >
-              <div className="simple-modal-heading">
-                <h2>
-                  {nodes.some((node) => node.id === editing.id)
-                    ? "修改大纲节点"
-                    : "新建大纲节点"}
-                </h2>
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label="关闭大纲编辑"
-                  onClick={() => setEditing(null)}
-                >
-                  <X size={17} />
-                </button>
-              </div>
-              <label>
-                节点标题
-                <input
-                  aria-label="大纲节点标题"
-                  value={editing.title}
-                  maxLength={500}
-                  required
-                  autoFocus
-                  onChange={(event) =>
-                    setEditing({ ...editing, title: event.target.value })
-                  }
-                />
-              </label>
-              <label>
-                写作要求
-                <textarea
-                  aria-label="大纲节点写作要求"
-                  value={editing.description}
-                  maxLength={10000}
-                  placeholder="这个节点要表达什么？需要哪些材料、论点或限制？"
-                  onChange={(event) =>
-                    setEditing({ ...editing, description: event.target.value })
-                  }
-                />
-              </label>
-              <div className="outline-node-options">
-                <label>
-                  层级
-                  <select
-                    aria-label="大纲节点层级"
-                    value={editing.level}
-                    onChange={(event) =>
-                      setEditing({
-                        ...editing,
-                        level: Number(event.target.value),
-                      })
-                    }
-                  >
-                    {[1, 2, 3, 4, 5, 6].map((level) => (
-                      <option key={level} value={level}>
-                        {level} 级标题
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  正文位置
-                  <select
-                    aria-label="大纲节点正文位置"
-                    value={editing.targetHeading || ""}
-                    onChange={(event) =>
-                      setEditing({
-                        ...editing,
-                        targetHeading: event.target.value || null,
-                      })
-                    }
-                  >
-                    <option value="">文末创建本节点</option>
-                    {items.map((item) => (
-                      <option key={item.from} value={headingKey(items, item)}>
-                        {item.title}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <p className="settings-note">
-                大纲和正文分别维护。删除节点不删除已有正文；新节点可以由 AI
-                在文末创建对应内容。
-              </p>
-              <div className="modal-footer">
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => setEditing(null)}
-                >
-                  取消
-                </button>
-                <button
-                  className="gold-button"
-                  disabled={busy || !editing.title.trim()}
-                >
-                  <Check size={13} />
-                  {busy ? "保存中…" : "保存节点"}
-                </button>
-              </div>
-            </form>
-          </div>,
-          document.body,
-        )}
-    </div>
+
+  function closeEditor() {
+    if (!saving.current && !busy) setEditor(null);
+  }
+
+  function updateDraft(values: Partial<WritingNode>) {
+    setEditError('');
+    setEditor(current => current && {...current, draft: {...current.draft, ...values}});
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editor || !editor.draft.title.trim()) return;
+    const {draft, original} = editor;
+    if (original && !nodes.some(node => node.id === draft.id)) {
+      setEditError('此节点已删除，请关闭窗口并重新打开大纲。');
+      return;
+    }
+    setEditError('');
+    const next = original ? nodes.map(node => node.id === draft.id ? draft : node) : [...nodes, draft];
+    if (await save(next)) {
+      onSelect(draft.id);
+      setEditor(null);
+    }
+  }
+
+  async function remove(node: WritingNode) {
+    const index = nodes.findIndex(value => value.id === node.id);
+    if (await save(nodes.filter(value => value.id !== node.id))) setUndo(stack => [...stack, {node, index}]);
+  }
+
+  async function undoRemove() {
+    const entry = undo.at(-1);
+    if (!entry) return;
+    const next = [...nodes];
+    if (!next.some(node => node.id === entry.node.id)) next.splice(Math.min(entry.index, next.length), 0, entry.node);
+    if (await save(next)) setUndo(stack => stack.slice(0, -1));
+  }
+
+  function clearDrag() {
+    dragged.current = null;
+    setDrop(null);
+  }
+
+  const draft = editor?.draft;
+  const original = editor?.original;
+  const target = original ? targetForNode(original, items) : undefined;
+  const edited = !!draft && !!original && (
+    draft.title !== original.title || draft.description !== original.description ||
+    draft.level !== original.level || draft.targetHeading !== original.targetHeading
   );
+
+  return <div className="writing-outline">
+    <div className="outline-view-switch">
+      <button type="button" className="new-outline-node" aria-label="新建大纲节点" title="新建大纲节点" disabled={busy || !ready} onClick={() => openEditor()}><Plus size={14}/></button>
+    </div>
+    <div className="writing-nodes" aria-label="写作大纲节点">
+      <div className="outline-manage-hint">
+        <span>{ready ? '独立写作节点 · 不删除正文' : '正在载入大纲…'}</span>
+        {!ready && <button type="button" onClick={onRetry}>重新载入大纲</button>}
+        {undo.length > 0 && <button type="button" aria-label="撤回删除大纲节点" disabled={busy || !ready} onClick={() => void undoRemove()}><RotateCcw size={11}/>撤回删除</button>}
+      </div>
+      {nodes.map((node, index) => <article key={node.id}
+        className={`writing-outline-row${selectedId === node.id ? ' selected' : ''}`}
+        data-drop={drop?.id === node.id ? drop.side : undefined}
+        onDragOver={event => {
+          if (!dragged.current || busy) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'move';
+          const sourceIndex = nodes.findIndex(candidate => candidate.id === dragged.current);
+          const side = sourceIndex < index ? 'after' : 'before';
+          setDrop(previous => sourceIndex === index || sourceIndex < 0 ? null : previous?.id === node.id ? previous : {id: node.id, side});
+        }}
+        onDrop={event => {
+          const sourceId = dragged.current;
+          if (!sourceId) return;
+          event.preventDefault();
+          clearDrag();
+          const sourceIndex = nodes.findIndex(candidate => candidate.id === sourceId);
+          if (sourceIndex >= 0 && sourceIndex !== index) void save(moveWritingNode(nodes, sourceId, index - sourceIndex));
+        }}>
+        <button type="button" className="icon-button outline-sort-handle" aria-label={`调整大纲节点顺序：${node.title}`} title="拖动排序，或使用上下方向键"
+          draggable={!busy && ready} disabled={busy || !ready}
+          onDragStart={event => {
+            if (busy || !ready) { event.preventDefault(); return; }
+            dragged.current = node.id;
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/x-hive-outline-node', node.id);
+            const row = event.currentTarget.parentElement;
+            if (row) event.dataTransfer.setDragImage(row, 14, row.offsetHeight / 2);
+          }}
+          onDragEnd={clearDrag}
+          onKeyDown={event => {
+            if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+            event.preventDefault();
+            event.stopPropagation();
+            const delta = event.key === 'ArrowUp' ? -1 : 1;
+            if (index + delta >= 0 && index + delta < nodes.length) void save(moveWritingNode(nodes, node.id, delta));
+          }}>
+          <GripVertical size={15}/>
+        </button>
+        <span className="outline-row-number">{String(index + 1).padStart(2, '0')}</span>
+        <button type="button" className="outline-row-title" aria-haspopup="dialog" aria-label={`编辑大纲节点：${node.title}`} disabled={busy || !ready} onClick={() => openEditor(node)}><span>{node.title}</span></button>
+        <button type="button" className="icon-button outline-row-delete" aria-label={`删除大纲节点：${node.title}`} title="删除节点，可撤回" disabled={busy || !ready} onClick={() => void remove(node)}><Trash2 size={13}/></button>
+      </article>)}
+      {ready && !nodes.length && <div className="empty-outline">
+        <ListTree size={22}/>
+        <p>从一个新的写作节点开始。</p>
+        <button type="button" className="secondary-button" disabled={busy} onClick={() => openEditor()}><Plus size={13}/>新建节点</button>
+      </div>}
+    </div>
+    {draft && <ChildWindow id="outline-node-editor" title={original ? '编辑大纲节点' : '新建大纲节点'} onClose={closeEditor} closeDisabled={busy}>
+      <form className="outline-node-editor" onSubmit={submit}>
+        <div className="outline-node-fields" inert={busy}>
+          <label>节点标题<input aria-label="大纲节点标题" data-child-window-focus value={draft.title} maxLength={500} required onChange={event => updateDraft({title: event.target.value})}/></label>
+          <label>写作要求<textarea aria-label="大纲节点写作要求" value={draft.description} maxLength={10000} placeholder="这个节点要表达什么？需要哪些材料、论点或限制？" onChange={event => updateDraft({description: event.target.value})}/></label>
+          <div className="outline-node-options">
+            <label>层级<select aria-label="大纲节点层级" value={draft.level} onChange={event => updateDraft({level: Number(event.target.value)})}>
+              {[1, 2, 3, 4, 5, 6].map(level => <option key={level} value={level}>{level} 级标题</option>)}
+            </select></label>
+            <label>正文位置<select aria-label="大纲节点正文位置" value={draft.targetHeading || ''} onChange={event => updateDraft({targetHeading: event.target.value || null})}>
+              <option value="">文末创建本节点</option>
+              {draft.targetHeading && !items.some(item => headingKey(items, item) === draft.targetHeading) && <option value={draft.targetHeading}>保留原关联章节</option>}
+              {items.map(item => <option key={item.from} value={headingKey(items, item)}>{item.title}</option>)}
+            </select></label>
+          </div>
+          {editError && <p className="outline-node-error" role="alert">{editError}</p>}
+        </div>
+        <footer className="outline-node-actions">
+          {original && <div>
+            {target && <button type="button" className="secondary-button" disabled={busy || edited} onClick={() => {closeEditor(); onLocate(target.from);}}><LocateFixed size={14}/>定位正文</button>}
+            <button type="button" className="secondary-button" disabled={busy || edited} title={edited ? '先保存节点修改' : undefined}
+              onClick={() => {closeEditor(); onWrite(original.id);}}>按此节点完成<ChevronRight size={14}/></button>
+          </div>}
+          <div className="outline-node-save">
+            <button type="button" className="secondary-button" disabled={busy} onClick={closeEditor}>取消</button>
+            <button type="submit" className="gold-button" disabled={busy || !ready || !draft.title.trim()}><Check size={14}/>{busy ? '保存中…' : '保存节点'}</button>
+          </div>
+        </footer>
+      </form>
+    </ChildWindow>}
+  </div>;
 }

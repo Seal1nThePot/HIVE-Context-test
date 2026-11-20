@@ -168,6 +168,46 @@ afterAll(async () => {
     await fs.rm(temp, { recursive: true, force: true });
 });
 describe("HTTP model and local service contract", () => {
+  it('resolves external Markdown snapshots without importing them into the document tree', async () => {
+    const name = 'frontend-map.md';
+    const body = Buffer.from('\ufeff附件内容\r\n下一行');
+    const upload = (route, data = body) => fetch(base + route + '?name=' + name, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/octet-stream'},
+      body: data,
+    });
+    const documents = path.join(temp, 'documents');
+    const before = await fs.readdir(documents);
+    const saved = await upload('/api/references/attachments');
+    expect(saved.status).toBe(200);
+    const attachment = await saved.json();
+    expect(attachment).toMatchObject({type:'attachment',path:name,id:expect.any(String)});
+    expect(await fs.readdir(documents)).toEqual(before);
+
+    const tree = await fetch(base + '/api/tree').then(response => response.json());
+    expect(tree.entries).not.toEqual(expect.arrayContaining([expect.objectContaining({path:name})]));
+    const invalid = await upload('/api/references/attachments', Buffer.from([0xff]));
+    expect(invalid.status).toBe(400);
+    expect((await upload('/api/references/attachments', Buffer.alloc(2_000_001))).status).toBe(413);
+
+    const normalImport = await upload('/api/import', Buffer.from('仓库笔记'));
+    expect(await normalImport.json()).toMatchObject({kind:'markdown',path:name});
+    const sources = [attachment, {type:'file',path:name}];
+    const resolved = await post('/api/references/resolve', {
+      sources, budget: 10, overrides: [{path:name,text:'未保存正文',characters:5}],
+    });
+    expect(resolved.status).toBe(200);
+    expect((await resolved.json()).files).toEqual([
+      {path:name,source:name,text:'附件内容\n下一行',characters:8,truncated:false},
+      {path:name,source:name,text:'未保',characters:5,truncated:true,unsaved:true},
+    ]);
+
+    const removed = await fetch(base + '/api/references/attachments/' + attachment.id, {method:'DELETE'});
+    expect(removed.ok).toBe(true);
+    expect((await post('/api/references/resolve', {sources:[attachment],budget:100})).status).toBe(400);
+    expect(await fs.readFile(path.join(documents,name), 'utf8')).toBe('仓库笔记');
+  });
+
   it('reads the full prefixed model catalog and isolates credentials for new, saved, cleared and moved drafts', async () => {
     const getConfig = () => fetch(base+'/api/config').then(response=>response.json());
     const config = await getConfig();

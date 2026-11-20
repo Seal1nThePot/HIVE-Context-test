@@ -4,6 +4,9 @@ export type AutoHidePlacement={edge:DockEdge;offset:number;rect:Rect;host?:'main
 // Old saved layouts carry a dock restore anchor for panels shelved from the
 // main window. Native shelves created now record their host explicitly.
 export function autoHideIsNative(layout:WorkspaceLayout,id:string){const placement=layout.autoHide?.[id];return !!placement&&(placement.host?placement.host==='native':!layout.restore[id]);}
+export function isExpandedAutoHidePanel(layout:WorkspaceLayout,id:string):boolean {
+  return layout.autoHideActive===id || id==='conversation'&&!!layout.autoHide?.[id]&&layout.open.includes(id);
+}
 const clamp=(value:number,min:number,max:number)=>Math.max(min,Math.min(max,value));
 export function nearestPanelEdge(rect:Rect,bounds:Rect,docked=false):DockEdge {
   const left=Math.abs(rect.x-bounds.x),right=Math.abs(rect.x+rect.width-bounds.x-bounds.width);
@@ -35,12 +38,13 @@ export function collapseAutoHidePanel(layout:WorkspaceLayout,id:string):Workspac
 export function repositionAutoHidePanel(layout:WorkspaceLayout,id:string,offset:number,edge?:'left'|'right'):WorkspaceLayout {
   const placement=layout.autoHide?.[id];
   if(!placement||!Number.isFinite(offset)||(edge!==undefined&&edge!=='left'&&edge!=='right'))return layout;
-  const base=layout.autoHideActive===id?collapseAutoHidePanel(layout,id):layout;
+  const base=isExpandedAutoHidePanel(layout,id)?collapseAutoHidePanel(layout,id):layout;
   const autoHide={...base.autoHide};delete autoHide[id];
   return {...base,autoHide:{...autoHide,[id]:{...placement,edge:edge??placement.edge,offset:offset<.5?.25:.75}}};
 }
 export function expandAutoHidePanel(layout:WorkspaceLayout,id:string):WorkspaceLayout {
-  const next=layout.autoHideActive&&layout.autoHideActive!==id?collapseAutoHidePanel(layout,layout.autoHideActive):layout;
+  const active=layout.autoHideActive;
+  const next=active&&active!==id&&active!=='conversation'?collapseAutoHidePanel(layout,active):layout;
   return {...next,open:next.open.includes(id)?next.open:[...next.open,id],minimized:next.minimized.filter(value=>value!==id),autoHideActive:id};
 }
 export function autoHidePanelRect(placement:AutoHidePlacement,bounds:Rect,anchor?:Rect):Rect {

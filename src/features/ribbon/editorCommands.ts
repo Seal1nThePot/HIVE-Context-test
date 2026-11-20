@@ -16,6 +16,8 @@ export function runEditorCommand(command: RibbonCommand, { target, openSearch, o
             openSearch();
             return;
         }
+        if(editor.state.readOnly)
+            throw new Error('当前编辑区只读。');
         if (command === 'image' || command === 'table' || command === 'properties') {
             if (command === 'image' && !target.file)
                 throw new Error('请先保存当前文档，再插入图片。');
@@ -26,9 +28,9 @@ export function runEditorCommand(command: RibbonCommand, { target, openSearch, o
             undoText(editor);
         else if (command === 'redo')
             redoText(editor);
-        else if (command === 'bold' || command === 'italic' || command === 'underline' || command === 'strike' || command === 'inlineCode')
+        else if (command === 'bold' || command === 'italic' || command === 'highlight' || command === 'underline' || command === 'strike' || command === 'inlineCode')
             editor.dispatch(inlineFormatting(editor.state, command));
-        else if (command === 'codeBlock' || command === 'link' || command === 'rule')
+        else if (command === 'codeBlock' || command === 'link' || command === 'rule' || command === 'details')
             editor.dispatch(insertStructure(editor.state, command));
         else if (command === 'left' || command === 'center' || command === 'right')
             editor.dispatch(paragraphAlignment(editor.state, command));

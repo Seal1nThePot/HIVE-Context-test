@@ -132,7 +132,7 @@ it('limits HIVE output exclusions to root prefixes and preserves nested ordinary
     await expect(make({excludeDirectories:[rule]}).list()).rejects.toThrow('工作空间边界');
 });
 
-it.each(['scan', 'save'])('clears unpublished creation-time observations after a failed %s and persists them on retry', async operation => {
+it.each(['scan', 'save'])('rebuilds creation-time records after a metadata write failure during %s', async operation => {
   const state = path.join(temp, 'state'); await fs.mkdir(state);
   const store = fileStore(root, state); stores.push(store);
   const target = path.join(state, 'file-times.json'), original = fs.rename.bind(fs);
@@ -144,7 +144,11 @@ it.each(['scan', 'save'])('clears unpublished creation-time observations after a
   if (operation === 'scan') {
     await fs.writeFile(path.join(root, 'a.md'), 'a');
     await expect(store.snapshot()).rejects.toThrow('metadata write failed');
-  } else await expect(store.save({path:'a.md', text:'a', baseline:null})).rejects.toThrow('metadata write failed');
+  } else {
+    const saved = await store.save({ path: 'a.md', text: 'a', baseline: null });
+    expect(saved.warning).toContain('正文已保存');
+    expect(await store.read('a.md')).toMatchObject({ text: 'a', hash: saved.hash });
+  }
   spy.mockRestore();
   expect(names((await store.snapshot()).entries)).toEqual(['a.md']);
   expect(JSON.parse(await fs.readFile(target, 'utf8'))['a.md'].createdAt).toBeGreaterThan(0);

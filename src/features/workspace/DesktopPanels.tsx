@@ -2,15 +2,17 @@ import {createContext,useCallback,useContext,useEffect,useLayoutEffect,useRef,us
 import {createPortal} from 'react-dom';
 import {EditorView} from '@codemirror/view';
 import {PanelDocumentContext} from '../../shared/panelDocument';
-import type {Rect} from './panelLayout';
+import {measureDockTree,type Rect,type Divider} from './panelLayout';
+import {findPanelGroup} from './workspaceState';
 import type {DragControl} from './PanelControl';
 import {openPanelContextMenu} from './PanelControl';
-import {NativeHostRuntime,type NativePanelHandle,type NativeFloatOptions,type LiveNativeHost} from './nativeHostRuntime';
+import {nativeHostContent,NativeHostRuntime,type NativePanelHandle,type NativeFloatOptions,type LiveNativeHost} from './nativeHostRuntime';
 import {latestGestureFrame,gestureFrameClock} from './gestureFrame';
 import './desktop-panels.css';
 import {PanelActivityContext,panelIsVisible} from '../../shared/panelActivity';
 import type {DockingColors} from '../theme/dockingAppearance';
 import type {AboutInfo} from '../../shared/buildInfo';
+import type {DockIconOverrides} from '../../../shared/iconPack.mjs';
 
 declare global {
   interface Window {hiveDesktop?:{
@@ -18,6 +20,9 @@ declare global {
     startupThemeReady?:(background:string)=>void;
     chooseRepositoryDirectory:()=>Promise<string|null>;
     getAboutInfo:()=>Promise<AboutInfo>;openAppDataDirectory:()=>Promise<void>;
+    getUpdateMode?:()=>Promise<'unsupported'|'directory'|'picker'|'internet'>;
+    setUpdateSource?:(source:'local'|'internet')=>Promise<'unsupported'|'directory'|'picker'|'internet'>;
+    installUpdate?:()=>Promise<{status:'cancelled'|'restarting'|'current'|'empty'}|{status:'error';message:string}>;
     onCloseRequested:(callback:()=>void)=>()=>void;finishClose:(allow:boolean)=>void;
     onServiceError:(callback:()=>void)=>()=>void;onPanelCloseRequested:(callback:(id:string)=>void)=>()=>void;
     closePanel:(id:string)=>void;windowCommand:(command:'minimize'|'maximize'|'close'|'focus'|'hide',panelId?:string)=>void;
@@ -25,14 +30,14 @@ declare global {
     panelRect:(id:string)=>Rect|null;
     panelDrag:(id:string,phase:'start'|'move'|'end'|'cancel',edge?:string,free?:boolean)=>boolean;
     onPanelMove:(callback:(event:{id:string;phase:'move'|'end'|'cancel';x:number;y:number;free?:boolean})=>void)=>()=>void;
-    dockOverlay:(feedback:{guides:{key:string;label:string;button:Rect}[];ready:{preview:Rect;button?:Rect}|null;rail?:{edge:'left'|'right';rect:Rect};colors?:DockingColors}|null)=>void;
+    dockOverlay:(feedback:{host?:string;guides:{key:string;label:string;button:Rect}[];ready:{preview:Rect;button?:Rect}|null;rail?:{edge:'left'|'right';rect:Rect};colors?:DockingColors;iconColors?:{accent:string;danger:string};iconOverrides?:DockIconOverrides}|null)=>void;
     dockTooltip:(value:{id:'global-toolbar';text:string;anchor:Rect;width:number;height:number;background:string;color:string;border:string;shadow?:string;fontSize:number}|null)=>void;
   }}
 }
 type DesktopPanels={
   enabled:boolean;windows:ReadonlyMap<string,Window>;hiddenWindows:ReadonlySet<string>;
   rect:(id:string)=>Rect|null;lastRect:(id:string)=>Rect|null;owner:(id:string)=>string;panelForHost:(id:string)=>string;
-  members:(id:string)=>string[]|undefined;refresh:(id:string)=>void;
+  members:(id:string)=>string[]|undefined;paneMembers:(id:string)=>string[]|undefined;refresh:(id:string)=>void;
   beginDrag:(id:string,event:ReactPointerEvent<HTMLElement>,edge?:string)=>void;
   register:(id:string,handle:NativePanelHandle)=>()=>void;removeMember:(id:string,force?:boolean)=>boolean;
   returnMembers:(ids:readonly string[])=>boolean;
@@ -40,18 +45,42 @@ type DesktopPanels={
   extract:(id:string)=>{restore:()=>boolean}|null;attach:(id:string)=>boolean;isComposing:()=>boolean;
   focus:(id:string)=>void;returnAll:()=>void;report:(message:string)=>void;toggleVisibility:(id:string)=>void;
 };
+import {useWindowAnnotations} from '../annotations/windowAnnotations';
+
 const Context=createContext<DesktopPanels|null>(null);
 export function useDesktopPanels(){const value=useContext(Context);if(!value)throw new Error('DesktopPanelsProvider is required.');return value;}
 
-function NativeGroupTabs({host,runtime,onDrag}:{host:LiveNativeHost;runtime:NativeHostRuntime;onDrag:DesktopPanels['beginDrag']}){
-  const dragged=useRef(new Set<string>());
-  return <div className="native-group-tabs" role="tablist" aria-label="组合面板标签" onPointerDown={event=>onDrag(host.id,event)} onKeyDown={event=>{
+function NativeGroupTabs({host,runtime,onDrag,panels=host.members,active=host.active,rect}:{host:LiveNativeHost;runtime:NativeHostRuntime;onDrag:DesktopPanels['beginDrag'];panels?:string[];active?:string;rect?:Rect}){
+  const dragged=useRef(new Set<string>()),{markedPanels}=useWindowAnnotations();
+  return <div className="native-group-tabs" style={rect?{left:rect.x+1,top:rect.y+1,width:`calc(${rect.width}px * var(--group-tabs-fraction) - 1px)`}:undefined} role="tablist" aria-label="组合面板标签" onPointerDown={event=>onDrag(host.id,event)} onKeyDown={event=>{
     if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();
-    const index=host.members.indexOf(host.active),next=event.key==='Home'?0:event.key==='End'?host.members.length-1:(index+(event.key==='ArrowRight'?1:host.members.length-1))%host.members.length;
-    runtime.select(host.id,host.members[next]);event.currentTarget.querySelectorAll<HTMLButtonElement>('button')[next]?.focus();
-  }}>{host.members.map(id=><button type="button" key={id} role="tab" data-panel-tab={id} data-panel-context={id} onContextMenu={event=>{event.preventDefault();event.stopPropagation();runtime.select(host.id,id);openPanelContextMenu(event.currentTarget.ownerDocument,id,event.clientX,event.clientY);}} aria-selected={host.active===id} tabIndex={host.active===id?0:-1}
+    const index=panels.indexOf(active),next=event.key==='Home'?0:event.key==='End'?panels.length-1:(index+(event.key==='ArrowRight'?1:panels.length-1))%panels.length;
+    runtime.select(host.id,panels[next]);event.currentTarget.querySelectorAll<HTMLButtonElement>('button')[next]?.focus();
+  }}>{panels.map(id=><button type="button" key={id} role="tab" data-panel-tab={id} data-window-annotation={markedPanels.indexOf(id)+1||undefined} data-panel-context={id} onContextMenu={event=>{event.preventDefault();event.stopPropagation();runtime.select(host.id,id);openPanelContextMenu(event.currentTarget.ownerDocument,id,event.clientX,event.clientY);}} aria-selected={active===id} tabIndex={active===id?0:-1}
     onPointerDown={event=>{event.stopPropagation();dragged.current.delete(id);host.resource.options.tabDrag?.(id,event,{fromTab:true,onFinish:value=>{if(value)dragged.current.add(id);}});}}
-    onClick={event=>{if(event.detail&&dragged.current.has(id)){dragged.current.delete(id);return;}runtime.select(host.id,id);}}>{runtime.handles.get(id)?.title()||id}{runtime.handles.get(id)?.dirty()&&<i className="dirty-dot"/>}</button>)}</div>;
+    onClick={event=>{if(event.detail&&dragged.current.has(id)){dragged.current.delete(id);return;}runtime.select(host.id,id);}}><span>{runtime.handles.get(id)?.title()||id}</span>{runtime.handles.get(id)?.dirty()&&<i className="dirty-dot"/>}</button>)}</div>;
+}
+
+
+function NativeGroupLayout({host,runtime,onDrag}:{host:LiveNativeHost;runtime:NativeHostRuntime;onDrag:DesktopPanels['beginDrag']}){
+  const child=host.resource.child;
+  const [size,setSize]=useState(()=>({width:child.innerWidth,height:child.innerHeight}));
+  useLayoutEffect(()=>{const resize=()=>setSize({width:child.innerWidth,height:child.innerHeight});child.addEventListener('resize',resize);return()=>child.removeEventListener('resize',resize);},[child]);
+  const content=nativeHostContent(host);
+  useLayoutEffect(()=>{runtime.syncVisibility(host);},[runtime,host,content]);
+  if(content?.type!=='split')return <NativeGroupTabs host={host} runtime={runtime} onDrag={onDrag}/>;
+  const geometry=measureDockTree(content,{x:0,y:0,...size}),panes=geometry.groups.map(g=>({id:g.id,panels:g.panels,active:g.active,rect:g.rect}));
+  for(const [id,rect] of Object.entries(geometry.panels))if(!geometry.groups.some(g=>g.panels.includes(id)))panes.push({id,panels:[id],active:id,rect});
+  function resize(divider:Divider,event:ReactPointerEvent<HTMLElement>){
+    if(event.button!==0)return;
+    event.preventDefault();const target=event.currentTarget, pointer=event.pointerId;
+    target.setPointerCapture(pointer);
+    const move=(e:PointerEvent)=>{if(e.pointerId!==pointer)return;const ratio=divider.axis==='x'?(e.clientX-divider.parent.x)/(divider.parent.width-5):(e.clientY-divider.parent.y)/(divider.parent.height-5);host.resource.options.resizeSplit?.(divider.id,ratio);};
+    const done=()=>{target.removeEventListener('pointermove',move);target.removeEventListener('lostpointercapture',done);};
+    target.addEventListener('pointermove',move);target.addEventListener('lostpointercapture',done);
+  }
+  const rules=Object.entries(geometry.panels).map(([id,r])=>'.desktop-panel-window .desktop-panel-surface > [data-panel-id="'+CSS.escape(id)+'"] { inset:auto!important;left:'+r.x+'px!important;top:'+r.y+'px!important;width:'+r.width+'px!important;height:'+r.height+'px!important; }');
+  return <><style>{rules.join('\n')}</style>{panes.map(pane=><NativeGroupTabs key={pane.id} {...pane} host={host} runtime={runtime} onDrag={onDrag}/>)}{geometry.dividers.map(divider=><div key={divider.id} className="native-pane-divider" role="separator" aria-orientation={divider.axis==='x'?'vertical':'horizontal'} style={{position:'fixed',left:divider.rect.x,top:divider.rect.y,width:divider.rect.width,height:divider.rect.height,cursor:divider.axis==='x'?'col-resize':'row-resize',zIndex:25,touchAction:'none'}} onPointerDown={event=>resize(divider,event)}/>)}</>;
 }
 
 export function DesktopPanelsProvider({children}:{children:ReactNode}){
@@ -89,12 +118,15 @@ export function DesktopPanelsProvider({children}:{children:ReactNode}){
   const docs=[document,...new Set([...windows.values()].map(child=>child.document))];
   return <Context.Provider value={{enabled:!!window.hiveDesktop?.isDesktop,windows,hiddenWindows,beginDrag,register,removeMember,returnMembers,refresh,attach,returnAll,report,
     owner:id=>runtime.registry.owner(id),panelForHost:id=>runtime.registry.get(id)?.active||id,members:id=>runtime.registry.get(id)?.members,
+    paneMembers:id=>{const host=runtime.registry.get(id);if(!host)return;const content=nativeHostContent(host);
+      if(content?.type!=='split')return host.members;
+      return findPanelGroup(content,id)?.panels||[id];},
     rect:id=>runtime.rect(id),lastRect:id=>runtime.lastRects.get(id)||null,
     detach:(id,options)=>runtime.open(id,options),detachGroup:(id,members,select,options)=>runtime.open(id,options,members,select),extract:id=>runtime.extract(id),
     isComposing:()=>composition.current||runtime.composing([...runtime.handles.keys()]),
     focus:id=>{const host=runtime.registry.get(id);if(host)window.hiveDesktop?.windowCommand('focus',host.id);else runtime.handles.get(id)?.focus();},
     toggleVisibility:id=>{const host=runtime.registry.get(id);if(!host)return;const hidden=host.members.every(member=>hiddenWindows.has(member));window.hiveDesktop?.windowCommand(hidden?'focus':'hide',host.id);setHiddenWindows(old=>{const next=new Set(old);for(const member of host.members){if(hidden)next.delete(member);else next.add(member);}return next;});}
-  }}>{children}{hosts.map(host=>createPortal(<NativeGroupTabs host={host} runtime={runtime} onDrag={beginDrag}/>,host.resource.child.document.body,'native-group-'+host.id))}
+  }}>{children}{hosts.map(host=>createPortal(<NativeGroupLayout host={host} runtime={runtime} onDrag={beginDrag}/>,host.resource.child.document.body,'native-group-'+host.id))}
     {error&&docs.map((doc,index)=>createPortal(<div className="desktop-window-error" role="alert">{error}<button onClick={()=>report('')}>关闭</button></div>,doc.body,'window-error-'+index))}
   </Context.Provider>;
 }

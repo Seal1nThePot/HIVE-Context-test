@@ -14,7 +14,7 @@ export default function TypographySettings(){
     {key:'lineHeight' as const,label:'行高',unit:'倍',description:'同一段内相邻文字行的高度，相对于正文与草稿字号。'},
     {key:'paragraphSpacing' as const,label:'段间距',unit:'em',description:'每个语义段落末尾的额外留白；1 em 等于一个正文字号。原文空行仍保留，软折行不重复增加。'},
   ];
-  return <fieldset className="typography-settings"><legend>正文与草稿排版</legend><p>只调整本机显示，保留 Markdown 原文。正文与草稿共用设置；段间距与首行缩进作用于实时预览。</p>
+  return <fieldset className="typography-settings"><legend>正文与草稿排版</legend><p>只调整本机显示，保留 Markdown 原文。正文与草稿共用设置。段间距与首行缩进作用于实时预览和实时编辑。</p>
     <SettingRow title={<label htmlFor="typography-preset">显示风格</label>} description={typographyPresets[preferences.preset].description}>
       <select id="typography-preset" value={preferences.preset} onChange={event=>setTypography(applyTypographyPreset(event.target.value as TypographyPreset))}>{Object.entries(typographyPresets).map(([key,preset])=><option key={key} value={key}>{preset.label}</option>)}</select>
       <button type="button" onClick={()=>setTypography(applyTypographyPreset(preferences.preset))}>恢复此预设</button>

@@ -28,8 +28,8 @@ const disk=(text='original',hash='baseline'):DiskFile=>({path:'draft.md',text,ha
 function fixture(){
     vi.useFakeTimers();hooks.slots=[];hooks.cursor=0;hooks.effects=[];
     const session:EditorSession={id:'editor',disk:disk(),state:EditorState.create({doc:'original'}),view:null,dirty:false};
-    const options={api:vi.fn<(...args:any[])=>Promise<any>>(),workspace:{id:'a',root:'first'},sessions:{current:new Map([['editor',session]])},activeSession:{current:'editor'},disk:{current:session.disk},switching:{current:false},structuring:{current:false},fileBusy:false,tick:0,autoSave:false,
-        setDirty:vi.fn(),setFileBusy:vi.fn(),setEntries:vi.fn(),setError:vi.fn(),inform:vi.fn(),redraw:vi.fn(),appAlive:{current:true}};
+    const options={api:vi.fn<(...args:any[])=>Promise<any>>(),workspace:{id:'a',root:'first'},sessions:{current:new Map([['editor',session]])},switching:{current:false},structuring:{current:false},fileBusy:false,tick:0,autoSave:false,
+        setFileBusy:vi.fn(),setEntries:vi.fn(),setError:vi.fn(),inform:vi.fn(),redraw:vi.fn(),appAlive:{current:true}};
     let result!:ReturnType<typeof useDocumentPersistence>;
     const render=()=>{hooks.cursor=0;hooks.effects=[];result=useDocumentPersistence(options);for(const effect of hooks.effects)effect();return result;};
     render();
@@ -39,6 +39,38 @@ function fixture(){
         response:(files:unknown[],extra:object={})=>({workspace:options.workspace,treeVersion:'opaque',files,...extra})};
 }
 afterEach(()=>{for(const slot of hooks.slots)slot?.cleanup?.();vi.useRealTimers();vi.clearAllMocks();});
+
+it('adopts the committed baseline when only the file-time record failed', async () => {
+    const t = fixture();
+    t.session.state = EditorState.create({ doc: 'local edits' });
+    t.session.dirty = true;
+    const warning = '正文已保存，但未能更新文件时间记录。';
+    t.options.api.mockResolvedValueOnce({ hash: 'committed', path: 'draft.md', warning });
+
+    await expect(t.result.saveSession('editor', true)).resolves.toBe(true);
+    expect(t.session.disk).toMatchObject({ text: 'local edits', hash: 'committed' });
+    expect(t.session.dirty).toBe(false);
+    expect(t.options.inform).toHaveBeenCalledWith(warning);
+    expect(t.options.setError).not.toHaveBeenCalled();
+});
+
+it('ignores a save receipt after switching repositories with the same open path', async () => {
+    const t = fixture();
+    t.session.state = EditorState.create({ doc: 'first repository edits' });
+    t.session.dirty = true;
+    const pending = deferred<unknown>();
+    t.options.api.mockReturnValueOnce(pending.promise);
+    const saving = t.result.saveSession('editor', true);
+
+    t.options.workspace = { id: 'b', root: 'second' };
+    t.options.sessions.current.set('new-tab', { ...t.session, id: 'new-tab', disk: disk() });
+    t.render();
+    pending.resolve({ hash: 'committed', path: 'draft.md' });
+
+    await expect(saving).resolves.toBe(true);
+    expect(t.options.sessions.current.get('new-tab')?.disk?.hash).toBe('baseline');
+    expect(t.result.savingPaths.current.size).toBe(0);
+});
 
 it('sends the learned tree version and processes disk updates without replacing unchanged entries',async()=>{
     const t=fixture(),entries=[{path:'draft.md',name:'draft.md',type:'file'}];

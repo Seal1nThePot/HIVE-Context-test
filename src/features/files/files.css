@@ -13,11 +13,11 @@
 }
 .app-header .workspace-switcher {
   min-width:0;max-width:calc(220px * var(--ui-scale,1));flex:0 1 auto;
-  gap:calc(6px * var(--ui-scale,1));padding:calc(4px * var(--ui-scale,1)) calc(8px * var(--ui-scale,1));
-  border:1px solid var(--hive-surface-border);border-radius:calc(7px * var(--ui-scale,1));
-  background:var(--hive-panel-bg);color:var(--text);line-height:1.2;
+  gap:calc(5px * var(--ui-scale,1));padding:calc(3px * var(--ui-scale,1)) calc(6px * var(--ui-scale,1));
+  border:0;border-radius:calc(4px * var(--ui-scale,1));
+  background:transparent;color:var(--hive-titlebar-text);line-height:1.2;
 }
-.app-header .workspace-switcher:hover {background:color-mix(in srgb,var(--hive-panel-bg) 87%,var(--text));color:var(--text);}
+.app-header .workspace-switcher:hover {background:color-mix(in srgb,var(--hive-titlebar-bg) 86%,var(--hive-titlebar-text));color:var(--hive-titlebar-text);}
 .app-header .workspace-switcher:focus-visible {outline-color:var(--hive-accent);}
 .workspace-switcher > b {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:calc(13px * var(--text-scale,1));font-weight:500;}
 .workspace-switcher > svg {flex:none;width:calc(13px * var(--ui-scale,1));height:calc(13px * var(--ui-scale,1));}
@@ -26,7 +26,7 @@
 .save-with-autosave {display:flex;flex-direction:column;align-items:center;padding-top:calc(4px * var(--ui-scale));}
 .quick-file-actions button {display:flex;align-items:center;justify-content:center;width:calc(28px * var(--ui-scale));height:calc(26px * var(--ui-scale));padding:calc(4px * var(--ui-scale));border:0;background:transparent;border-radius:4px;color:var(--text);}
 .quick-file-actions button:hover {background:var(--hive-selection-bg);}
-.quick-file-actions .header-save-as {margin-top:calc(4px * var(--ui-scale));}
+.quick-file-actions .header-help {margin-top:calc(4px * var(--ui-scale));}
 .quick-file-actions .auto-save-toggle {display:flex;align-items:center;justify-content:center;width:calc(32px * var(--ui-scale));height:calc(18px * var(--ui-scale));cursor:pointer;}
 /* Use the same contrast as titlebar icons, including when the input/selection colors match the bar. */
 .quick-file-actions .auto-save-toggle input {appearance:none;margin:0;width:calc(28px * var(--ui-scale));height:calc(14px * var(--ui-scale));border:calc(1px * var(--ui-scale)) solid var(--hive-titlebar-text);border-radius:999px;background:var(--hive-titlebar-bg);position:relative;cursor:pointer;flex:none;}
@@ -92,7 +92,7 @@
   .app-header .workspace-switcher {min-width:var(--header-control-width);gap:var(--header-control-gap);padding-inline:var(--header-control-gap);}
   .workspace-switcher > .workspace-switcher-chevron {display:none;}
   .quick-file-actions {gap:var(--header-control-gap);}
-  .quick-file-actions .header-save-as {width:var(--header-control-width);}
+  .quick-file-actions .header-help {width:var(--header-control-width);}
   .app-header .header-actions .connection {
     min-width:var(--header-control-width);
     max-width:clamp(var(--header-control-width),calc(50vw - 155px),100px);

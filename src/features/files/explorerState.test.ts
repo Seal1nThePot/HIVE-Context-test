@@ -31,10 +31,12 @@ it('offers the appropriate context actions for files, folders and empty space',(
   expect(menuActions('file')).toContain('tab');
   expect(menuActions('file')).toContain('duplicate');
   expect(menuActions('file')).not.toContain('createFile');
-  expect(menuActions('folder')).toContain('createFile');
+  expect(menuActions('file')).not.toContain('createFolder');
+  expect(menuActions('folder')).not.toContain('createFile');
+  expect(menuActions('folder')).not.toContain('createFolder');
   expect(menuActions('folder')).not.toContain('tab');
   expect(menuActions('folder')).not.toContain('duplicate');
-  expect(menuActions()).toEqual(['createFile','createFolder']);
+  expect(menuActions()).toEqual([]);
   expect(menuActions('file')).not.toContain('openTrash');
   expect(menuActions('folder')).not.toContain('openTrash');
 });

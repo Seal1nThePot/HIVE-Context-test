@@ -12,6 +12,8 @@
   --gold-bg: #d4ba7812;
   --text: #d9dcd3;
   --green: #98ac89;
+  --icon-accent: var(--hive-accent, currentColor);
+  --icon-danger: var(--hive-danger, currentColor);
   --outline-font-xs: max(10px, calc(10.5px * var(--text-scale, 1)));
   --outline-font-sm: max(10px, calc(11.5px * var(--text-scale, 1)));
   --outline-font-md: max(10px, calc(14px * var(--text-scale, 1)));
@@ -417,48 +419,6 @@ p {
   margin-left: auto;
   color: var(--hive-header-text);
 }
-.outline-list {
-  flex: 1;
-  overflow: auto;
-  min-height: 50px;
-  padding: 0 11px 12px;
-}
-.outline-list button {
-  width: 100%;
-  justify-content: flex-start;
-  gap: 9px;
-  text-align: left;
-  font-size: var(--outline-font-md);
-  line-height: 1.6;
-  min-height: 35px;
-  border-left: 1px solid transparent;
-  color: var(--text);
-  padding-right: 8px;
-}
-.outline-list button > span:last-child {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.outline-list button.active {
-  border-left-color: var(--hive-accent);
-  color: var(--hive-selection-text);
-  background: var(--hive-selection-bg);
-}
-.outline-list button.outline-document {
-  color: var(--text);
-  font-size: var(--outline-font-sm);
-  margin-bottom: 5px;
-}
-.outline-dot {
-  width: 3px;
-  height: 3px;
-  background: var(--hive-panel-bg);
-  border-radius: 50%;
-  margin-left: 2px;
-  margin-right: 2px;
-  flex-shrink: 0;
-}
 .sidebar-bottom {
   height: 43px;
   border-top: 1px solid var(--line);
@@ -712,6 +672,9 @@ p {
   border-color: var(--hive-accent);
   background: var(--gold-bg);
   color: var(--hive-accent);
+}
+.chat-context > .chat-basis-button:hover {
+  color: var(--text);
 }
 .chat-context > button:focus-visible {
   outline: 2px solid var(--hive-accent);
@@ -1440,11 +1403,8 @@ p {
   color: inherit;
   padding: 11px 14px;
 }
-.error-toast button {
-  color: inherit;
-  margin-left: 6px;
-  padding: 4px;
-}
+.error-toast > span {min-width:0;white-space:pre-line;overflow-wrap:anywhere;}
+.error-toast > button {flex:none;}
 .empty-note {
   font-size: calc(10px * var(--text-scale, 1));
   line-height: 1.8;
@@ -1710,25 +1670,36 @@ p {
   min-height: 0;
   background: var(--hive-panel-bg);
 }
+/* Scratch file actions share the document panel’s control sizing. */
 .scratch-toolbar {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 0 19px;
-  height: 44px;
-  min-height: 44px;
+  gap: var(--panel-header-inset);
+  padding: 0 var(--panel-header-inset);
+  min-height: var(--panel-header-height);
+  flex-wrap: wrap;
   border-bottom: 1px solid var(--hive-surface-border);
+  background: var(--hive-header-bg);
   color: var(--text);
   font-size: calc(11px * var(--text-scale, 1));
 }
-.scratch-toolbar > span {
-  margin-right: auto;
+.scratch-pad .scratch-toolbar > .scratch-file-link {
+  flex: 1;
+  min-width: 0;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+.scratch-toolbar > .icon-button {
+  flex: none;
+  width: var(--panel-action-size);
+  height: var(--panel-action-size);
+  padding: 0;
 }
 .scratch-meta {
-  font-size: calc(9px * var(--text-scale, 1));
+  font-size: var(--ui-description);
   color: var(--text);
-  padding: 11px 20px 5px;
-  line-height: 1.7;
+  padding: calc(8px * var(--ui-scale)) var(--panel-header-inset);
+  line-height: var(--ui-line-height);
 }
 .scratch-loading {
   flex: 1;
@@ -1770,147 +1741,10 @@ p {
   gap: 5px;
   white-space: nowrap;
 }
-.outline-view-switch button.active {
-  color: var(--hive-selection-text);
-  border-bottom-color: var(--hive-accent);
-}
 .writing-nodes {
   overflow: auto;
   padding: 0 13px 18px;
   flex: 1;
-}
-.outline-explainer {
-  font-size: var(--outline-font-sm);
-  color: var(--text);
-  margin: 0 3px 12px;
-}
-.writing-node {
-  position: relative;
-  background: var(--hive-panel-bg);
-  border: 1px solid var(--hive-surface-border);
-  border-radius: 6px;
-  padding: 10px 10px 8px;
-  margin-bottom: 10px;
-  outline-offset: 1px;
-}
-.writing-node.selected {
-  border-color: var(--hive-accent);
-  background: var(--hive-selection-bg);
-}
-.node-title {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-.node-title > span {
-  font-size: var(--outline-font-xs);
-  color: var(--hive-header-text);
-}
-.node-title > button:not(.icon-button) {
-  font-size: var(--outline-font-md);
-  line-height: 1.7;
-  padding: 0;
-  text-align: left;
-  justify-content: flex-start;
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  color: var(--hive-header-text);
-}
-.node-title .icon-button {
-  width: 20px;
-  height: 22px;
-  color: var(--hive-header-text);
-}
-.writing-node > p {
-  font-size: var(--outline-font-sm);
-  line-height: 1.8;
-  color: var(--text);
-  margin: 8px 0 11px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.node-footer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 5px;
-  justify-content: space-between;
-  border-top: 1px solid var(--hive-surface-border);
-  padding-top: 7px;
-}
-.node-footer > span {
-  font-size: var(--outline-font-xs);
-  color: var(--hive-header-text);
-}
-.node-footer > button {
-  padding: 0;
-  font-size: var(--outline-font-xs);
-  color: var(--hive-header-text);
-  gap: 1px;
-}
-.node-description-form {
-  margin-top: 9px;
-}
-.node-description-form textarea {
-  width: 100%;
-  height: 130px;
-  padding: 8px;
-  border: 1px solid var(--hive-input-border);
-  border-radius: 4px;
-  background: var(--hive-input-bg);
-  resize: vertical;
-  font-size: var(--outline-font-sm);
-  line-height: 1.8;
-}
-.node-description-form > div {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 5px;
-}
-.node-description-form button {
-  font-size: var(--outline-font-sm);
-  color: var(--text);
-  padding: 3px 2px;
-  gap: 4px;
-}
-.outline-description-tooltip {
-  position: fixed;
-  z-index: 90;
-  width: 280px;
-  max-height: 300px;
-  overflow: auto;
-  padding: 16px;
-  border: 1px solid var(--hive-popup-border, var(--line));
-  border-radius: 8px;
-  background: var(--hive-popup-bg, var(--panel));
-  box-shadow: var(--hive-popup-shadow);
-  pointer-events: none;
-}
-.outline-description-tooltip > small {
-  display: block;
-  font-size: var(--outline-font-xs);
-  color: var(--muted);
-  letter-spacing: 0.5px;
-  margin-bottom: 7px;
-}
-.outline-description-tooltip > strong {
-  display: block;
-  font-size: var(--outline-font-md);
-  color: var(--hive-popup-text, var(--text));
-  font-weight: 500;
-  margin-bottom: 8px;
-}
-.outline-description-tooltip > p {
-  white-space: pre-wrap;
-  font-size: var(--outline-font-sm);
-  color: var(--hive-popup-text, var(--text));
-  line-height: 1.9;
 }
 .bottom-bar {
   position: relative;
@@ -2098,9 +1932,6 @@ p {
     font-size: calc(10px * var(--text-scale, 1));
     padding-left: 14px !important;
   }
-  .outline-list button {
-    padding-left: 9px !important;
-  }
   .document-tab {
     padding: 0 13px;
     font-size: calc(10px * var(--text-scale, 1));
@@ -2244,7 +2075,7 @@ p {
   .document-toolbar {
     padding-left: 18px;
   }
-  .document-pane .cm-content {
+  .document-pane .cm-content, .scratch-pad .cm-content {
     font-size: calc(14px * var(--text-scale, 1));
   }
   .document-pane .cm-editor {
@@ -2272,15 +2103,12 @@ p {
 /* Make document emphasis legible even when a chosen CJK font lacks italic faces. */
 .cm-editor .cm-content .cm-preview-strong,.cm-editor .cm-table-cell-preview strong {font-synthesis:weight style;font-weight:800;}
 .cm-editor .cm-content .cm-preview-emphasis,.cm-editor .cm-table-cell-preview em {font-synthesis:weight style;font-style:italic;}
-.workspace-panel:is(.outline-workspace, .toc-workspace) > .independent-panel-header > b {font-size:var(--outline-font-sm);}
 
 /* At very narrow panel widths, wrap controls instead of cutting them off. */
 .outline-workspace,.scratch-workspace,.find-replace-workspace,.repositories-workspace,.basis-workspace {container-type:inline-size;container-name:compact-panel;min-width:0;}
 @container compact-panel (max-width:180px) {
   .outline-workspace .outline-view-switch {gap:4px;padding:4px;}
   .outline-workspace .outline-view-switch > .new-outline-node {margin-left:0;}
-  .scratch-workspace .scratch-toolbar {height:auto;min-height:44px;padding:4px;flex-wrap:wrap;}
-  .scratch-workspace .scratch-toolbar > span {flex-basis:100%;}
   .find-replace-workspace .find-replace-content {padding:5px;}
   .find-replace-workspace .find-input-row {flex-wrap:wrap;}
   .find-replace-workspace .find-input-row input {flex-basis:100%;}
@@ -2305,3 +2133,4 @@ p {
 .outline-workspace .sidebar-content {flex:1 0 120px;min-height:120px;}
 .properties-workspace .note-properties-panel {flex:1 0 180px;min-height:180px;}
 .properties-workspace .properties-scroll {flex:1 0 80px;min-height:80px;}
+.chat-panel:is([data-chat-drop],[data-reference-pointer-active]) { outline:2px dashed var(--hive-accent);outline-offset:-3px; }

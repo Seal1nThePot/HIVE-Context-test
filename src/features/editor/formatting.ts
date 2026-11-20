@@ -4,14 +4,14 @@ import {markdownLanguage} from '@codemirror/lang-markdown';
 import {frontmatterBlock} from '../../shared/frontmatter';
 
 export type Alignment='left'|'center'|'right';
-export type InlineFormat='bold'|'italic'|'underline'|'strike'|'inlineCode';
+export type InlineFormat='bold'|'italic'|'underline'|'strike'|'inlineCode'|'highlight';
 type Span={from:number;to:number;kind?:string};
 export type AlignedBlock=Span & {openTo:number;closeFrom:number;contentFrom:number;contentTo:number;alignment:Alignment};
-export type UnderlineSpan=Span & {contentFrom:number;contentTo:number};
+export type InlineTagSpan=Span & {contentFrom:number;contentTo:number};
 
 // Inspect text only. HTML is never injected into the DOM or evaluated.
 export function inspectFormatting(state:EditorState){
-  const text=state.doc.toString(),excluded:Span[]=[],htmlBlocks:Span[]=[],underlines:UnderlineSpan[]=[],blocks:AlignedBlock[]=[];
+  const text=state.doc.toString(),excluded:Span[]=[],htmlBlocks:Span[]=[],underlines:InlineTagSpan[]=[],highlights:InlineTagSpan[]=[],blocks:AlignedBlock[]=[];
   const metadata=frontmatterBlock(text);if(metadata)excluded.push({from:metadata.from,to:metadata.to,kind:'Frontmatter'});
   markdownLanguage.parser.parse(text).iterate({enter(node){
     if(/^(FencedCode|CodeBlock|InlineCode|Escape)$/.test(node.name)){
@@ -20,11 +20,15 @@ export function inspectFormatting(state:EditorState){
     if(node.name==='HTMLBlock')htmlBlocks.push({from:node.from,to:node.to});
   }});
   const ignored=(from:number,to:number)=>excluded.some(span=>from<span.to&&to>span.from);
-  const stack:number[]=[];
-  for(const match of text.matchAll(/<u>|<\/u>/g)){
+  const tagStarts={u:[] as number[],mark:[] as number[]};
+  for(const match of text.matchAll(/<(\/?)(u|mark)>/g)){
     const from=match.index,to=from+match[0].length;if(ignored(from,to))continue;
-    if(match[0]==='<u>')stack.push(from);
-    else {const start=stack.pop();if(start!==undefined)underlines.push({from:start,to,contentFrom:start+3,contentTo:from});}
+    const tag=match[2] as keyof typeof tagStarts, stack=tagStarts[tag];
+    if(!match[1])stack.push(from);
+    else {
+      const start=stack.pop();
+      if(start!==undefined)(tag==='u'?underlines:highlights).push({from:start,to,contentFrom:start+tag.length+2,contentTo:from});
+    }
   }
   const divs:({from:number;openTo:number;alignment:Alignment}|null)[]=[];
   for(let number=1;number<=state.doc.lines;number++){
@@ -39,16 +43,16 @@ export function inspectFormatting(state:EditorState){
     if(contentTo>contentFrom&&text[contentTo-1]==='\n')contentTo--;
     blocks.push({...open,to:line.to,closeFrom:line.from,contentFrom,contentTo:Math.max(contentFrom,contentTo)});
   }
-  return {blocks,underlines,excluded,htmlBlocks};
+  return {blocks,underlines,highlights,excluded,htmlBlocks};
 }
 
-const tokens:Record<InlineFormat,[string,string]>={bold:['**','**'],italic:['*','*'],underline:['<u>','</u>'],strike:['~~','~~'],inlineCode:['`','`']};
+const tokens:Record<InlineFormat,[string,string]>={bold:['**','**'],italic:['*','*'],underline:['<u>','</u>'],strike:['~~','~~'],inlineCode:['`','`'],highlight:['<mark>','</mark>']};
 const historyBoundary={annotations:isolateHistory.of('full'),userEvent:'input.format',scrollIntoView:true};
 function checkEditable(state:EditorState){if(state.readOnly)throw new Error('当前编辑区只读。');}
 
 export function inlineFormatting(state:EditorState,format:InlineFormat):TransactionSpec{
   checkEditable(state);
-  const {excluded,underlines}=inspectFormatting(state),[open,close]=tokens[format];
+  const {excluded,underlines,highlights}=inspectFormatting(state),[open,close]=tokens[format];
   for(const range of state.selection.ranges)if(excluded.some(span=>(format!=='inlineCode'||span.kind!=='InlineCode')&&(range.empty?range.from>=span.from&&range.from<span.to:range.from<span.to&&range.to>span.from)))throw new Error('请在代码区域之外使用文字格式。');
   if(format==='inlineCode')return {...state.changeByRange(range=>{
     const existing=excluded.find(span=>span.kind==='InlineCode'&&range.from>=span.from&&range.to<=span.to);
@@ -71,8 +75,21 @@ export function inlineFormatting(state:EditorState,format:InlineFormat):Transact
   const spec=state.changeByRange(range=>{
     const selected=state.sliceDoc(range.from,range.to);
     if(!range.empty&&!selected.trim())return {range};
-    const enclosed=state.sliceDoc(Math.max(0,range.from-open.length),range.from)===open&&state.sliceDoc(range.to,range.to+close.length)===close;
     const direction=(from:number,to:number)=>EditorSelection.range(range.anchor<=range.head?from:to,range.anchor<=range.head?to:from);
+    if(format==='highlight'){
+      const span=highlights.filter(item=>range.from>=item.contentFrom&&range.to<=item.contentTo)
+        .sort((a,b)=>(a.to-a.from)-(b.to-b.from))[0];
+      if(span){
+        const removeOpen=range.empty||range.from===span.contentFrom,removeClose=range.empty||range.to===span.contentTo;
+        const offset=removeOpen?-open.length:close.length;
+        return {changes:[
+          {from:removeOpen?span.from:range.from,to:removeOpen?span.contentFrom:range.from,insert:removeOpen?'':close},
+          {from:removeClose?span.contentTo:range.to,to:removeClose?span.to:range.to,insert:removeClose?'':open},
+        ],range:direction(range.from+offset,range.to+offset)};
+      }
+      if(highlights.some(item=>range.from<item.to&&range.to>item.from)&&!(selected.startsWith(open)&&selected.endsWith(close)))throw new Error('请选择完整的高亮文字，或在未高亮文字中设置高亮。');
+    }
+    const enclosed=state.sliceDoc(Math.max(0,range.from-open.length),range.from)===open&&state.sliceDoc(range.to,range.to+close.length)===close;
     if(enclosed)return {changes:[{from:range.from-open.length,to:range.from,insert:''},{from:range.to,to:range.to+close.length,insert:''}],range:direction(range.from-open.length,range.to-open.length)};
     const lines=selected.split('\n'),remove=!!selected&&lines.filter(line=>line.trim()).every(line=>{const core=line.trim();return core.startsWith(open)&&core.endsWith(close)&&core.length>=open.length+close.length;});
     const insert=range.empty?open+close:lines.map(line=>{
@@ -140,7 +157,7 @@ export function lineFormatting(state:EditorState,kind:'bullet'|'numbered'|'quote
   return {...historyBoundary,changes:set,selection:state.selection.map(set)};
 }
 
-export function insertStructure(state:EditorState,kind:'codeBlock'|'link'|'rule'):TransactionSpec{
+export function insertStructure(state:EditorState,kind:'codeBlock'|'link'|'rule'|'details'):TransactionSpec{
   checkEditable(state);const range=state.selection.main;
   if(state.selection.ranges.length!==1)throw new Error('请使用一个连续选区插入结构。');
   const {excluded}=inspectFormatting(state);
@@ -151,6 +168,16 @@ export function insertStructure(state:EditorState,kind:'codeBlock'|'link'|'rule'
     return {...historyBoundary,changes:{from:range.from,to:range.to,insert},selection:EditorSelection.range(start,start+8)};
   }
   if(kind==='rule')return {...historyBoundary,changes:{from:range.to,insert:'\n\n---\n\n'},selection:EditorSelection.cursor(range.to+7)};
+  if(kind==='details'){
+    const first=state.doc.lineAt(range.from),last=state.doc.lineAt(Math.max(range.from,range.to-1));
+    const insertAt=range.empty?range.from:first.from, endAt=range.empty?range.to:last.to;
+    if(excluded.some(span=>insertAt<span.to&&endAt>=span.from&&span.kind!=='Escape'))throw new Error('请在代码区域之外插入折叠块。');
+    const before=/\S/.test(state.sliceDoc(first.from,insertAt))?'\n\n':insertAt>0&&state.sliceDoc(insertAt-2,insertAt)!=='\n\n'?'\n':'';
+    const after=/\S/.test(state.sliceDoc(endAt,last.to))?'\n\n':endAt<state.doc.length&&state.sliceDoc(endAt,endAt+2)!=='\n\n'?'\n':'';
+    const titleStart=before+'<details>\n<summary>', body=state.sliceDoc(insertAt,endAt)||'折叠块内容';
+    const insert=titleStart+'</summary>\n\n'+body+'\n\n</details>'+after;
+    return {...historyBoundary,changes:{from:insertAt,to:endAt,insert},selection:EditorSelection.cursor(insertAt+titleStart.length)};
+  }
   const first=state.doc.lineAt(range.from),last=state.doc.lineAt(range.to>range.from&&state.doc.lineAt(range.to).from===range.to?range.to-1:range.to);
   const content=state.sliceDoc(first.from,last.to),runs=content.match(/`+/g)||[],fence='`'.repeat(Math.max(3,...runs.map(run=>run.length+1)));
   const before=first.from>0&&state.doc.line(first.number-1).text.trim()?'\n':'',after=last.to<state.doc.length&&state.doc.line(last.number+1).text.trim()?'\n':'';

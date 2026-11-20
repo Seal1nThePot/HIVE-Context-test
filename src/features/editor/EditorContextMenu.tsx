@@ -3,7 +3,8 @@ import {createPortal} from 'react-dom';
 import {EditorSelection,EditorState} from '@codemirror/state';
 import type {EditorView} from '@codemirror/view';
 import {selectAll} from '@codemirror/commands';
-import {Scissors,Copy,ClipboardPaste,Clipboard,Highlighter,List,TextSelect,Eraser} from 'lucide-react';
+import {Scissors,Copy,ClipboardPaste,Clipboard,Icon,TextSelect,FileInput,Sparkles} from "../../shared/icons";
+import {textForQuickAI} from '../chat/contextDraft';
 import {previewPlan} from './markdownPresentation';
 import {cellContent} from './tableWidget';
 import {tableCell} from './tableViewport';
@@ -16,13 +17,14 @@ export function decodedOffsets(raw:string){const offsets=[0];let pos=0;while(pos
 
 export function clipboardChange(state:EditorState,selection:EditorSelection,inserted:string){const selected=state.update({selection}).state;return selected.changeByRange(range=>({changes:{from:range.from,to:range.to,insert:inserted},range:EditorSelection.cursor(range.from+inserted.length)}));}
 
-export default function EditorContextMenu({editor,point,input,onClose,onMark,onUnmark,annotationId,onShowAnnotations,onError,link,onOpenLink}:{
-  link?:string;onOpenLink?:(target:string)=>void;editor:EditorView;point:{x:number;y:number};input?:HTMLTextAreaElement;onClose:()=>void;onMark:()=>void;onUnmark?:(id?:string)=>void;annotationId?:string;onShowAnnotations?:(context:AnnotationContext)=>void;onError?:(message:string)=>void;
+export default function EditorContextMenu({editor,point,input,onClose,onMark,onUnmark,annotationId,onShowAnnotations,onError,link,onOpenLink,onDraftSelection}:{
+  link?:string;onOpenLink?:(target:string)=>void;editor:EditorView;point:{x:number;y:number;position?:number|null};input?:HTMLTextAreaElement;onClose:()=>void;onMark:()=>void;onUnmark?:(id?:string)=>void;annotationId?:string;onShowAnnotations?:(context:AnnotationContext)=>void;onError?:(message:string)=>void;onDraftSelection?:(text:string)=>void;
 }){
   const menu=useRef<HTMLDivElement>(null),[position,setPosition]=useState(point);
   const document=usePanelDocument(),window=document.defaultView!;
   const snapshot=useRef({doc:editor.state.doc,selection:editor.state.selection,input,inputValue:input?.value,start:input?.selectionStart??0,end:input?.selectionEnd??0}).current;
   const hasSelection=input?snapshot.start!==snapshot.end:snapshot.selection.ranges.some(range=>!range.empty);
+  const draftSelection=!input&&onDraftSelection?textForQuickAI(editor.state,snapshot.selection,point.position):'';
   const readOnly=editor.state.readOnly||!!input?.readOnly;
   const focusTarget=()=>input?.isConnected?input.focus():editor.focus();
   useLayoutEffect(()=>{
@@ -34,8 +36,8 @@ export default function EditorContextMenu({editor,point,input,onClose,onMark,onU
   useEffect(()=>{
     const outside=(event:PointerEvent)=>{if(!menu.current?.contains(event.target as Node))onClose();};
     const close=()=>onClose();
-    document.addEventListener('pointerdown',outside);window.addEventListener('resize',close);window.addEventListener('blur',close);
-    return()=>{document.removeEventListener('pointerdown',outside);window.removeEventListener('resize',close);window.removeEventListener('blur',close);};
+    document.addEventListener('pointerdown',outside,true);window.addEventListener('resize',close);window.addEventListener('blur',close);
+    return()=>{document.removeEventListener('pointerdown',outside,true);window.removeEventListener('resize',close);window.removeEventListener('blur',close);};
   },[onClose,document,window]);
   function run(action:()=>void){onClose();action();}
   function showLocal(){
@@ -81,10 +83,11 @@ export default function EditorContextMenu({editor,point,input,onClose,onMark,onU
       <button type="button" role="menuitem" title="纯文本粘贴" aria-label="纯文本粘贴" disabled={readOnly} onClick={()=>void clipboard('plain')}><Clipboard size={16}/><span>纯文本</span></button>
     </div>
     <hr/>
-    {link&&onOpenLink&&<button type="button" role="menuitem" onClick={()=>run(()=>onOpenLink(link))}>跳转至文件</button>}
-    {!input&&<button type="button" role="menuitem" disabled={!hasSelection} onClick={()=>run(onMark)}><Highlighter size={15}/><span>标注选区</span><kbd>Ctrl+Alt+M</kbd></button>}
-    {!input&&onUnmark&&<button type="button" role="menuitem" disabled={!hasSelection&&!annotationId} onClick={()=>run(()=>onUnmark(annotationId))}><Eraser size={15}/><span>取消标注</span></button>}
-    {onShowAnnotations&&<button type="button" role="menuitem" onClick={()=>run(showLocal)}><List size={15}/><span>查看文本标注</span></button>}
+    {link&&onOpenLink&&<button type="button" role="menuitem" onClick={()=>run(()=>onOpenLink(link))}><FileInput size={15}/><span>跳转至文件</span></button>}
+    {!!draftSelection.trim()&&<button type="button" role="menuitem" onClick={()=>run(()=>{if(!valid()){onError?.('正文或选区已变化，请再次打开右键菜单。');return;}onDraftSelection?.(draftSelection);})}><Sparkles size={15}/><span>添加到 AI 输入框</span></button>}
+    {!input&&<button type="button" role="menuitem" disabled={!hasSelection} onClick={()=>run(onMark)}><Icon name="annotation.markSelection" size={15}/><span>标注选区</span><kbd>Ctrl + 单击</kbd></button>}
+    {!input&&onUnmark&&<button type="button" role="menuitem" disabled={!hasSelection&&!annotationId} onClick={()=>run(()=>onUnmark(annotationId))}><Icon name="annotation.unmarkSelection" size={15}/><span>取消标注</span></button>}
+    {onShowAnnotations&&<button type="button" role="menuitem" onClick={()=>run(showLocal)}><Icon name="annotation.showLocal" size={15}/><span>查看文本标注</span></button>}
     <button type="button" role="menuitem" onClick={()=>run(()=>{if(input){input.focus();input.select();}else{selectAll(editor);editor.focus();}})}><TextSelect size={15}/><span>全选</span><kbd>Ctrl+A</kbd></button>
   </div>,document.body);
 }

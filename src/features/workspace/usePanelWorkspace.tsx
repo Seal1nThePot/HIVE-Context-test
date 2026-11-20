@@ -1,8 +1,9 @@
+import {floatingDropContent,pruneFloatingGroup,type FloatingGroup} from './floatingLayout';
 import { createRef, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { dockedPanels, dockResizeEdges, measureDockTree, resizeDockSplit, PANEL_HEADER_HEIGHT, type DockEdge, type DockPlacementEdge, type Rect,type PanelGroup } from "./panelLayout";
+import { dockedPanels, dockResizeEdges, measureDockTree, resizeDockSplit, PANEL_HEADER_HEIGHT, type DockEdge, type DockPlacementEdge, type Rect } from "./panelLayout";
 import { completeWorkspace, defaultWorkspace, detachWorkspacePanel, hideWorkspacePanel, openWorkspacePanel, placeWorkspacePanel, placeWorkspacePanelAtEdge, floatWorkspaceGroup, placeWorkspaceGroup, closeWorkspacePanelPreservingAutoHide, type WorkspaceLayout } from "./workspaceState";
-import {autoHideIsNative,autoHidePanelRect,collapseAutoHidePanel,nearestPanelEdge,panelAutoHidePlacement,releaseAutoHidePanel,withAutoHideMetadata,repositionAutoHidePanel} from "./autoHide";
+import {autoHideIsNative,autoHidePanelRect,collapseAutoHidePanel,isExpandedAutoHidePanel,nearestPanelEdge,panelAutoHidePlacement,releaseAutoHidePanel,withAutoHideMetadata,repositionAutoHidePanel} from "./autoHide";
 import DockGuides from "./DockGuides";
 import {DockIntent,type DockScene,type DockPointer,type DockFeedback,type DockGuide} from "./dockInteraction";
 import type { DragControl } from "./PanelControl";
@@ -83,7 +84,12 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
   }
   const tabGroups=useMemo(()=>[
     ...measurements.groups.map(group=>({...group,floating:false})),
-    ...visibleFloatingGroups(layout.floatingGroups,detachedIds).map(group=>({...group,rect:fit(layout.rects[group.id]||suggestedRect(group.active),group.id),floating:true}))
+    ...visibleFloatingGroups(layout.floatingGroups,detachedIds).flatMap(group=>{
+      const rect=fit(layout.rects[group.id]||suggestedRect(group.active),group.id);
+      if(!group.content)return [{...group,rect,floating:true}];
+      const panes=measureDockTree(group.content,rect),seen=new Set(panes.groups.flatMap(g=>g.panels));
+      return [...panes.groups,...Object.entries(panes.panels).filter(([id])=>!seen.has(id)).map(([id,rect])=>({type:'group' as const,id:'pane:'+id,panels:[id],active:id,rect}))].map(pane=>({...pane,floating:true}));
+    })
   ],[layout,bounds,measurements,detachedIds]);
   function groupFor(id:string){return tabGroups.find(group=>group.panels.includes(id));}
   function currentRect(id:string,wholeGroup=false):Rect{
@@ -113,9 +119,13 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
     // is projected straight into a native host rather than shown inside the main page.
     for(const group of layout.floatingGroups){
       const members=group.panels.filter(id=>layout.open.includes(id));
-      if(members.length>1&&!members.some(id=>desktop.windows.has(id)||lifecycle.opening(id))){
-        const opening={...group,panels:members};prepareNativeGroup(opening,layout.rects[group.id]||suggestedRect(group.active));lifecycle.queueGroup(opening);
-      }
+      if(members.length<2||members.some(id=>lifecycle.opening(id)||lifecycle.handoffs.has(id)))continue;
+      const live=members.filter(id=>desktop.windows.has(id));
+      if(live.length===members.length&&live.every(id=>desktop.windows.get(id)===desktop.windows.get(live[0])))continue;
+      // Reopening a closed pane can add a member to a still-open single-panel host.
+      // Move all surfaces together so the new host can own the entire restored tree.
+      if(live.length&&!desktop.returnMembers(live))continue;
+      const opening=pruneFloatingGroup(group,members);prepareNativeGroup(opening,layout.rects[group.id]||suggestedRect(group.active));lifecycle.queueGroup(opening);
     }
     for(const id of nativeProjection){
       if(!lifecycle.homes.has(id)){const placement=layout.autoHide?.[id];lifecycle.homes.set(id,{rect:placement?autoHidePanelRect(placement,boundsRef.current,iconAnchors.current.get(id)):layout.rects[id]||suggestedRect(id),placement});if(placement&&layout.autoHideActive===id)update(old=>openNativePanel(old,id));}
@@ -124,7 +134,11 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
     for(const [id,operation] of lifecycle.pendingGroups){
       lifecycle.pendingGroups.delete(id);const group=lifecycle.groups.get(id),home=group&&lifecycle.homes.get(group.active);
       if(!group||!home||!group.panels.every(member=>latest.current.open.includes(member))){lifecycle.finish(operation,'cancelled');continue;}
-      desktop.detachGroup(group.active,group.panels,open,{rect:()=>home.rect,...nativeCallbacks(operation,group.active,group),tabDrag:beginTabDrag});
+      desktop.detachGroup(group.active,group.panels,open,{rect:()=>home.rect,...nativeCallbacks(operation,group.active,group),tabDrag:beginTabDrag,
+        content:()=>latest.current.floatingGroups.find(g=>g.id===group.id)?.content,
+        resizeSplit:(split,ratio)=>{if(latest.current.locked||group.panels.some(member=>isPanelPositionLocked(latest.current,member)))return;
+          update(old=>({...old,floatingGroups:old.floatingGroups.map(g=>g.id===group.id&&g.content?{...g,content:resizeDockSplit(g.content,split,ratio)!}:g)}));desktop.refresh(group.active);},
+      });
       group.panels.forEach(member=>lifecycle.pendingOpen.delete(member));
     }
     for(const [id,operation] of lifecycle.pendingOpen){
@@ -147,7 +161,7 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
   },[desktop.windows]);
   function toggleAutoHide(id:string,anchor?:Rect){
     if(anchor)iconAnchors.current.set(id,anchor);
-    if(latest.current.autoHideActive===id||desktop.windows.has(id)&&latest.current.autoHide?.[id]){if(desktop.windows.has(id))hide(id,true);else update(old=>collapseAutoHidePanel(old,id));return;}
+    if(isExpandedAutoHidePanel(latest.current,id)||desktop.windows.has(id)&&latest.current.autoHide?.[id]){if(desktop.windows.has(id))hide(id,true);else update(old=>collapseAutoHidePanel(old,id));return;}
     open(id);
   }
   function repositionAutoHide(id:string,offset:number,edge?:'left'|'right'){
@@ -168,7 +182,7 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
     return transition('dock',ids,()=>update(()=>next));
   }
   useEffect(()=>{
-    const id=layout.autoHideActive;if(!id)return;
+    const id=layout.autoHideActive;if(!id||id==='conversation')return;
     const outside=(event:globalThis.PointerEvent)=>{
       if(desktop.windows.has(id)||lifecycle.pendingOpen.has(id)||lifecycle.homes.has(id))return;
       const target=event.target as Element;
@@ -204,8 +218,17 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
   }
   function dockingScene(id:string):DockScene {
     const state=latest.current,nativeIds=new Set([...desktop.windows.keys(),...state.open.filter(panel=>lifecycle.opening(panel))]),tree=visibleDockTree(state.tree,nativeIds),docked=dockedPanels(tree),groups=visibleFloatingGroups(state.floatingGroups,nativeIds),grouped=new Set(groups.flatMap(group=>group.panels));
-    const floating=groups.map(group=>({id:group.active,rect:fit(state.rects[group.id]||suggestedRect(group.active),group.id),layer:state.layers[group.id]||30}));
+    const floating:DockScene['floating']=tabGroups.filter(group=>group.floating).map(group=>({id:group.active,rect:group.rect,layer:state.layers[state.floatingGroups.find(g=>g.panels.includes(group.active))?.id||group.id]||30}));
     for(const target of state.open)if(target!==id&&!nativeIds.has(target)&&!docked.includes(target)&&!grouped.has(target))floating.push({id:target,rect:state.autoHide?.[target]?autoHidePanelRect(state.autoHide[target],boundsRef.current,iconAnchors.current.get(target)):fit(state.rects[target]||suggestedRect(target),target),layer:state.layers[target]||panelLayers.floating});
+    const seen=new Set<string>(),source=desktop.owner(id);
+    for(const member of desktop.windows.keys()){
+      const host=desktop.owner(member);if(host===source||seen.has(host)||desktop.hiddenWindows.has(member)||member==='global-toolbar')continue;
+      seen.add(host);const frame=desktop.rect(member);if(!frame)continue;
+      const current=desktop.panelForHost(host),group=state.floatingGroups.find(g=>g.panels.includes(current));
+      const local=group?.content?measureDockTree(group.content,frame):null;
+      const visible=local?Object.keys(local.panels).filter(id=>!local.groups.some(g=>g.panels.includes(id)&&g.active!==id)):[current];
+      for(const id of visible)floating.push({id,rect:local?.panels[id]||frame,layer:1000+(state.layers[group?.id||id]||0),host});
+    }
     return {panel:id,tree,bounds:boundsRef.current,viewport:{x:0,y:0,width:window.innerWidth,height:window.innerHeight},floating,scale:headerHeight/PANEL_HEADER_HEIGHT,locked:!!state.locked,positionLockedPanels:state.open.filter(panel=>isPanelPositionLocked(state,panel)),protectedPanels:isEditorPanel(id)?[]:[PRIMARY_EDITOR,...(tabGroups.find(group=>group.panels.includes(PRIMARY_EDITOR))?.panels||[])],dedupeEquivalent:desktop.enabled};
   }
   function commitNativeDrop(id:string,guide:DockGuide|null,rail:ReturnType<typeof railDropAt>){
@@ -221,6 +244,14 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
     if(!guide)return;
     const allowed=id===PRIMARY_EDITOR?!state.locked&&!isPanelPositionLocked(state,guide.target)&&(guide.edge!=='center'||isEditorPanel(guide.target)):canPlacePanel(state,id,guide.target,guide.edge);
     if(!allowed||members.some(member=>member!==PRIMARY_EDITOR&&!canPlacePanel(state,member,guide.target,guide.edge)))return;
+    if(guide.scope==='panel'&&desktop.windows.has(guide.target)){
+      if(members.includes(guide.target)||members.includes(PRIMARY_EDITOR)||guide.target===PRIMARY_EDITOR)return;
+      const targetMembers=desktop.members(guide.target)||[guide.target];
+      if(targetMembers.includes(PRIMARY_EDITOR)||targetMembers.some(member=>isPanelPositionLocked(state,member)))return;
+      const targetFrame=desktop.rect(guide.target);if(!targetFrame)return;
+      const target=nativeGroupEntry(guide.target)?.[1],joined=floatingDropContent(target,guide.target,nativeGroup,id,guide.edge);
+      return transition('dock',[...targetMembers,...members],()=>{update(old=>floatWorkspaceGroup(old,joined,targetFrame));onActivate?.(id);});
+    }
     return transition('dock',members,()=>{
       update(old=>nativeGroup?placeWorkspaceGroup(old,nativeGroup,guide.target,guide.edge,currentRect(guide.target,true),guide.scope==='workspace'):guide.scope==='workspace'?placeWorkspacePanelAtEdge(old,id,guide.edge as DockEdge):placeWorkspacePanel(old,id,guide.target,guide.edge,currentRect(guide.target,true)));onActivate?.(id);
     });
@@ -283,7 +314,7 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
     if(!lifecycle.homes.has(id))lifecycle.homes.set(id,{rect,placement:latest.current.autoHide?.[id]});
     update(old=>openNativePanel(isolateWorkspacePanel(old,id),id));
   }
-  function nativeCallbacks(operation:PanelOperation,id:string,group?:PanelGroup){
+  function nativeCallbacks(operation:PanelOperation,id:string,group?:FloatingGroup){
     return {onReady:()=>lifecycle.finish(operation,'succeeded'),onFailure:()=>{
       if(!lifecycle.isCurrent(operation))return;
       const members=lifecycle.members(operation).filter(member=>latest.current.open.includes(member));
@@ -305,21 +336,23 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
   }
   function beginTabDrag(id:string,event:PointerEvent<HTMLElement>,control?:DragControl){
     if(event.button!==0||!event.isPrimary)return;
-    if(event.currentTarget.ownerDocument!==document&&(!isEditorPanel(id)||(desktop.members(id)?.length||0)<2)){desktop.beginDrag(id,event);return;}
-    if(!canDetachDocumentTab(latest.current,id)||desktop.isComposing()||event.button!==0)return;
+    if(event.currentTarget.ownerDocument!==document&&(desktop.members(id)?.length||0)<2){desktop.beginDrag(id,event);return;}
+    if((isEditorPanel(id)?!canDetachDocumentTab(latest.current,id):!canMovePanel(latest.current,id))||desktop.isComposing())return;
     if(desktop.enabled)beginNativeDrag(id,event,control);else beginDrag(id,event,control);
   }
-  function prepareNativeGroup(group:PanelGroup,rect:Rect){
+  function prepareNativeGroup(group:FloatingGroup,rect:Rect){
     lifecycle.groups.set(group.id,group);
     for(const id of group.panels)lifecycle.homes.set(id,{rect,placement:latest.current.autoHide?.[id]});
   }
   function nativeGroupEntry(id:string){
     const members=desktop.members(id);
+    const saved=latest.current.floatingGroups.find(group=>group.panels.includes(id));
+    if(saved&&members&&members.length>1)return [saved.id,pruneFloatingGroup(saved,saved.panels.filter(member=>members.includes(member)),desktop.panelForHost(desktop.owner(id)))] as const;
     const entry=[...lifecycle.groups.entries()].find(([,group])=>group.panels.includes(id)||members?.some(member=>group.panels.includes(member)));
     if(!entry)return;
-    return [entry[0],members?{...entry[1],panels:entry[1].panels.filter(member=>members.includes(member)),active:members.includes(entry[1].active)?entry[1].active:members[0]}:entry[1]] as const;
+    return [entry[0],members?pruneFloatingGroup(entry[1],entry[1].panels.filter(member=>members.includes(member)),desktop.panelForHost(desktop.owner(id))):entry[1]] as const;
   }
-  function beginNativeDrag(id:string,event:PointerEvent<HTMLElement>,control?:DragControl,nativeGroup?:PanelGroup){
+  function beginNativeDrag(id:string,event:PointerEvent<HTMLElement>,control?:DragControl,nativeGroup?:FloatingGroup){
     if(desktop.isComposing())return;
     const sourceWindow=event.currentTarget.ownerDocument.defaultView!,fromNative=sourceWindow!==window;
     const offset={x:sourceWindow.screenX-window.screenX,y:sourceWindow.screenY-window.screenY},origin={x:event.clientX+offset.x,y:event.clientY+offset.y};
@@ -343,7 +376,7 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
       if(!began&&Math.hypot(dx,dy)<5)return;
       if(!began){
         if(fromNative){lifecycle.handoffs.add(id);transfer=desktop.extract(id);if(!transfer){lifecycle.handoffs.delete(id);cleanup.current?.();return;}
-          if(sourceGroup){const panels=sourceGroup[1].panels.filter(member=>member!==id),active=desktop.panelForHost(sourceHost);if(panels.length>1)lifecycle.groups.set(sourceGroup[0],{...sourceGroup[1],panels,active:panels.includes(active)?active:panels[0]});else lifecycle.groups.delete(sourceGroup[0]);}
+          if(sourceGroup){const panels=sourceGroup[1].panels.filter(member=>member!==id),active=desktop.panelForHost(sourceHost);if(panels.length>1)lifecycle.groups.set(sourceGroup[0],pruneFloatingGroup(sourceGroup[1],panels,active));else lifecycle.groups.delete(sourceGroup[0]);}
         }
         began=true;operation=lifecycle.begin('drag',nativeGroup?.panels||[id]);for(const member of operation.members)lifecycle.handoffs.add(member);control?.onStart?.();if(nativeGroup){prepareNativeGroup(nativeGroup,start);update(old=>({...old}));}else prepareNativeFloat(id,start);
         const options={rect:()=>handoff.placement(),inactive:true,tabDrag:beginTabDrag,onReady:()=>{
@@ -368,6 +401,7 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
   function groupFloat(id:string){const group=groupFor(id);if(!group||group.panels.some(member=>!canMovePanel(latest.current,member)))return;const rect=currentRect(id,true);return transition('float',group.panels,()=>{update(old=>floatWorkspaceGroup(old,group,rect));raise(id);});}
   function groupDock(id:string){const group=groupFor(id)||nativeGroupEntry(id)?.[1];if(!group||group.panels.includes(PRIMARY_EDITOR)||group.panels.some(member=>!canPlacePanel(latest.current,member,PRIMARY_EDITOR,'right')))return;const rect=currentRect(id,true);return transition('dock',group.panels,()=>update(old=>placeWorkspaceGroup(old,group,PRIMARY_EDITOR,'right',rect)));}
   function beginGroupDrag(id:string,event:PointerEvent<HTMLElement>,control?:DragControl){
+    if(control?.fromTab&&!isEditorPanel(id)){beginTabDrag(id,event,control);return;}
     const group=groupFor(id);if(!group||event.button!==0)return;
     const original=latest.current;
     if(group.panels.some(member=>!canMovePanel(original,member)))return;
@@ -419,7 +453,7 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
   }
   function handles(id:string){if(!desktop.windows.has(id)&&!isFreelyMovableTool(layout,id)&&(isPanelPositionLocked(layout,id)||layout.locked&&dockedPanels(layout.tree).includes(id)))return null;const hidden=desktop.windows.has(id)?undefined:layout.autoHide?.[id];const edges=hidden?[({left:'e',right:'w',top:'s',bottom:'n'} as const)[hidden.edge]]:['n','s','e','w','ne','nw','se','sw'];return <>{edges.map(edge=><div key={edge} data-resize-edge={edge} className={'panel-resize panel-resize-'+edge} aria-label={`调整面板大小 ${edge}`} onPointerDown={event=>resize(id,event,edge)}/>)}</>;}
   function panel(id:string){
-    const autoHide=layout.autoHide?.[id],peek=!!autoHide&&layout.autoHideActive===id;
+    const autoHide=layout.autoHide?.[id],peek=!!autoHide&&isExpandedAutoHidePanel(layout,id);
     const group=groupFor(id),floating=!measurements.panels[id]&&!autoHide,frame=peek?autoHidePanelRect(autoHide!,bounds,iconAnchors.current.get(id)):group?.rect||measurements.panels[id]||fit(layout.rects[id]||suggestedRect(id),id);
     const rect=group?{...frame,y:frame.y+headerHeight,height:Math.max(0,frame.height-headerHeight)}:frame;
     const style:CSSProperties={position:floating||peek?'fixed':'absolute',left:rect.x,top:rect.y,width:rect.width,height:rect.height,minWidth:0,minHeight:0,flex:'none',display:layout.open.includes(id)&&(!group||group.active===id)&&!detachedIds.has(id)?undefined:'none',zIndex:peek||floating?layout.layers[group?.id||id]||panelLayers.floating:panelLayers.docked,boxShadow:peek?'var(--hive-popup-shadow)':undefined,borderTopLeftRadius:group?0:undefined,borderTopRightRadius:group?0:undefined};
@@ -435,14 +469,21 @@ export function usePanelWorkspace(stage: RefObject<HTMLDivElement|null>,onActiva
       tabs={(tabGroups.find(group=>group.panels.includes(dockFeedback?.target?.id||''))?.panels.filter(id=>id!==dragging)||[dockFeedback?.target?.id||'']).map(id=>refFor(id).current?.getAttribute('aria-label')||'目标面板')}/>,document.body)}
   </>;
   return {panel,beginTabDrag,beginGroupDrag,groupFloat,groupDock,prepareNativeFloat,floatNativePanel,returnNativePanel,canPullRail:(edge:'left'|'right')=>canDockAutoHideRail(layout,edge),dockAutoHideRail:pullAutoHideRail,closePreservingAutoHide,open,splitEditor,openDocumentTab,isPositionLocked:(id:string)=>isPanelPositionLocked(layout,id),togglePositionLock,locked:!!layout.locked,toggleLocked:()=>{cleanup.current?.();stopDocking();update(old=>({...old,locked:!old.locked}));},close:(id:string)=>hide(id,false),minimize:(id:string)=>hide(id,true),toggle:(id:string)=>layout.open.includes(id)?hide(id,false):open(id),isOpen:(id:string)=>layout.open.includes(id),chrome,
-    capture:()=>structuredClone(latest.current),
+    capture:()=>{
+      const snapshot=structuredClone(latest.current);
+      for(const group of snapshot.floatingGroups){
+        const rect=desktop.rect(group.active);if(rect)snapshot.rects[group.id]=rect;
+      }
+      return snapshot;
+    },
     restoreLayout:(saved:WorkspaceLayout)=>{
       if(latest.current.locked)throw new Error('请先解锁工作区位置，再应用其他视图。');
       cleanup.current?.();setDragging(null);stopDocking();iconAnchors.current.clear();
-      const next=structuredClone(saved);next.rects=Object.fromEntries(Object.entries(next.rects).map(([id,rect])=>[id,fit(rect,id,next)]));
+      const next=structuredClone(saved),nativeGroups=new Set(desktop.enabled?next.floatingGroups.map(group=>group.id):[]);
+      next.rects=Object.fromEntries(Object.entries(next.rects).map(([id,rect])=>[id,nativeGroups.has(id)?rect:fit(rect,id,next)]));
       const ids=[...new Set([...latest.current.open,...desktop.windows.keys(),...lifecycle.homes.keys()])];
       const result=transition('restore',ids,()=>{lifecycle.reset();previousNativeWindows.current.clear();const normalized=normalize(next,boundsRef.current);latest.current=normalized;setLayout(normalized);});
       if(result!=='succeeded')throw new Error('请先完成当前窗口操作或输入法组词，再应用视图。');
     },
-    reset:()=>{if(latest.current.locked)return;cleanup.current?.();return transition('restore',[...new Set([...latest.current.open,...desktop.windows.keys(),...lifecycle.homes.keys()])],()=>{lifecycle.reset();previousNativeWindows.current.clear();update(()=>defaultWorkspace());});},openIds:layout.open,minimizedIds:layout.minimized,toggleAutoHide,repositionAutoHide,openDocked,autoHideItems:Object.entries(layout.autoHide||{}).map(([id,placement])=>({id,edge:placement.edge,offset:placement.offset,active:layout.autoHideActive===id||desktop.enabled&&(desktop.windows.has(id)||lifecycle.opening(id))&&layout.open.includes(id)})),tabGroups:tabGroups.map(group=>({...group,style:{position:group.floating?'fixed':'absolute',left:group.rect.x,top:group.rect.y,width:group.rect.width,height:group.rect.height,zIndex:group.floating?(layout.layers[group.id]||panelLayers.floating)+1:panelLayers.tabs} as CSSProperties}))};
+    reset:()=>{if(latest.current.locked)return;cleanup.current?.();return transition('restore',[...new Set([...latest.current.open,...desktop.windows.keys(),...lifecycle.homes.keys()])],()=>{lifecycle.reset();previousNativeWindows.current.clear();update(()=>defaultWorkspace());});},openIds:layout.open,minimizedIds:layout.minimized,toggleAutoHide,repositionAutoHide,openDocked,autoHideItems:Object.entries(layout.autoHide||{}).map(([id,placement])=>({id,edge:placement.edge,offset:placement.offset,active:isExpandedAutoHidePanel(layout,id)||desktop.enabled&&(desktop.windows.has(id)||lifecycle.opening(id))&&layout.open.includes(id)})),tabGroups:tabGroups.map(group=>({...group,style:{position:group.floating?'fixed':'absolute',left:group.rect.x,top:group.rect.y,width:group.rect.width,height:group.rect.height,zIndex:group.floating?(layout.layers[group.id]||panelLayers.floating)+1:panelLayers.tabs} as CSSProperties}))};
 }

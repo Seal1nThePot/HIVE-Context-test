@@ -21,6 +21,10 @@ export default function AboutSettings() {
   const [feedback, setFeedback] = useState('');
   const [copying, setCopying] = useState(false);
   const [opening, setOpening] = useState(false);
+  const [updateMode, setUpdateMode] = useState<'unsupported'|'directory'|'picker'|'internet'>('unsupported');
+  const [settingUpdateSource, setSettingUpdateSource] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [updateFeedback, setUpdateFeedback] = useState('');
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -28,6 +32,9 @@ export default function AboutSettings() {
       void readDesktopAboutInfo(bridge).then(value => {
         if (alive.current) { setInfo(value); setLoading(false); }
       });
+      void bridge.getUpdateMode?.().then(value => {
+        if (alive.current) setUpdateMode(value);
+      }).catch(() => {});
     }
     return () => { alive.current = false; };
   }, [bridge]);
@@ -50,6 +57,35 @@ export default function AboutSettings() {
     if (!alive.current) return;
     setOpening(false); setFeedback(opened ? '已请求打开应用数据目录。' : '无法打开应用数据目录，请稍后重试。');
   }
+  async function changeUpdateSource(source: 'local' | 'internet') {
+    if (!bridge?.setUpdateSource) return;
+    setSettingUpdateSource(true);
+    setUpdateFeedback('');
+    try {
+      const mode = await bridge.setUpdateSource(source);
+      if (alive.current) setUpdateMode(mode);
+    } catch {
+      if (alive.current) setUpdateFeedback('无法保存更新来源，请重试。');
+    } finally {
+      if (alive.current) setSettingUpdateSource(false);
+    }
+  }
+  async function update() {
+    if (!bridge?.installUpdate) return;
+    setUpdating(true);
+    setUpdateFeedback('');
+    try {
+      const result = await bridge.installUpdate();
+      if (!alive.current) return;
+      if (result.status === 'restarting') { setUpdateFeedback('正在重启 HIVE…'); return; }
+      if (result.status === 'error') setUpdateFeedback(result.message);
+      if (result.status === 'current') setUpdateFeedback('当前没有较新的更新。');
+      if (result.status === 'empty') setUpdateFeedback(updateMode === 'internet' ? 'GitHub 暂无可用的稳定版更新包。' : '更新目录中还没有发布包。');
+    } catch {
+      if (alive.current) setUpdateFeedback('无法开始更新，请重试。');
+    }
+    if (alive.current) setUpdating(false);
+  }
 
   return <div className="about-settings">
     <section className="settings-card about-metadata" aria-labelledby="about-version-title">
@@ -68,7 +104,27 @@ export default function AboutSettings() {
           {info.runtime.chrome && <div><dt>Chromium</dt><dd>{info.runtime.chrome}</dd></div>}
           {info.runtime.node && <div><dt>Node.js</dt><dd>{info.runtime.node}</dd></div>}</>}
       </dl>
-      <p>当前没有在线更新服务。后续更新由统一发布提供，请以所用构建的版本与渠道为准。</p>
+    </section>
+    <section className="settings-card about-update" aria-labelledby="about-update-title">
+      <h2 id="about-update-title">应用更新</h2>
+      {updateMode !== 'unsupported' ? <>
+        <label className="about-update-source">
+          更新来源
+          <select value={updateMode === 'internet' ? 'internet' : 'local'} disabled={updating || settingUpdateSource}
+            onChange={event => void changeUpdateSource(event.target.value === 'internet' ? 'internet' : 'local')}>
+            <option value="local">本地</option>
+            <option value="internet">互联网（GitHub）</option>
+          </select>
+        </label>
+        <p>{updateMode === 'internet' ? '从 GitHub Releases 检查稳定版。' : updateMode === 'directory'
+          ? '从本地稳定版发布目录检查更新。' : '选择新版更新包中的 update.hive.json。'} 确认后，HIVE 会保存并退出，更新完成后自动重启。</p>
+        <div className="about-actions">
+          <button type="button" className="settings-secondary" disabled={updating || settingUpdateSource} onClick={() => void update()}>
+            {updating ? updateMode === 'internet' ? '正在检查或下载更新…' : '正在检查更新…' : updateMode === 'picker' ? '选择本地更新包…' : '检查更新'}
+          </button>
+        </div>
+        {updateFeedback && <p role="status" className="about-feedback">{updateFeedback}</p>}
+      </> : <p>应用内更新适用于 Windows 目录版。</p>}
     </section>
     <section className="settings-card about-documents" aria-labelledby="about-documents-title">
       <h2 id="about-documents-title">离线资料</h2>

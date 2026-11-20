@@ -11,14 +11,14 @@ const proposal={...anchor,id:'proposal',text:'replacement',reason:'reason',mode:
 const annotation={...anchor,id:'annotation',source:'document',note:'note',createdAt:'now'} as TextAnnotation;
 describe('stored document transaction protection',()=>{
   it('keeps a pending proposal, request and AI undo stale after a disk overlap is later restored',()=>{
-    const state=EditorState.create({doc:original}),owners={editorState:{current:state},proposal:{current:proposal},requestAnchor:{current:{...anchor}},undo:{current:[{...anchor,before:'old'} as UndoEdit]}};
+    const state=EditorState.create({doc:original}),owners={proposal:{current:proposal},requestAnchor:{current:{...anchor}},undo:{current:[{...anchor,before:'old'} as UndoEdit]}};
     const changed=state.update({changes:{from:anchor.from,to:anchor.to,insert:'changed'}});applyStoredDocumentChange(owners,changed);
     const restored=changed.state.update({changes:{from:anchor.from,to:anchor.from+7,insert:'target'}});const derived=applyStoredDocumentChange(owners,restored)!;
-    expect(owners.editorState.current).toBe(restored.state);expect(restored.state.doc.toString()).toBe(original);
+    expect(restored.state.doc.toString()).toBe(original);
     expect(owners.proposal.current.stale).toBe(true);expect(owners.requestAnchor.current.stale).toBe(true);expect(owners.undo.current[0].stale).toBe(true);expect(derived.outline[0].title).toBe('title');
   });
   it('maps nonoverlapping changes and restores heading/selection derived values without a View',()=>{
-    const state=EditorState.create({doc:original,selection:{anchor:anchor.from,head:anchor.to}}),owners={editorState:{current:state},proposal:{current:proposal},requestAnchor:{current:{...anchor}},undo:{current:[] as UndoEdit[]}};
+    const state=EditorState.create({doc:original,selection:{anchor:anchor.from,head:anchor.to}}),owners={proposal:{current:proposal},requestAnchor:{current:{...anchor}},undo:{current:[] as UndoEdit[]}};
     const transaction=state.update({changes:{from:0,insert:'# earlier\n\n'}}),derived=applyStoredDocumentChange(owners,transaction)!;
     expect(owners.proposal.current.from).toBe(anchor.from+11);expect(owners.proposal.current.stale).toBe(false);expect(derived.outline.map(heading=>heading.title)).toEqual(['earlier','title']);expect(derived.selection.text).toBe('target');
   });

@@ -1,7 +1,7 @@
 import {usePanelDocument} from '../../shared/panelDocument';
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ListTree, PencilLine, Sparkles, WandSparkles } from "lucide-react";
+import { Check, ListTree, PencilLine, Sparkles, WandSparkles } from "../../shared/icons";
 import { modeLabels, type Mode } from "../../shared/core";
 export default function WritingModeControl({mode,onMode}:{mode:Mode;onMode:(mode:Mode)=>void}){
   const document=usePanelDocument(),window=document.defaultView!;

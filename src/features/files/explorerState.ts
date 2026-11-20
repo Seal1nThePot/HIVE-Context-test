@@ -71,8 +71,6 @@ export function readOrder(value:string|null):ExplorerOrder{
 export function menuActions(type?:Entry['type']):string[]{
   return [
     ...(type==='file'?['tab']:[]),
-    ...(type!=='file'?['createFile']:[]),
-    'createFolder',
     ...(type==='file'?['duplicate']:[]),
     ...(type?['move',...(type==='folder'?['search']:[]),'copy','reveal','ai','rename','trash']:[]),
   ];

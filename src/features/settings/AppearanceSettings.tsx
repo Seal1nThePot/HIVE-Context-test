@@ -37,5 +37,10 @@ export default function AppearanceSettings({appearance,setAppearance,saveError,g
     </SettingRow>)}
     <button type="button" className="text-button" onClick={()=>setAppearance(old=>({...old,uiScale:defaultAppearance.uiScale,textScale:defaultAppearance.textScale,editorSize:defaultAppearance.editorSize}))}>恢复默认大小</button>
     {saveError&&<p role="status">{saveError}</p>}
-  </fieldset>}{group === "typography" && <TypographySettings/>}</>;
+  </fieldset>}{group === "typography" && <>
+    <TypographySettings/>
+    <SettingRow title={<label htmlFor="split-view-order">左右分栏顺序</label>} description={appearance.splitOrder==='semantic-first'?'语义在左，源码在右':'源码在左，语义在右'}>
+      <input id="split-view-order" className="setting-switch" type="checkbox" role="switch" checked={appearance.splitOrder==='semantic-first'} onChange={event=>setAppearance(old=>({...old,splitOrder:event.target.checked?'semantic-first':'source-first'}))}/>
+    </SettingRow>
+  </>}</>;
 }

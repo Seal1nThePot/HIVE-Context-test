@@ -1,18 +1,17 @@
+import {useShortcutPreferences} from '../settings/ShortcutPreferences';
+import {shortcutLabel,type ShortcutId} from '../settings/shortcuts';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import "./ribbon-display.css";
 import {
-  ListPlus, ChevronDown, ChevronUp, EyeOff, MoreVertical, Settings2,
+  ChevronDown, ChevronUp, DocumentsPanel, EyeOff, iconComponent, MoreVertical, NoteProperties, Settings2,
   AlignCenter,
   AlignLeft,
   AlignRight,
   Bold,
   Columns2,
-  FileCog,
   FileOutput,
-  FilePlus,
   FileText,
-  FolderOpen,
   History,
   Image,
   Italic,
@@ -21,14 +20,13 @@ import {
   List,
   ListOrdered,
   MessageSquare,
-  Search,
   SpellCheck,
   Type,
   Underline,
-  Undo2,Redo2,Quote,Code,Code2,Minus,SquareCheck,Strikethrough,Table2,
-} from "lucide-react";
+  Undo2,Redo2,Quote,Minus,SquareCheck,Strikethrough,Table2,
+} from "../../shared/icons";
 import type {Alignment,InlineFormat} from '../editor/formatting';
-export type RibbonCommand=InlineFormat|Alignment|'bullet'|'numbered'|'quote'|'task'|'codeBlock'|'link'|'rule'|'find'|'image'|'table'|'properties'|'undo'|'redo'|0|1|2|3|4;
+export type RibbonCommand=InlineFormat|Alignment|'bullet'|'numbered'|'quote'|'task'|'codeBlock'|'link'|'rule'|'details'|'find'|'image'|'table'|'properties'|'undo'|'redo'|0|1|2|3|4;
 export type RibbonFileActions = Partial<Record<'new' | 'open' | 'export' | 'recent', { run: () => void; disabled?: boolean }>>;
 const fileActionNames: Partial<Record<string, keyof RibbonFileActions>> = {
   新建: 'new',
@@ -36,37 +34,44 @@ const fileActionNames: Partial<Record<string, keyof RibbonFileActions>> = {
   导出: 'export',
   最近使用: 'recent',
 };
-const commands:Partial<Record<string,RibbonCommand>>={'撤销':'undo','重做':'redo','加粗':'bold','倾斜':'italic','下划线':'underline','删除线':'strike','行内代码':'inlineCode','代码块':'codeBlock','链接':'link','分隔线':'rule','待办列表':'task','左对齐':'left','居中':'center','右对齐':'right','项目符号':'bullet','编号':'numbered','引用':'quote','查找替换':'find','查找':'find','插入图片':'image','插入表格':'table','插入笔记属性':'properties','文档属性':'properties'};
-const shortcuts:Partial<Record<string,string>>={'加粗':'Ctrl+B','倾斜':'Ctrl+I','下划线':'Ctrl+U','左对齐':'Ctrl+Shift+L','居中':'Ctrl+Shift+E','右对齐':'Ctrl+Shift+R','撤销':'Ctrl+Z','重做':'Ctrl+Y','查找替换':'Ctrl+F'};
+const commands:Partial<Record<string,RibbonCommand>>={'撤销':'undo','重做':'redo','加粗':'bold','倾斜':'italic','下划线':'underline','切换高亮':'highlight','删除线':'strike','行内代码':'inlineCode','代码块':'codeBlock','链接':'link','分隔线':'rule','待办列表':'task','左对齐':'left','居中':'center','右对齐':'right','项目符号':'bullet','编号':'numbered','引用':'quote','查找替换':'find','查找':'find','插入图片':'image','插入表格':'table','折叠块':'details','插入笔记属性':'properties','文档属性':'properties'};
+const shortcuts:Partial<Record<string,ShortcutId>>={'加粗':'bold','倾斜':'italic','下划线':'underline','左对齐':'alignLeft','居中':'alignCenter','右对齐':'alignRight','撤销':'undo','重做':'redo','查找替换':'find'};
 const descriptions: Partial<Record<string,string>> = {
   '新建':'在当前仓库中新建 Markdown 文稿。',
   '打开':'打开文档面板以选择文件。',
   '导出':'将当前文稿导出为 Markdown 副本。',
   '最近使用':'查看当前仓库中最近打开的文件。',
   '撤销':'撤销上一步操作。','重做':'重做上一步撤销的操作。',
-  '加粗':'将所选内容字体加粗。','倾斜':'将所选内容设为斜体。','下划线':'为所选内容添加下划线。','删除线':'为所选内容添加删除线。','行内代码':'将所选内容设为行内代码。',
+  '加粗':'将所选内容字体加粗。','倾斜':'将所选内容设为斜体。','下划线':'为所选内容添加下划线。','切换高亮':'添加或取消所选文字的高亮。','删除线':'为所选内容添加删除线。','行内代码':'将所选内容设为行内代码。',
   '左对齐':'将当前段落左对齐。','居中':'将当前段落居中对齐。','右对齐':'将当前段落右对齐。',
   '项目符号':'将当前内容设为项目符号列表。','编号':'将当前内容设为编号列表。','引用':'将当前内容设为引用。',
   '代码块':'插入或切换代码块。','链接':'为内容添加链接。','分隔线':'插入分隔线。','待办列表':'将当前内容设为待办列表。',
   '查找替换':'在当前文稿中查找和替换内容。','查找':'在当前文稿中查找内容。',
-  '插入图片':'插入图片。','插入表格':'插入表格。','插入笔记属性':'编辑文稿属性。','文档属性':'编辑文稿属性。',
+  '插入图片':'插入图片。','插入表格':'插入表格。','折叠块':'插入可展开和收起的折叠块。','插入笔记属性':'编辑文稿属性。','文档属性':'编辑文稿属性。',
 };
 
+
+const NewNoteIcon=iconComponent('file.newNote');
+const HighlightIcon=iconComponent('format.highlight');
+const InlineCodeIcon=iconComponent('format.inlineCode');
+const CodeBlockIcon=iconComponent('insert.codeBlock');
+const FindReplaceIcon=iconComponent('editor.findReplace');
+const DetailsIcon=iconComponent('insert.details');
 
 const content = {
   文件: [
     {
       name: "文档",
       items: [
-        ["新建", FilePlus],
-        ["打开", FolderOpen],
+        ["新建", NewNoteIcon],
+        ["打开", DocumentsPanel],
         ["导出", FileOutput],
       ],
     },
     {
       name: "信息",
       items: [
-        ["文档属性", FileCog],
+        ["文档属性", NoteProperties],
         ["最近使用", History],
       ],
     },
@@ -85,8 +90,9 @@ const content = {
         ["加粗", Bold],
         ["倾斜", Italic],
         ["下划线", Underline],
+        ["切换高亮", HighlightIcon],
         ["删除线", Strikethrough],
-        ["行内代码", Code],
+        ["行内代码", InlineCodeIcon],
       ],
     },
     {
@@ -100,11 +106,11 @@ const content = {
         ["引用", Quote],
       ],
     },
-    {name:'结构',items:[['代码块',Code2],['链接',Link2],['分隔线',Minus],['待办列表',SquareCheck]]},
+    {name:'结构',items:[['代码块',CodeBlockIcon],['链接',Link2],['分隔线',Minus],['待办列表',SquareCheck]]},
     {
       name: "编辑",
       items: [
-        ["查找替换", Search],
+        ["查找替换", FindReplaceIcon],
       ],
     },
   ],
@@ -114,7 +120,8 @@ const content = {
       items: [
         ["插入图片", Image],
         ["插入表格", Table2],
-        ["插入笔记属性", ListPlus],
+        ["折叠块", DetailsIcon],
+        ["插入笔记属性", NoteProperties],
         ["链接", Link2],
         ["文本", Type],
       ],
@@ -126,7 +133,7 @@ const content = {
       name: "校对",
       items: [
         ["拼写检查", SpellCheck],
-        ["查找", Search],
+        ["查找", FindReplaceIcon],
       ],
     },
     { name: "批注", items: [["批注", MessageSquare]] },
@@ -143,6 +150,7 @@ const content = {
   ],
 } as const;
 export default function Ribbon({viewControls,visible,collapsed,onVisibilityChange,onCollapsedChange,onSettings,onCommand,editorReady,fileActions}:{viewControls:ReactNode;visible:boolean;collapsed:boolean;onVisibilityChange:(value:boolean)=>void;onCollapsedChange:(value:boolean)=>void;onSettings:()=>void;onCommand:(command:RibbonCommand)=>void;editorReady:boolean;fileActions?:RibbonFileActions}) {
+  const {bindings}=useShortcutPreferences();
   const [tab, setTab] = useState<keyof typeof content>("开始");
   const [menuOpen,setMenuOpen]=useState(false),[position,setPosition]=useState({x:0,y:0});
   const menuButton=useRef<HTMLButtonElement>(null),menu=useRef<HTMLDivElement>(null);
@@ -243,7 +251,7 @@ export default function Ribbon({viewControls,visible,collapsed,onVisibilityChang
         ))}
       </div>
       {tooltip&&createPortal(<div id="ribbon-tool-tooltip" className="ribbon-tool-tooltip" role="tooltip" style={{left:tooltip.x,top:tooltip.y}}>
-        <strong>{tooltip.name}{shortcuts[tooltip.name]?' ('+shortcuts[tooltip.name]+')':''}</strong>
+        <strong>{tooltip.name}{shortcuts[tooltip.name]?' ('+shortcutLabel(bindings,shortcuts[tooltip.name]!)+')':''}</strong>
         <span>{tooltip.description}</span>
       </div>,document.body)}
       {menuOpen&&createPortal(<div ref={menu} className="panel-control-menu ribbon-display-menu" role="menu" aria-label="顶部编辑栏操作" style={{left:position.x,top:position.y}} onKeyDown={event=>{

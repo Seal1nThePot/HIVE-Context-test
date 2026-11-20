@@ -1,9 +1,29 @@
 .editor-host .split-main { height: 100%; min-width: 0; }
 .editor-host .split-source { display: none; }
-.editor-host.split-view { display: flex; }
+.editor-host.split-view {
+  --split-divider-width: 8px;
+  --split-min-width: min(140px, calc(25% - 2px));
+  --split-available: calc(100% - var(--split-divider-width));
+  display: grid;
+  grid-template-areas: "source divider main";
+  grid-template-columns: clamp(var(--split-min-width), calc(var(--split-available) * var(--split-left, .5)), calc(var(--split-available) - var(--split-min-width))) var(--split-divider-width) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+.editor-host.split-view[data-split-order="semantic-first"] { grid-template-areas: "main divider source"; }
 .editor-host.split-view .split-source,
-.editor-host.split-view .split-main { display: block; flex: 1 1 0; min-width: 0; height: 100%; overflow: hidden; }
-.editor-host.split-view .split-source { border-right: 1px solid var(--line); }
+.editor-host.split-view .split-main { display: block; min-width: 0; height: 100%; overflow: hidden; }
+.editor-host.split-view .split-source { grid-area: source; }
+.editor-host.split-view .split-main { grid-area: main; }
+.split-divider { grid-area: divider; position: relative; cursor: col-resize; touch-action: none; outline: none; }
+.split-divider::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--line);
+}
+.split-divider:is(:hover, :focus-visible, [data-dragging])::before { width: 2px; background: var(--hive-accent, var(--gold)); }
 .editor-host.split-view .cm-line { padding-left: 20px; padding-right: 20px; }
 /* Only the split views add visual space; document contents are unchanged. */
 .editor-host.split-view .cm-line[style*="--split-alignment-padding"]::after {
@@ -13,8 +33,7 @@
   pointer-events: none;
 }
 
-/* Project rendered breaks where possible. Source-only Markdown markers and the
-   line-number gutter can still use more width, so prose also wraps at its own edge. */
+/* The source pane wraps prose at its own width. */
 .editor-host.split-view .split-source .cm-line:not(.cm-code-nowrap) { white-space: pre-wrap !important; overflow-wrap: anywhere !important; word-break: normal !important; }
 
 .editor-host.split-view .cm-line[style*="--split-alignment-before"]::before {

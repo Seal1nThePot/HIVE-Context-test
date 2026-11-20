@@ -12,6 +12,7 @@
 .about-settings details pre { margin:0; border:0; border-top:1px solid var(--hive-settings-border); border-radius:0 0 6px 6px; }
 .about-settings .about-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:14px; }
 .about-settings .about-actions button { white-space:normal; text-align:left; }
+.about-settings .about-update-source { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
 .about-settings .about-feedback { color:var(--hive-settings-text); }
 @container (max-width:310px) {
   .about-settings dl > div { grid-template-columns:minmax(0,1fr); gap:4px; }

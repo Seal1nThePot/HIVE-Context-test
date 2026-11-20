@@ -1,6 +1,6 @@
 import {useEffect,useId,useMemo,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
-import {X} from 'lucide-react';
+import {X} from "../../shared/icons";
 import {flattenEntries,type Entry} from './explorerState';
 import './file-picker.css';
 

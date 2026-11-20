@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-mode="idle" data-tone="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>HIVE · 写作快捷栏动效</title>
+  <link rel="stylesheet" href="../src/features/chat/writing-dock.css">
+  <style>
+    :root {
+      color-scheme: light;
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", sans-serif;
+      --ui-scale: 1;
+      --paper: #fffefa; --workspace: #eaeae6; --shell: #f8f8f5; --line: #17192219;
+      --text: #282b30; --faded: #646970; --body: #414448; --accent: #396baa;
+      --hive-dock-frame-bg: #eef1f5e8; --hive-dock-frame-border: #b9c1cf;
+      --hive-dock-frame-shadow: #1a293f25; --hive-dock-side-icon: #364252;
+      --hive-accent: #327aca; --hive-dock-ai-icon: #363f62; --hive-dock-ai-hover-icon: #363f62;
+    }
+    :root[data-tone="dark"] {
+      color-scheme: dark;
+      --paper: #212327; --workspace: #18191d; --shell: #202124; --line: #e8e9ff21;
+      --text: #efeeeb; --faded: #a0a2ab; --body: #ceced1; --accent: #accbff;
+      --hive-dock-frame-bg: #3c414be8; --hive-dock-frame-border: #626977;
+      --hive-dock-frame-shadow: #0005; --hive-dock-side-icon: #e1e7ee;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--workspace); color: var(--text); }
+    button { font: inherit; color: inherit; cursor: pointer; }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+    .symbols { position: absolute; width: 0; height: 0; overflow: hidden; }
+    .app { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 100svh; }
+    header, footer { position: relative; z-index: 2; background: var(--shell); }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px clamp(14px, 3vw, 50px); border-bottom: 1px solid var(--line); }
+    .identity, .tools, .status, .session { display: flex; align-items: center; }
+    .identity { gap: 13px; min-width: 0; }
+    .wordmark { display: flex; align-items: center; gap: 7px; font: 650 16px/1 "Segoe UI",sans-serif; letter-spacing: .08em; }
+    .wordmark svg { width: 17px; height: 17px; }
+    .filename { border-left: 1px solid var(--line); padding-left: 13px; color: var(--faded); font-size: 13px; white-space: nowrap; }
+    .tools { gap: 5px; }
+    .utility { display: flex; align-items: center; gap: 7px; border: 0; border-radius: 8px; padding: 7px 10px; background: transparent; font-size: 12px; color: var(--faded); }
+    .utility:hover, .utility[aria-pressed="true"] { background: var(--line); color: var(--text); }
+    .utility svg { width: 16px; height: 16px; }
+    .workspace { display: grid; justify-items: center; position: relative; min-height: 480px; }
+    .page { width: min(820px, calc(100% - 80px)); padding: clamp(54px, 8vh, 108px) clamp(24px, 7vw, 110px) 180px; background: var(--paper); border-inline: 1px solid var(--line); }
+    .chapter { margin: 0 0 16px; font-size: 12px; color: var(--faded); letter-spacing: .18em; }
+    h1 { margin: 0 0 28px; font: 500 clamp(34px, 4vw, 47px)/1.25 "Songti SC","STSong","SimSun",serif; letter-spacing: .12em; }
+    .prose { color: var(--body); font: 16px/2.15 "Songti SC","STSong","SimSun",serif; letter-spacing: .035em; }
+    .prose p { margin: 0 0 16px; }
+    .caret { display: inline-block; width: 1.5px; height: 1em; margin-left: 2px; vertical-align: -.13em; background: var(--accent); }
+    .scene { position: absolute; display: flex; align-items: flex-end; justify-content: center; width: 100%; bottom: clamp(27px, 6vh, 65px); pointer-events: none; }
+    .dock { position: relative; transform-origin: center bottom; transition: transform 360ms cubic-bezier(.22,.85,.25,1); }
+    [data-zoom="true"] .dock { transform: scale(1.65); }
+    .writing-dock-controls { position: relative; isolation: isolate; gap: 6px; padding: 6px 10px; border-radius: 19px; backdrop-filter: blur(14px); box-shadow: inset 0 1px 0 #ffffff75, 0 2px 4px #18233c12, 0 10px 30px -8px var(--hive-dock-frame-shadow); }
+    .dock-mode-button { pointer-events: none; }
+    .move { position: absolute; left: calc(100% + 4px); bottom: 0; display: grid; place-items: center; width: 21px; height: 21px; border-radius: 5px; background: var(--hive-dock-frame-bg); border: 1px solid var(--hive-dock-frame-border); color: var(--hive-dock-side-icon); }
+    .move svg { width: 14px; height: 14px; }
+    .writing-dock-controls .dock-ai-button {
+      pointer-events: auto; position: relative; isolation: isolate; overflow: visible; border: 0;
+      background: #919bb8; box-shadow: 0 0 0 .65px #28374d5c, 0 1px 2px #2e39504d;
+      transition: transform 240ms cubic-bezier(.2,.8,.2,1);
+      -webkit-tap-highlight-color: transparent;
+    }
+    .dock-ai-button:active { transform: scale(.95); }
+    .lens { position: absolute; inset: 0; border-radius: 50%; overflow: hidden; isolation: isolate; background: linear-gradient(144deg,#fbfcff 3%,#d3e8fb 34%,#b4cde8 65%,#e9e7f4 95%); }
+    .refraction { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; transform: scale(.86); transition: opacity 540ms ease, transform 700ms cubic-bezier(.22,.85,.25,1); }
+    .lens::before, .lens::after { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 1; border-radius: inherit; }
+    .lens::before { background: radial-gradient(ellipse 75% 33% at 34% 9%, #ffffffad, transparent 88%); opacity: .74; }
+    .lens::after { box-shadow: inset .6px 1.1px 1px #fffe, inset -.8px -1.1px 1.3px #1e28497a, inset 0 0 0 2px #ffffff1e; }
+    .dock-ai-button .star { position: relative; width: 53%; height: 53%; fill: #36455e; transform: scale(1); filter: drop-shadow(0 1px .4px #fff7); transition: fill 500ms ease, transform 500ms cubic-bezier(.2,.8,.2,1), filter 500ms; }
+    [data-mode="running"] .refraction { opacity: 1; transform: scale(1); }
+    [data-mode="running"] .star { fill: #fff; transform: scale(.9); filter: drop-shadow(0 1px 2px #211952a8); }
+    [data-mode="done"] .star { transform: scale(1.04); fill: #52678e; }
+    .dock-ai-button::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      pointer-events: none;
+      box-shadow: 0 0 0 1px #6389d78c, 0 0 6px 2px #5c99f080, 0 0 12px 3px #816ad64d;
+      opacity: 0;
+      transition: opacity 180ms ease-out;
+    }
+    @media (hover: hover) { .dock-ai-button:hover::after { opacity: 1; } }
+    footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 20px; padding: 12px clamp(14px, 3vw, 50px); border-top: 1px solid var(--line); font-size: 12px; color: var(--faded); }
+    .status, .session { gap: 9px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #a6abae; }
+    [data-mode="running"] .dot { background: #7584dc; }
+    [data-mode="done"] .dot { background: #528b77; }
+    .action { padding: 5px 12px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--text); font-size: 12px; }
+    .action:hover { background: var(--line); }
+    @media (max-width: 560px) {
+      header { padding: 10px 12px; }
+      .identity { gap: 8px; }
+      .filename { padding-left: 8px; }
+      .utility { min-height: 38px; min-width: 38px; justify-content: center; }
+      .utility span { display:none; }
+      .page { width: 100%; border: 0; padding: 46px 25px 140px; }
+      .prose { font-size: 15px; }
+      [data-zoom="true"] .dock { transform: scale(1.22); }
+      [data-zoom="true"] .move { visibility: hidden; }
+      .scene { bottom: 26px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition-duration: 0s !important; }
+    }
+  </style>
+</head>
+<body>
+  <svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+      <path id="hive-star" d="M16 1.5C18.1 11.3 20.7 13.9 30.5 16C20.7 18.1 18.1 20.7 16 30.5C13.9 20.7 11.3 18.1 1.5 16C11.3 13.9 13.9 11.3 16 1.5Z"/>
+      <!-- Lucide icons
+ISC License
+
+Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of Feather (MIT). All other copyright (c) for Lucide are held by Lucide Contributors 2022.
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+-->
+      <symbol id="highlighter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11-6 6v3h9l3-3"></path><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"></path></symbol>
+      <symbol id="list-tree" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12h-8"></path><path d="M21 6H8"></path><path d="M21 18h-8"></path><path d="M3 6v4c0 1.1.9 2 2 2h3"></path><path d="M3 10v6c0 1.1.9 2 2 2h3"></path></symbol>
+      <symbol id="wand-sparkles" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"></path><path d="m14 7 3 3"></path><path d="M5 6v4"></path><path d="M19 14v4"></path><path d="M10 2v2"></path><path d="M7 8H3"></path><path d="M21 16h-4"></path><path d="M11 3H9"></path></symbol>
+      <symbol id="pencil-line" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z"></path><path d="m15 5 3 3"></path></symbol>
+      <symbol id="move" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20"></path><path d="m15 19-3 3-3-3"></path><path d="m19 9 3 3-3 3"></path><path d="M2 12h20"></path><path d="m5 9-3 3 3 3"></path><path d="m9 5 3-3 3 3"></path></symbol>
+    </defs>
+  </svg>
+  <div class="app">
+    <header>
+      <div class="identity"><span class="wordmark"><svg viewBox="0 0 32 32" aria-hidden="true"><use href="#hive-star" fill="currentColor"/></svg>HIVE</span><span class="filename">晚潮.md</span></div>
+      <div class="tools">
+        <button type="button" class="utility" id="zoom" aria-pressed="false" aria-label="放大快捷栏" title="放大快捷栏"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 5 5M7.5 10h5M10 7.5v5"/></svg><span>放大查看</span></button>
+        <button type="button" class="utility" id="tone" aria-label="深色外观" aria-pressed="false" title="深色外观"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/></svg><span>深色外观</span></button>
+      </div>
+    </header>
+    <main class="workspace">
+      <article class="page">
+        <p class="chapter">第一章</p>
+        <h1>晚潮</h1>
+        <div class="prose"><p>父亲的修表铺关了十七年。今天下午，门底下滑进来一张取件单。</p>
+        <p>我把卷帘门抬到一半，海风先钻了进去。柜台上的绿绒布褪成了灰色，只有一小块地方还留着深深的绿。</p>
+        <p><span id="line"></span><span class="caret" aria-hidden="true"></span></p></div>
+      </article>
+      <div class="scene"><div class="dock">
+        <div class="writing-dock-controls" aria-label="写作快捷栏">
+          <button class="dock-mode-button" type="button" disabled aria-label="标注工具"><svg aria-hidden="true"><use href="#highlighter"/></svg></button>
+          <button class="dock-mode-button" type="button" disabled aria-label="大纲"><svg aria-hidden="true"><use href="#list-tree"/></svg></button>
+          <button type="button" class="dock-ai-button" id="orb" aria-label="开始模拟生成">
+            <span class="lens" aria-hidden="true"><canvas class="refraction" width="192" height="192"></canvas></span>
+            <svg class="star" viewBox="0 0 32 32" aria-hidden="true"><use href="#hive-star"/></svg>
+          </button>
+          <button class="dock-mode-button" type="button" disabled aria-label="改文"><svg aria-hidden="true"><use href="#wand-sparkles"/></svg></button>
+          <button class="dock-mode-button" type="button" disabled aria-label="续写"><svg aria-hidden="true"><use href="#pencil-line"/></svg></button>
+        </div>
+        <span class="move" aria-hidden="true"><svg><use href="#move"/></svg></span>
+      </div></div>
+    </main>
+    <footer><div>写作快捷栏 · 本地动效预览</div>
+      <div class="session"><span class="status" role="status"><i class="dot"></i><span id="status">待命</span></span><button type="button" class="action" id="action">模拟生成</button></div>
+    </footer>
+  </div>
+  <script>
+    const root = document.documentElement;
+    const orb = document.getElementById('orb');
+    const action = document.getElementById('action');
+    const canvas = document.querySelector('canvas');
+    const ctx = canvas.getContext('2d');
+    const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+    const line = document.getElementById('line');
+    const excerpt = '取件单上写着一行铅笔字。我认得那个歪歪斜斜的「海」字，最后一点总是落得太远。';
+    let frame = 0, lastFrame = -Infinity, elapsed = 0, started = 0, settling = 0, ending = 0, typing = 0;
+
+    // Draw translucent curved sheets inside a fixed-size glass face. All coordinates
+    // below use a 100-unit lens, independent of the preview magnification.
+    const ribbons = [
+      { color: [109, 77, 241], edge: [206, 166, 255], y: 34, depth: 29, offset: 1.4, slope: -.22 },
+      { color: [27, 147, 234], edge: [136, 249, 255], y: 49, depth: 26, offset: .1, slope: -.34 },
+      { color: [121, 107, 246], edge: [246, 203, 255], y: 66, depth: 19, offset: 2.6, slope: -.20 }
+    ];
+    function rgba(rgb, alpha) { return 'rgba(' + rgb.join(',') + ',' + alpha + ')'; }
+    function ribbon(sheet, time) {
+      const upper = new Path2D();
+      const lower = [];
+      for (let x = -5; x <= 105; x += 2) {
+        const u = x / 100, phase = time * .82 + sheet.offset;
+        const y = sheet.y + (x - 50) * sheet.slope
+          + Math.sin(u * 5.7 + phase) * 9
+          + Math.sin(u * 2.6 - time * .63 + sheet.offset) * 8;
+        if (x === -5) upper.moveTo(x, y); else upper.lineTo(x, y);
+        lower.push([x, y + sheet.depth * (.68 + .31 * Math.sin(u * 4.4 - phase))]);
+      }
+      const surface = new Path2D(upper);
+      for (let i = lower.length - 1; i >= 0; i--) surface.lineTo(...lower[i]);
+      surface.closePath();
+      const tint = ctx.createLinearGradient(0,sheet.y-20,28,sheet.y+sheet.depth+12);
+      tint.addColorStop(0,rgba(sheet.edge,.92)); tint.addColorStop(.36,rgba(sheet.color,.88)); tint.addColorStop(1,rgba(sheet.color,.06));
+      ctx.save();
+      ctx.filter='blur(2.4px)';
+      ctx.fillStyle=tint; ctx.fill(surface);
+      ctx.restore();
+      const rim = ctx.createLinearGradient(0,0,99,0);
+      rim.addColorStop(0,rgba(sheet.edge,.02)); rim.addColorStop(.26,rgba(sheet.edge,.86));
+      rim.addColorStop(.62,rgba(sheet.edge,.52)); rim.addColorStop(1,rgba(sheet.edge,.04));
+      ctx.strokeStyle=rim; ctx.lineWidth=.9; ctx.stroke(upper);
+    }
+    function draw(time) {
+      ctx.setTransform(canvas.width/100,0,0,canvas.height/100,0,0);
+      const base = ctx.createLinearGradient(13,4,82,99);
+      base.addColorStop(0,'#dce9ff'); base.addColorStop(.22,'#7a8fd2'); base.addColorStop(.53,'#343f80'); base.addColorStop(.83,'#7371b3'); base.addColorStop(1,'#d4d5ef');
+      ctx.fillStyle=base; ctx.fillRect(0,0,100,100);
+      for (const sheet of ribbons) ribbon(sheet,time);
+      const blush = ctx.createRadialGradient(76,25,0,76,25,31);
+      blush.addColorStop(0,'#edaaff55'); blush.addColorStop(1,'#edaaff00');
+      ctx.fillStyle=blush; ctx.fillRect(0,0,100,100);
+      const x = 23 + 8*Math.sin(time*.67);
+      const caustic = ctx.createRadialGradient(x,80,0,x,80,35);
+      caustic.addColorStop(0,'#9cffff88'); caustic.addColorStop(1,'#9cffff00');
+      ctx.fillStyle=caustic; ctx.fillRect(0,0,100,100);
+    }
+    function updateFrame(now) {
+      if (now-lastFrame >= 32) { draw((elapsed+now-started)/1000); lastFrame=now; }
+      frame=requestAnimationFrame(updateFrame);
+    }
+    function syncAnimation() {
+      if (frame) { cancelAnimationFrame(frame); frame=0; elapsed+=performance.now()-started; }
+      if (root.dataset.mode!=='running') return;
+      if (document.hidden || reduceMotion.matches) { draw(elapsed/1000); return; }
+      started=performance.now(); lastFrame=-Infinity; frame=requestAnimationFrame(updateFrame);
+    }
+    function state(mode) {
+      root.dataset.mode=mode;
+      document.getElementById('status').textContent={idle:'待命',running:'模拟生成中',done:'已完成'}[mode];
+      action.textContent=mode==='running'?'结束生成':'模拟生成';
+      orb.setAttribute('aria-label', mode==='running'?'结束模拟生成':'开始模拟生成');
+      syncAnimation();
+    }
+    function finish() {
+      clearTimeout(ending); clearInterval(typing); line.textContent=excerpt;
+      state('done');
+      settling=setTimeout(()=>state('idle'),650);
+    }
+    function start() {
+      clearTimeout(settling); clearTimeout(ending); clearInterval(typing);
+      elapsed=0; line.textContent=reduceMotion.matches?excerpt:'';
+      draw(0); state('running');
+      let length=0;
+      if (!reduceMotion.matches) typing=setInterval(()=>{
+        line.textContent=excerpt.slice(0,++length);
+        if (length>=excerpt.length) clearInterval(typing);
+      },210);
+      ending=setTimeout(finish,10000);
+    }
+    function toggle() { if (root.dataset.mode==='running') finish(); else start(); }
+    action.addEventListener('click',toggle);
+    orb.addEventListener('click',toggle);
+    function bindSwitch(id, apply) {
+      const button=document.getElementById(id);
+      button.addEventListener('click',()=>{
+        const on=button.getAttribute('aria-pressed')!=='true';
+        button.setAttribute('aria-pressed',String(on)); apply(on);
+      });
+    }
+    bindSwitch('zoom',on=>{root.dataset.zoom=String(on);});
+    bindSwitch('tone',on=>{root.dataset.tone=on?'dark':'light';});
+    document.addEventListener('visibilitychange',syncAnimation);
+    reduceMotion.addEventListener('change',()=>{
+      if(reduceMotion.matches && root.dataset.mode==='running') { clearInterval(typing); line.textContent=excerpt; }
+      syncAnimation();
+    });
+    start();
+  </script>
+</body>
+</html>

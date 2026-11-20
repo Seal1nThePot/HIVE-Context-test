@@ -6,6 +6,13 @@ import {findImageReferences} from './image-references.mjs';
 
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 const folder='导入的图片';
+export const MAX_MARKDOWN_BYTES = 2_000_000;
+export function decodeImportedMarkdown(buffer){
+  if(!Buffer.isBuffer(buffer))throw fail('文件内容无效。');
+  if(buffer.length>MAX_MARKDOWN_BYTES)throw fail('Markdown 文件超过 2 MB。');
+  try{return new TextDecoder('utf-8',{fatal:true}).decode(buffer);}
+  catch{throw fail('Markdown 文件必须使用 UTF-8 编码。');}
+}
 function safeBase(name){
   if(typeof name!=='string'||!name||name.length>1000)throw fail('文件名称无效。');
   const leaf=path.posix.basename(name.replace(/\\/g,'/'));
@@ -22,8 +29,7 @@ export function importStore({root,files}){
     if(parent!==undefined&&typeof parent!=='string')throw fail('目标文件夹无效。');
     if(parent){const target=await files.resolve(parent,true);if(!(await fs.lstat(target)).isDirectory())throw fail('目标必须是文件夹。');}
     if(ext==='.md'){
-      if(buffer.length>2_000_000)throw fail('Markdown 文件超过 2 MB。');
-      try{new TextDecoder('utf-8',{fatal:true}).decode(buffer);}catch{throw fail('Markdown 文件必须使用 UTF-8 编码。');}
+      decodeImportedMarkdown(buffer);
     }else if(['.png','.jpg','.jpeg','.gif','.webp'].includes(ext)){
       const type=imageType(buffer);
       if((ext==='.jpeg'?'.jpg':ext)!==type.extension)throw fail('图片扩展名与实际类型不符。');

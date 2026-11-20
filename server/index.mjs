@@ -5,13 +5,16 @@ import { promises as fs } from "node:fs";
 import { workspaceStore } from "./workspace.mjs";
 import { modelConfigStore } from "./model-config.mjs";
 import {imageStore,MAX_IMAGE_BYTES} from './images.mjs';
-import {importStore} from './imports.mjs';
+import {importStore,MAX_MARKDOWN_BYTES} from './imports.mjs';
+import {referenceAttachmentStore} from './reference-attachments.mjs';
 import {resolveReferences} from './references.mjs';
 import {generationPayload} from './generation-options.mjs';
 import {probeModelService,sendChatCompletion,upstreamHttpError,upstreamJson} from './model-probe.mjs';
 import {templateStore} from './templates.mjs';
 import {desktopShell} from './desktop-shell.mjs';
-import {fileProbe} from './file-probe.mjs';
+import { registerDocumentRoutes } from './document-routes.mjs';
+import { registerAiTools } from './ai-tools/index.mjs';
+import { registerHistoryRoutes } from './history/history-routes.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const project = path.resolve(here, "..");
@@ -25,9 +28,15 @@ let port = Number(process.env.HIVE_PORT ?? 4324);
 await fs.mkdir(root, { recursive: true });
 const modelSettings = await modelConfigStore(local, {envKey:process.env.HIVE_API_KEY || ""});
 const desktopFiles=process.env.HIVE_DESKTOP_SHELL==='1'&&process.send?desktopShell(process):null;
-const spaces = await workspaceStore(local, root, {revealFile:desktopFiles?.revealFile});
+const spaces = await workspaceStore(local, root, {
+  revealFile:desktopFiles?.revealFile,repositoryManifestDirectory:process.env.HIVE_APP_DATA_DIR||local,
+}).catch(async error => {
+  if (error.code === 'HIVE_STATE_CORRUPT' && desktopFiles) {
+    await new Promise(resolve => process.send({type:'hive-startup-error',message:error.message}, () => resolve()));
+  }
+  throw error;
+});
 const templates = await templateStore(process.env.HIVE_TEMPLATES_DIR || path.join(local,'templates'),path.join(project,'templates'),{sourceDirectory:process.env.HIVE_TEMPLATES_SOURCE || (!project.includes('.asar')?path.join(project,'templates'):undefined)});
-const scratchPath = "自由草稿.md";
 const app = express();
 app.disable("x-powered-by");
 app.use("/api", (req, res, next) => {
@@ -45,18 +54,25 @@ app.use("/api", (req, res, next) => {
 });
 app.use(express.json({ limit: "3mb" }));
 app.get('/api/templates',async(_req,res)=>res.json(await templates.list()));
-app.get('/api/templates/:id',async(req,res)=>res.json(await templates.read(req.params.id)));
+app.get('/api/templates/:id',async(req,res)=>{
+  const record=await templates.read(req.params.id);
+  if(req.query.colorsOnly==='1')return res.json(record);
+  const iconPack=await templates.readIcons(req.params.id);
+  if(req.query.iconPackRevision===iconPack.packRevision)return res.json({...record,iconPackUnchanged:true});
+  res.json({...record,iconPack});
+});
 app.post('/api/templates/:id',async(req,res)=>res.json(await templates.save(req.params.id,req.body)));
 app.post('/api/templates/:id/open',async(req,res)=>res.json(await templates.open(req.params.id)));
+app.get('/api/templates/:id/icons',async(req,res)=>res.json(await templates.readIcons(req.params.id)));
+app.post('/api/templates/:id/icons',async(req,res)=>res.json(await templates.saveIcons(req.params.id,req.body)));
 app.get('/api/workspace', (_req,res)=>res.json(spaces.read()));
-const workspaceRoutes = new Set(['writing-outline','annotations','scratch','outline','tree','file','folder','rename','workspace','explorer','images','image-file','references','import']);
+const workspaceRoutes = new Set(['writing-outline','annotations','scratch','outline','tree','file','folder','rename','workspace','explorer','images','image-file','references','import','history']);
 const mutationQueues=new Map();
-let probeOwner, activeProbe;
 app.use('/api', (req,res,next)=>{
   if(!workspaceRoutes.has(req.path.split('/')[1])) return next();
   try {
     req.workspace=spaces.capture(req.headers['x-hive-workspace']);
-    if(req.method!=='POST'||req.path==='/workspace/sync')return next();
+    if(!['POST','DELETE'].includes(req.method)||req.path==='/workspace/sync')return next();
     const id=req.workspace.id,previous=mutationQueues.get(id)||Promise.resolve();
     let release;const done=new Promise(resolve=>{release=resolve;});mutationQueues.set(id,done);
     let released=false,started=false;const finish=()=>{if(released)return;released=true;release();if(mutationQueues.get(id)===done)mutationQueues.delete(id);};
@@ -68,27 +84,15 @@ app.use('/api', (req,res,next)=>{
 app.post('/api/workspace', async(req,res)=>res.json(await spaces.update(req.body)));
 app.post('/api/workspace/repositories', async(req,res)=>res.json(await spaces.manage(req.body)));
 app.post('/api/references/resolve',async(req,res)=>res.json(await resolveReferences(req.workspace,req.body)));
-app.post('/api/workspace/sync', async(req,res)=>{
-  const paths=req.body.paths;
-  if(!Array.isArray(paths)||paths.length>100||paths.some(value=>typeof value!=='string')) return res.status(400).json({error:'同步文件列表无效。'});
-  const unique=[...new Set(paths)], files=new Array(unique.length);
-  const baselines=req.body.baselines;
-  if(probeOwner!==req.workspace){
-    activeProbe?.clear();probeOwner=req.workspace;activeProbe=fileProbe(req.workspace.files);
-  }
-  const probe=activeProbe;
-  probe.retain(unique);
-  let next=0;
-  await Promise.all(Array.from({length:Math.min(4,unique.length)},async()=>{
-    while(next<unique.length){
-      const index=next++,file=unique[index];
-      const knownHash=baselines && typeof baselines==='object' && Object.hasOwn(baselines,file) ? baselines[file] : undefined;
-      try{files[index]=await probe.read(file,knownHash);}catch(error){files[index]={path:file,error:error.code==='ENOENT'?'文件已在磁盘删除或移动。':error.message};}
-    }
-  }));
-  const snapshot=await req.workspace.files.snapshot({knownVersion:req.body.treeVersion});
-  res.json({workspace:spaces.read(),...snapshot,files});
+app.post('/api/references/attachments',express.raw({type:'application/octet-stream',limit:MAX_MARKDOWN_BYTES}),async(req,res)=>{
+  res.json(await referenceAttachmentStore(req.workspace.state).add(req.query.name,req.body));
 });
+app.delete('/api/references/attachments/:id',async(req,res)=>{
+  await referenceAttachmentStore(req.workspace.state).remove(req.params.id);
+  res.json({ok:true});
+});
+registerDocumentRoutes(app, spaces);
+registerHistoryRoutes(app);
 app.get("/api/writing-outline", async (req, res) => {
   await req.workspace.files.read(req.query.file);
   res.json(await req.workspace.nodes.read(req.query.file));
@@ -115,30 +119,6 @@ app.post("/api/annotations", async (req, res) => {
   const identity = await annotationIdentity(req, req.body.source, req.body.file);
   res.json(await req.workspace.annotations.save({ ...req.body, ...identity }));
 });
-app.get("/api/scratch", async (req, res) => {
-  try {
-    const data = await req.workspace.files.read(scratchPath);
-    res.json({ text: data.text, hash: data.hash, path: scratchPath });
-  } catch (error) {
-    if (error.code === "ENOENT") res.json({ text: "", hash: null, path: scratchPath });
-    else throw error;
-  }
-});
-app.post("/api/scratch", async (req, res) => {
-  const format = await req.workspace.files.read(scratchPath).catch(error => {
-    if (error.code === "ENOENT") return {eol:"LF",bom:false};
-    throw error;
-  });
-  res.json(
-    await req.workspace.files.save({
-      path: scratchPath,
-      text: req.body.text,
-      baseline: req.body.baseline,
-      eol: format.eol,
-      bom: format.bom,
-    }),
-  );
-});
 app.get("/api/outline", async (req, res) => {
   await req.workspace.files.read(req.query.file);
   res.json(await req.workspace.outlines.read(req.query.file));
@@ -161,10 +141,6 @@ app.get("/api/health", (_req, res) =>
     ready: true,
   }),
 );
-app.get('/api/tree',async(req,res)=>{
-  const snapshot=await req.workspace.files.snapshot({force:req.query.refresh==='1'});
-  res.json({root:req.workspace.root,...snapshot});
-});
 app.get('/api/explorer/trash',async(req,res)=>res.json(await req.workspace.explorer.listTrash()));
 app.post('/api/explorer/trash/preview',async(req,res)=>res.json(await req.workspace.explorer.previewTrash(req.body.days)));
 app.post('/api/explorer/trash/purge',async(req,res)=>res.json(await req.workspace.explorer.purgeTrash(req.body.token)));
@@ -200,22 +176,12 @@ app.get('/api/images',async(req,res)=>{
   res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Security-Policy',"default-src 'none'; sandbox");
   res.type(image.mime).send(image.buffer);
 });
-app.get("/api/file", async (req, res) =>
-  res.json(await req.workspace.files.read(req.query.path)),
-);
-app.post("/api/file", async (req, res) => res.json(await req.workspace.files.save(req.body)));
-app.post("/api/folder", async (req, res) => {
-  await req.workspace.files.folder(req.body.path);
-  res.json({ ok: true });
-});
-app.post("/api/rename", async (req, res) =>
-  res.json(await req.workspace.files.rename(req.body.from, req.body.to, req.body.baseline)),
-);
 app.get("/api/config", (_req, res) => res.json(modelSettings.read()));
 app.post("/api/config", async (req, res) => res.json(await modelSettings.update(req.body)));
 app.post("/api/model-services", async (req, res) => res.json(await modelSettings.upsert(req.body)));
 app.post("/api/model-services/remove", async (req, res) => res.json(await modelSettings.remove(req.body)));
 app.post("/api/model-services/reorder", async (req, res) => res.json(await modelSettings.reorder(req.body)));
+registerAiTools(app,{spaces,modelSettings});
 app.post("/api/model-services/probe", async (req, res) => {
   const route = modelSettings.resolveProbe(req.body);
   const abort = new AbortController();
@@ -232,7 +198,7 @@ app.post("/api/model-services/probe", async (req, res) => {
   }
 });
 app.post("/api/generate", async (req, res) => {
-  const route = modelSettings.resolve(req.body.selection);
+  const route = {...modelSettings.resolve(req.body.selection), sessionId:req.get('x-hive-model-session')};
   const {payload, outputLimit} = generationPayload(route, req.body);
   const abort = new AbortController();
   res.on("close", () => abort.abort());
@@ -341,6 +307,7 @@ app.use((error, _req, res, _next) => {
         (error.code === "ENOENT" ? 404 : error.code === "EEXIST" ? 409 : 500),
     )
     .json({
+      ...(error.code === 'HIVE_STATE_CORRUPT' ? {code:error.code} : {}),
       error:
         error.code === "ENOENT"
           ? "文件不存在，请刷新文件列表。"

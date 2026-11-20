@@ -5,6 +5,8 @@ import {
   annotationSignature,
   mapAnnotations,
   mergeAnnotationRecords,
+  orderedAnnotations,
+  reorderAnnotations,
   textFingerprint,
   validateSubmission,
   type TextAnnotation,
@@ -155,6 +157,23 @@ describe("text annotations", () => {
       )[0].note,
     ).toBe("新备注");
   });
+  it("reorders document and scratch items without changing their identity or initial fallback order", () => {
+    const a=item('a'),b=item('b'),scratch={...item('scratch'),source:'scratch' as const};
+    expect(orderedAnnotations([b,a,scratch]).map(item=>item.id)).toEqual(['b','a','scratch']);
+    const reordered=reorderAnnotations([a,b,scratch],'scratch','a');
+    expect(reordered.map(item=>[item.id,item.order])).toEqual([['scratch',0],['a',1],['b',2]]);
+    expect(orderedAnnotations([reordered[1],reordered[2],reordered[0],item('new')]).map(item=>item.id)).toEqual(['scratch','a','b','new']);
+  });
+
+  it("merges a note edit with an independent change to its displayed order", () => {
+    const a={...item('a'),order:0};
+    const reordered={...a,order:1};
+    const edited={...a,note:'新的要求'};
+    expect(mergeAnnotationRecords([a],[reordered],[edited])[0]).toMatchObject({order:1,note:'新的要求'});
+    expect(mergeAnnotationRecords([a],[edited],[reordered])[0]).toMatchObject({order:1,note:'新的要求'});
+    expect(()=>mergeAnnotationRecords([a],[reordered],[{...a,order:2}])).toThrow('调整了标注排序');
+  });
+
   it("maps editor highlight decorations through ordinary text changes", () => {
     let state = EditorState.create({
       doc: "abcdef",

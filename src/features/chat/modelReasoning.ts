@@ -13,6 +13,29 @@ export const reasoningLevels:{value:ReasoningEffort;label:string}[]=[
   {value:'max',label:'最大'},
 ];
 
+export function reasoningSnapIndex(ratio:number,trackWidth:number,lastIndex:number,heldIndex:number|null):number|null {
+  if(lastIndex<1)return null;
+
+  const stepWidth=trackWidth/lastIndex;
+  const position=ratio*lastIndex;
+  // Keep both thresholds inside half a step so the preview and nearest-stop commit agree.
+  const releaseDistance=Math.min(12,stepWidth*.35);
+  if(heldIndex!==null&&Math.abs(position-heldIndex)*stepWidth<=releaseDistance)return heldIndex;
+
+  const nearest=Math.round(position);
+  const enterDistance=Math.min(7,stepWidth*.2);
+  return Math.abs(position-nearest)*stepWidth<=enterDistance?nearest:null;
+}
+
+export function previewReasoningDrag(ratio:number,trackWidth:number,lastIndex:number,heldIndex:number|null) {
+  const snapIndex=reasoningSnapIndex(ratio,trackWidth,lastIndex,heldIndex);
+  return {
+    ratio:snapIndex===null?ratio:snapIndex/lastIndex,
+    index:snapIndex??Math.round(ratio*lastIndex),
+    snapIndex,
+  };
+}
+
 const keyFor=(selection:ModelSelection)=>`hive.reasoning.${JSON.stringify([selection.serviceId,selection.modelId])}`;
 const unavailable='原推理档位已不可用，已切回服务默认。';
 

@@ -1,9 +1,10 @@
 .find-replace-workspace {min-width:260px;min-height:190px;}
 .find-replace-content {display:flex;flex:1;flex-direction:column;gap:10px;padding:12px;min-height:0;overflow:auto;font-size:calc(12px * var(--text-scale));}
-.find-target {color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.find-replace-workspace .find-replace-content {padding-top:9px;}
+.find-target {display:block;flex:none;line-height:1.5;min-width:0;max-width:100%;font-size:calc(11px * var(--text-scale));color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .find-input-row {display:flex;gap:5px;align-items:center;}
 .find-input-row input {flex:1;min-width:0;padding:8px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--text);font:inherit;}
-.find-input-row button {flex:none;display:flex;align-items:center;justify-content:center;min-height:32px;padding:5px 8px;border:1px solid var(--line);border-radius:4px;color:var(--text);background:var(--panel);font:inherit;}
+.find-input-row button {flex:none;display:flex;align-items:center;justify-content:center;gap:4px;min-height:32px;padding:5px 8px;border:1px solid var(--line);border-radius:4px;color:var(--text);background:var(--panel);font:inherit;}
 .find-options {display:flex;gap:13px;flex-wrap:wrap;font-size:calc(11px * var(--text-scale));}
 .find-options label {display:flex;gap:4px;align-items:center;}.find-options input {accent-color:var(--gold);}
 .find-result {font-size:calc(11px * var(--text-scale));color:var(--muted);min-height:16px;}

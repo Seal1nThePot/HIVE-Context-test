@@ -1,13 +1,24 @@
 import type {PointerEvent as ReactPointerEvent} from 'react';
 import type {DragControl} from './PanelControl';
-import type {Rect} from './panelLayout';
+import {dockedPanels,removeDockPanel,activateDockPanel,type DockTree,type Rect} from './panelLayout';
 import {NativeHostRegistry,type NativeHost} from './nativeHostRegistry';
 import {subscribeStylesheetChanges} from '../theme/stylesheetChanges';
 
-export type NativeFloatOptions={rect?:()=>Rect;inactive?:boolean;onReady?:()=>void;onFailure?:()=>void;onConnect?:(stage:HTMLElement,child:Window)=>void;onReturn?:()=>void;tabDrag?:(id:string,event:ReactPointerEvent<HTMLElement>,control?:DragControl)=>void};
+export type NativeFloatOptions={content?:()=>DockTree|undefined;resizeSplit?:(split:string,ratio:number)=>void;rect?:()=>Rect;inactive?:boolean;onReady?:()=>void;onFailure?:()=>void;onConnect?:(stage:HTMLElement,child:Window)=>void;onReturn?:()=>void;tabDrag?:(id:string,event:ReactPointerEvent<HTMLElement>,control?:DragControl)=>void};
 export type NativePanelHandle={mount:(parent:HTMLElement)=>void;home:()=>void;active:(value:boolean|null)=>void;title:()=>string;dirty:()=>boolean;focus:()=>void;isComposing:()=>boolean};
 type Resource={child:Window;stage:HTMLElement|null;connected:boolean;select:(id:string)=>void;options:NativeFloatOptions;cleanup:()=>void};
 export type LiveNativeHost=NativeHost<Resource>;
+
+export function nativeHostContent(host:LiveNativeHost):DockTree|undefined {
+  let content=host.resource.options.content?.();
+  if(!content)return;
+  for(const id of dockedPanels(content))if(!host.members.includes(id))content=removeDockPanel(content||null,id)??undefined;
+  return activateDockPanel(content||null,host.active)??undefined;
+}
+function shownInTree(tree:DockTree):string[]{
+  if(tree.type==='split')return [...shownInTree(tree.a),...shownInTree(tree.b)];
+  return [tree.type==='panel'?tree.panel:tree.active];
+}
 
 /** Mirrors presentation only; panels retain their original React and editor owners. */
 export function mirrorAppearance(target:Document){
@@ -70,7 +81,8 @@ export class NativeHostRuntime {
   composing(ids:string[]){return ids.some(id=>this.handles.get(id)?.isComposing());}
   refresh(id:string){const host=this.registry.get(id);if(host?.resource.connected&&!host.resource.child.closed){host.resource.child.document.title=`${this.handles.get(host.active)?.title()||'面板'} — HIVE markdown editor`;if(host.group)this.changed();}}
   select(id:string,member:string){const host=this.registry.get(id);if(!host||!this.registry.select(host.id,member))return;this.activate(host);host.resource.select(member);this.changed();}
-  private activate(host:LiveNativeHost){for(const id of host.members)this.handles.get(id)?.active(host.group?id===host.active:null);this.refresh(host.id);}
+  syncVisibility(host:LiveNativeHost){const content=nativeHostContent(host),shown=content?shownInTree(content):[host.active];for(const id of host.members)this.handles.get(id)?.active(host.group?shown.includes(id):null);}
+  private activate(host:LiveNativeHost){this.syncVisibility(host);this.refresh(host.id);}
   close(id:string,force=false){
     const host=this.registry.get(id);if(!host)return true;
     return this.returnMembers([...host.members],force);
@@ -125,7 +137,15 @@ export class NativeHostRuntime {
     }};
   }
   open(id:string,options:NativeFloatOptions={},members=[id],select:(id:string)=>void=()=>{}){
-    const previous=this.registry.get(id);if(previous&&!previous.resource.child.closed){window.hiveDesktop?.windowCommand('focus',previous.id);return;}if(previous)this.close(previous.id,true);
+    const previous=this.registry.get(id);
+    if(previous&&!previous.resource.child.closed){
+      // The workspace already requested this member. Select it in the live host
+      // without calling the tab-click callback that opens the workspace again.
+      if(previous.active!==id&&this.registry.select(previous.id,id))this.activate(previous);
+      window.hiveDesktop?.windowCommand('focus',previous.id);
+      return;
+    }
+    if(previous)this.close(previous.id,true);
     if(!window.hiveDesktop?.isDesktop||new Set(members).size!==members.length||!members.includes(id)||members.some(member=>!this.handles.has(member)||!!this.registry.get(member))||this.composing(members)){options.onFailure?.();return;}
     const group=members.length>1,hostId=group?`native-group:${crypto.randomUUID()}`:id;
     const url=new URL('/',window.location.href);url.searchParams.set('panelWindow',hostId);

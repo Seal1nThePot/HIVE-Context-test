@@ -28,7 +28,7 @@ export function normalizeComposerShadow(value:unknown):ComposerShadow{
   const raw=value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:{};
   const clamp=(input:unknown,min:number,max:number,fallback:number)=>typeof input==='number'&&Number.isFinite(input)?Math.round(Math.max(min,Math.min(max,input))):fallback;
   const color=typeof raw.color==='string'&&/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i.test(raw.color)?raw.color.toLowerCase():defaultComposerShadow.color;
-  return {color,blur:clamp(raw.blur,0,40,defaultComposerShadow.blur),offsetY:clamp(raw.offsetY,0,24,defaultComposerShadow.offsetY)};
+  return {color,blur:clamp(raw.blur,0,40,defaultComposerShadow.blur),offsetY:clamp(raw.offsetY,-24,24,defaultComposerShadow.offsetY)};
 }
 export function composerShadowCss(value:ComposerShadow){return `0 ${value.offsetY}px ${value.blur}px ${value.color}`;}
 export function defaultColorsForBase(base:BaseColor):Palette{return {...(base==='gray'?oliveGrayColors:base==='white'?oliveWhiteColors:palettes.hive.colors)};}
@@ -123,6 +123,7 @@ export function accentForeground(hex:string){
   return (luminance+.05)/.05 >= 1.05/(luminance+.05)?'#000000':'#ffffff';
 }
 export function mix(a:string,b:string,amount:number){const x=rgb(a),y=rgb(b);return '#'+x.map((v,i)=>Math.round(v*(1-amount)+y[i]*amount).toString(16).padStart(2,'0')).join('');}
+export function themeRoleColor(color:string,light:boolean){return light?mix(color,'#000000',.38):color;}
 export function themeTokens(theme:ThemeCorePreferences){
   const base=theme.base==='white'?'#ffffff':theme.base==='gray'?'#e4e7e4':theme.base==='custom'?theme.customBase:'#171918';
   const light=brightness(base)>145;

@@ -4,7 +4,7 @@ import SettingRow from './SettingRow';
 import {StatusBarSettings,type StatusPreferences} from "../editor/EditorStatusBar";
 import { useEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { DesktopPanel, useDesktopPanels } from '../workspace/DesktopPanels';
-import { ArrowLeft, Bot, Check, ChevronRight, Info, Keyboard, LayoutPanelTop, Minus, Palette, PencilLine, Plus, Search, Server, SlidersHorizontal, Trash2, X, RefreshCw, Plug, Settings, MoreHorizontal, GripVertical, WandSparkles } from 'lucide-react';
+import { ArrowLeft, Check, ChevronRight, Icon, Info, iconComponent, Keyboard, LayoutPanelTop, Minus, Palette, PencilLine, Plus, Search, Server, SlidersHorizontal, Trash2, X, RefreshCw, Plug, Settings, MoreHorizontal, GripVertical, WandSparkles } from "../../shared/icons";
 import AboutSettings from './AboutSettings';
 import {aboutSearchKeywords} from './aboutInfo';
 import AppearanceSettings from './AppearanceSettings';
@@ -14,19 +14,24 @@ import type {useAnnotationPreferences} from './useAnnotationPreferences';
 import { useAppearance } from './useAppearance';
 import { MODEL_CONFIGURATION_LIMIT, MODEL_CONTEXT_TOKEN_MAX, reasoningLevelValues, effectiveReasoningLevels, effectiveInputTypes, withImportedReasoningDefaults, modelConnectionAddress, inputTypeValues, type Config, type ModelService, type ModelEntry, type ModelProbeRequest, type ModelProbeResult, type ReasoningLevel, type InputType } from './modelConfig';
 import { sortCatalogModels } from './catalogOrder';
+import ShortcutSettings from './ShortcutSettings';
+import {useWindowAnnotations} from '../annotations/windowAnnotations';
+import HistoryRetentionSettings from '../history/HistoryRetentionSettings';
+import type {HistoryLimits} from '../history/historyTypes';
 import './settings.css';
 
 export type SettingsSection='appearance'|'appearance-reserved'|'features'|'writing'|'models'|'shortcuts'|'about';
 type Props={panelIconDragPreferences:ReturnType<typeof usePanelIconDragPreferences>;annotationPreferences:ReturnType<typeof useAnnotationPreferences>;statusPreferences:StatusPreferences;config:Config;initialSection:SettingsSection;restoreKey:number;appearance:ReturnType<typeof useAppearance>;busy:boolean;
+  historyLimits?:HistoryLimits;onSaveHistoryLimits?:(limits:HistoryLimits)=>Promise<void>;
   onProbe:(body:ModelProbeRequest,signal?:AbortSignal)=>Promise<ModelProbeResult>;onRequest:(route:string,body:unknown)=>Promise<void>;onReload:()=>Promise<void>;onClose:()=>void};
 type ServiceDraft=Omit<ModelService,'id'|'hasKey'>&{id?:string;key:string;clearKey:boolean};
 const sections=[{id:'appearance' as const,label:'界面',description:'顶部编辑栏、文字、正文排版与底部栏',Icon:LayoutPanelTop},
   {id:'appearance-reserved' as const,label:'外观',description:'外观设置',Icon:Palette},
   {id:'features' as const,label:'功能',description:'悬浮工具与面板',Icon:SlidersHorizontal},
   {id:'writing' as const,label:'写作',description:'续写与写作节奏',Icon:PencilLine},
-  {id:'models' as const,label:'模型',description:'AI 服务与模型管理',Icon:Bot},
+  {id:'models' as const,label:'模型',description:'AI 服务与模型管理',Icon:iconComponent("model.choose")},
   {id:'shortcuts' as const,label:'快捷键',description:'编辑与面板操作',Icon:Keyboard},
-  {id:'about' as const,label:'关于',description:'版本、构建、离线帮助与诊断信息',keywords:aboutSearchKeywords,Icon:Info}];
+  {id:'about' as const,label:'关于',description:'版本、应用更新、离线帮助与诊断信息',keywords:aboutSearchKeywords,Icon:Info}];
 
 const sectionMatches=(item:typeof sections[number],search:string)=>(item.label+item.description+('keywords' in item?item.keywords:'')).toLowerCase().includes(search.trim().toLowerCase());
 
@@ -34,7 +39,7 @@ export default function SettingsPage(props:Props){
   return <DesktopPanel id="settings" title="设置" open><SettingsContent {...props}/></DesktopPanel>;
 }
 
-function SettingsContent({panelIconDragPreferences,annotationPreferences,statusPreferences,config,initialSection,restoreKey,appearance,busy,onProbe,onRequest,onReload,onClose}:Props){
+function SettingsContent({panelIconDragPreferences,annotationPreferences,statusPreferences,config,initialSection,restoreKey,appearance,busy,historyLimits,onSaveHistoryLimits,onProbe,onRequest,onReload,onClose}:Props){
   const [section,setSection]=useState(initialSection),[search,setSearch]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const [draft,setDraft]=useState<ServiceDraft|null>(null),[modelId,setModelId]=useState(''),[modelName,setModelName]=useState(''),[filter,setFilter]=useState(''),[removeId,setRemoveId]=useState<string|null>(null),[discard,setDiscard]=useState(false);
   const [catalog,setCatalog]=useState<ModelEntry[]>([]),[catalogOpen,setCatalogOpen]=useState(false),[catalogSearch,setCatalogSearch]=useState(''),[checked,setChecked]=useState<string[]>([]),[probing,setProbing]=useState(false),[modelSettings,setModelSettings]=useState<string|null>(null),[menu,setMenu]=useState<string|null>(null),[menuPosition,setMenuPosition]=useState({left:0,top:0});
@@ -48,7 +53,7 @@ function SettingsContent({panelIconDragPreferences,annotationPreferences,statusP
   useEffect(()=>{const close=(event:Event)=>{if((event as CustomEvent).detail!=='settings')return;event.preventDefault();if(busy)return;if(draft)setDiscard(true);else onClose();};window.addEventListener('hive:panel-close-requested',close);return()=>window.removeEventListener('hive:panel-close-requested',close);},[busy,draft,onClose]);
   useEffect(()=>{setLimit(String(config.continuationLimit));},[config.continuationLimit]);
   useEffect(()=>{if(discard)discardRef.current?.scrollIntoView({block:'nearest'});},[discard]);
-  const desktop=useDesktopPanels();
+  const desktop=useDesktopPanels(),{markedPanels}=useWindowAnnotations();
   const detached=desktop.windows.has('settings');
   const [position,setPosition]=useState({x:Math.max(8,window.innerWidth-820),y:48});
   const [minimized,setMinimized]=useState(false),[openingNative,setOpeningNative]=useState(desktop.enabled);
@@ -131,7 +136,7 @@ function SettingsContent({panelIconDragPreferences,annotationPreferences,statusP
   const currentService=draft?.id?config.services.find(item=>item.id===draft.id):undefined;
   const shownServices=config.services.filter(item=>(item.name+' '+item.endpoint+' '+item.models.map(model=>model.name+' '+model.id).join(' ')).toLowerCase().includes(filter.toLowerCase()));
   return <div ref={panel} data-panel-id="settings" className={'settings-floating workspace-panel'+(minimized?' settings-floating-minimized':'')} role="dialog" aria-label="设置" style={{...(detached?{}:{left:position.x,top:position.y}),...(openingNative?{visibility:'hidden'}:{})}} onKeyDown={key}>
-    <div className="settings-floating-title panel-drag-header" onPointerDown={drag}><b>设置</b><div className="settings-floating-actions">
+    <div className="settings-floating-title panel-drag-header" data-window-annotation={markedPanels.indexOf('settings')+1||undefined} onPointerDown={drag}><b>设置</b><div className="settings-floating-actions">
       <button type="button" aria-label={minimized?'恢复设置':'最小化设置'} title={minimized?'恢复设置':'最小化设置'} onClick={()=>{if(detached)window.hiveDesktop?.windowCommand('minimize','settings');else setMinimized(value=>!value);}}><Minus size={16}/></button>
       <button type="button" aria-label="关闭设置" disabled={busy} onClick={()=>{if(draft)setDiscard(true);else onClose();}}><X size={16}/></button>
     </div></div>
@@ -139,14 +144,14 @@ function SettingsContent({panelIconDragPreferences,annotationPreferences,statusP
     <div className="settings-page" style={minimized?{display:'none'}:undefined}>
     <aside className="settings-sidebar" inert={editing}>
       <div className="settings-brand"><span>H</span><b>HIVE</b><small>设置</small></div>
-      <label className="settings-search"><Search size={15}/><input aria-label="搜索设置" placeholder="搜索设置…" value={search} disabled={editing} onChange={event=>setSearch(event.target.value)}/></label>
+      <label className="settings-search"><Icon name="settings.search" size={15}/><input aria-label="搜索设置" placeholder="搜索设置…" value={search} disabled={editing} onChange={event=>setSearch(event.target.value)}/></label>
       <nav aria-label="设置分类">{sections.filter(item=>sectionMatches(item,search)).map(({id,label,description,Icon})=><button key={id} type="button" className={section===id?'active':''} title={description} aria-current={section===id?'page':undefined} disabled={editing} onClick={()=>navigate(id)}><Icon size={16}/><span>{label}</span></button>)}</nav>
       {search.trim()&&!sections.some(item=>sectionMatches(item,search))&&<p className="settings-nav-empty">没有匹配的设置分类</p>}
       <button ref={closeButton} type="button" className="settings-return" onClick={()=>{if(draft)setDiscard(true);else onClose();}} disabled={busy}><ArrowLeft size={16}/>返回写作</button>
     </aside>
     <main className="settings-content" inert={editing}>
       <div className="settings-content-scroll">
-      <header className="settings-page-heading"><div className="settings-title-icon"><sectionInfo.Icon size={22}/></div><div><h1>{sectionInfo.label==='模型'?'模型配置':sectionInfo.label}</h1><p>{sectionInfo.description}</p></div></header>
+      <header className="settings-page-heading"><div className="settings-title-icon">{sectionInfo.id==="models"?<Icon name="model.settings" size={22}/>:<sectionInfo.Icon size={22}/>}</div><div><h1>{sectionInfo.label==='模型'?'模型配置':sectionInfo.label}</h1><p>{sectionInfo.description}</p></div></header>
       {error&&<div className="settings-feedback error" role="alert"><span>{error}</span>{(error.includes('其他窗口')||error.includes('重新载入'))&&<button type="button" disabled={busy} onClick={async()=>{try{await onReload();setError('');setNotice('已重新载入配置。');}catch(error){setError((error as Error).message);}}}>重新载入配置</button>}</div>}
       {notice&&<p className="settings-feedback" role="status"><Check size={14}/>{notice}</p>}
       {section==='about'&&<AboutSettings/>}
@@ -157,18 +162,14 @@ function SettingsContent({panelIconDragPreferences,annotationPreferences,statusP
         <StatusBarSettings preferences={statusPreferences}/>
       </>}
       {section==='appearance-reserved'&&<ThemeSettings/>}
-      {section==='features'&&<><section className="settings-card feature-settings"><h2>悬浮工具</h2><SettingRow title="显示底部悬浮工具栏" description="显示标注工具、写作模式和 AI 开关。关闭后仍可通过右上角面板按钮或 Ctrl+J 打开 AI。"><input className="setting-switch" aria-label="显示底部悬浮工具栏" type="checkbox" checked={appearance.appearance.floatingToolbarVisible!==false} onChange={event=>appearance.setAppearance(old=>({...old,floatingToolbarVisible:event.target.checked}))}/></SettingRow></section>
+      {section==='features'&&<><section className="settings-card feature-settings"><h2>悬浮工具</h2><SettingRow title="显示底部悬浮工具栏" description="显示标注工具、写作模式和 AI 开关。关闭后仍可通过右上角面板按钮打开 AI。"><input className="setting-switch" aria-label="显示底部悬浮工具栏" type="checkbox" checked={appearance.appearance.floatingToolbarVisible!==false} onChange={event=>appearance.setAppearance(old=>({...old,floatingToolbarVisible:event.target.checked}))}/></SettingRow></section>
       <section className="settings-card feature-settings"><h2>面板位置</h2><SettingRow title="锁定与解锁手势" description="在面板标题栏操作。锁定后仍可打开、关闭和收纳；标签组共享位置。"><select aria-label="面板锁定手势" value={appearance.appearance.panelLockGesture||'doubleClick'} onChange={event=>appearance.setAppearance(old=>({...old,panelLockGesture:event.target.value==='longPress'?'longPress':'doubleClick'}))}><option value="doubleClick">双击标题栏</option><option value="longPress">长按标题栏（0.6 秒）</option></select></SettingRow><SettingRow title="图标拖动标识" description="长按侧栏图标拖动时，选择跟随指针的标识样式。"><select aria-label="图标拖动标识" value={panelIconDragPreferences.preferences.holdStyle} onChange={event=>panelIconDragPreferences.setPreferences(old=>({...old,holdStyle:event.target.value==='bar'?'bar':'circle'}))}><option value="circle">圆形</option><option value="bar">长条</option></select></SettingRow><SettingRow title="图标长按时间" description="设置 0.05–3 秒；短按仍然展开或收起面板。"><PanelIconDelay label="图标长按时间" value={panelIconDragPreferences.preferences.holdDelayMs} onChange={holdDelayMs=>panelIconDragPreferences.setPreferences(old=>({...old,holdDelayMs}))}/></SettingRow><SettingRow title="最短触发时间" description="设置 0.05–3 秒；实际触发时间取长按时间与最短触发时间中较大的值。"><PanelIconDelay label="最短触发时间" value={panelIconDragPreferences.preferences.minimumTriggerMs} onChange={minimumTriggerMs=>panelIconDragPreferences.setPreferences(old=>({...old,minimumTriggerMs}))}/></SettingRow>{panelIconDragPreferences.saveError&&<p role="status">{panelIconDragPreferences.saveError}</p>}</section>{appearance.saveError&&<p role="status">{appearance.saveError}</p>}</>}
-      {section==='features'&&<AnnotationSettings {...annotationPreferences}/>}
+      {section==='features'&&<><AnnotationSettings {...annotationPreferences}/>{historyLimits&&onSaveHistoryLimits&&<HistoryRetentionSettings limits={historyLimits} onSave={onSaveHistoryLimits}/>}</>}
       {section==='writing'&&<form className="settings-card writing-settings" onSubmit={async event=>{event.preventDefault();await run('/config',{revision:config.revision,continuationLimit:Number(limit)},'写作设置已保存。');}}><h2>续写长度</h2><p>每次续写生成一个完整段落，先审阅，再决定是否采纳。</p><SettingRow title={<label htmlFor="writing-limit">续写最大字数</label>} description="允许 1–10000 个可见字符，默认 100。"><div className="settings-inline-field"><input id="writing-limit" type="number" min={1} max={10000} step={1} required value={limit} onChange={event=>setLimit(event.target.value)}/><span>字</span></div></SettingRow><small>含标点，不计空白与 Markdown 标记；超限或多段输出会阻止应用。</small><button type="submit" className="settings-primary" disabled={busy}>{busy?'保存中…':'保存写作设置'}</button></form>}
-      {section==='shortcuts'&&<section className="settings-card shortcut-settings"><h2>常用操作</h2>{[
-        ['锁定 / 解锁面板位置',appearance.appearance.panelLockGesture==='longPress'?'长按标题栏 0.6 秒':'双击标题栏'],
-        ['新建笔记','Ctrl + N'],['打开文档列表','Ctrl + O'],['新建文件夹（文档列表内）','Ctrl + Shift + N'],['重命名选中文件','F2'],['删除到回收站（文档列表内）','Delete'],['新标签页打开（文档列表内）','Ctrl + Enter'],['复制路径（文档列表内）','Ctrl + Shift + C'],['文件夹中查找（文档列表内）','Ctrl + Shift + F'],['文件右键菜单','Shift + F10'],['保存正文','Ctrl + S'],['查找与替换','Ctrl + F'],['呼叫 AI','Ctrl + J'],['标注选区','Ctrl + Alt + M'],['发送消息','Ctrl + Enter'],['撤回 / 重做','Ctrl + Z / Ctrl + Y'],['停止生成 / 取消拖动','Escape'],['拖动时保持浮动','Alt + 拖动'],
-        ['下一处 / 上一处匹配','F3 / Shift + F3'],['打开替换（编辑区内）','Ctrl + H'],['粗体 / 斜体 / 下划线（编辑区内）','Ctrl + B / I / U'],['左对齐 / 居中 / 右对齐（编辑区内）','Ctrl + Shift + L / E / R'],
-      ].map(([label,key])=><div key={label}><span>{label}</span><kbd>{key}</kbd></div>)}</section>}
+      {section==='shortcuts'&&<ShortcutSettings longPress={appearance.appearance.panelLockGesture==='longPress'}/>}
       {section==='models'&&<>
         <div className="settings-section-heading"><h2>AI 服务 <span>{config.services.length}</span></h2><button type="button" className="settings-primary" disabled={busy} onClick={()=>edit()}><Plus size={16}/>添加自定义服务</button></div>
-        {!!config.services.length&&<label className="settings-service-search"><Search size={15}/><input aria-label="搜索服务或模型" placeholder="搜索服务或模型…" value={filter} onChange={event=>setFilter(event.target.value)}/></label>}
+        {!!config.services.length&&<label className="settings-service-search"><Icon name="settings.searchServiceModel" size={15}/><input aria-label="搜索服务或模型" placeholder="搜索服务或模型…" value={filter} onChange={event=>setFilter(event.target.value)}/></label>}
         <div className="model-service-list">{shownServices.map(service=>{const index=config.services.indexOf(service);return <article className={'model-service-card '+(!service.enabled?'disabled-service':'')} key={service.id} draggable onDragStart={e=>e.dataTransfer.setData('text/hive-service',String(index))} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();const raw=e.dataTransfer.getData('text/hive-service');const from=Number(raw);if(raw&&Number.isInteger(from))void moveService(from,index);}}>
           <span className="sort-handle" role="button" tabIndex={0} aria-description="使用上下方向键调整顺序" aria-label={`调整服务${service.name}顺序`} title="拖动排序；方向键上 / 下调整顺序" onKeyDown={e=>{if(e.key==='ArrowUp'||e.key==='ArrowDown'){e.preventDefault();void moveService(index,index+(e.key==='ArrowUp'?-1:1));}}}><GripVertical size={15}/></span><button className="model-service-open" type="button" onClick={()=>edit(service)} disabled={busy}><span className="model-service-avatar">{service.name.charAt(0).toUpperCase()}</span><span><b>{service.name}</b><small>{service.endpoint} · {service.models.length} 个模型</small></span><ChevronRight size={16}/></button>
           <span className="service-menu-wrap"><button type="button" className="settings-small-action" aria-label={`${service.name}更多操作`} aria-expanded={menu===service.id} onClick={e=>{const rect=e.currentTarget.getBoundingClientRect(),win=e.currentTarget.ownerDocument.defaultView!;setMenuPosition({left:Math.max(8,Math.min(rect.right-160,win.innerWidth-168)),top:Math.max(8,Math.min(rect.bottom+4,win.innerHeight-140))});setMenu(menu===service.id?null:service.id);}}><MoreHorizontal size={16}/></button>{menu===service.id&&panel.current&&createPortal(<span className="service-menu" style={{left:menuPosition.left,top:menuPosition.top}}><button type="button" disabled={probing} onClick={()=>{setMenu(null);void probe({...service,key:'',clearKey:false});}}>测试列表连接</button><button type="button" onClick={()=>{setMenu(null);edit(service);}}>编辑与测试模型</button><button type="button" onClick={()=>{setMenu(null);void run('/model-services',{revision:config.revision,service:{...service,enabled:!service.enabled}},service.enabled?'服务已停用。':'服务已启用。');}}>{service.enabled?'停用':'启用'}</button></span>,panel.current.ownerDocument.body)}</span>

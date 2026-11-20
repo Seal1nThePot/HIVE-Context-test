@@ -1,5 +1,5 @@
 import {useEffect,useId,useRef,useState,type PointerEvent as ReactPointerEvent} from 'react';
-import {ChevronDown,GripVertical,Plus,X} from 'lucide-react';
+import {ChevronDown,GripVertical,Plus,X} from "../../shared/icons";
 import type {StatusPreferences} from './EditorStatusBar';
 import {countDescription,paragraphDescription,placeStatusItem,statusItems,statusLabel,type StatusKey} from './statusModel';
 import './status-bar-settings.css';

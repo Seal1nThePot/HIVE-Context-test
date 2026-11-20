@@ -7,6 +7,10 @@ const info={version:1,id:'claude-olive-gold',name:'青苔鎏金',description:'�
 const blueInfo={...info,id:'claude-mediterranean-blue',name:'地中海蓝',bases:['black','white'],directory:'C:/templates/mediterranean-blue'};
 let data:Map<string,string>,request:ReturnType<typeof vi.fn>,blueDefaults:typeof blue;
 const response=(value:unknown,status=200)=>({ok:status<400,status,json:async()=>value}) as Response;
+const leftIcon=(width:number)=>({viewBox:`0 0 ${width} 24`,shapes:[{tag:'path',attrs:{d:'M1 1h10'}}]});
+const iconPack=(packRevision:string,width?:number,warning='')=>({version:1,icons:width?{ArrowLeft:leftIcon(width)}:{},packRevision,warning});
+const catalogResponse=()=>response({directory:'C:/templates',templates:[info,blueInfo],warnings:[]});
+const blueResponse=(extra:Record<string,unknown>={})=>response({template:blueInfo,colors:blueDefaults,defaults:blueDefaults,revision,defaultsRevision:revision,...extra});
 beforeEach(()=>{vi.resetModules();vi.useFakeTimers();data=new Map();blueDefaults=structuredClone(blue);blueDefaults.base='black';vi.stubGlobal('localStorage',{getItem:(key:string)=>data.get(key)??null,setItem:(key:string,value:string)=>data.set(key,value)});request=vi.fn(async(url:string,init?:RequestInit)=>{if(url==='/api/templates')return response({directory:'C:/templates',templates:[info,blueInfo],warnings:[]});const selected=url.includes('claude-mediterranean-blue'),colors=selected?blueDefaults:olive;return response({template:selected?blueInfo:info,colors:typeof init?.body==='string'?JSON.parse(init.body).colors:colors,defaults:colors,revision,defaultsRevision:revision});});vi.stubGlobal('fetch',request);});
 afterEach(()=>{vi.clearAllTimers();vi.useRealTimers();vi.unstubAllGlobals();});
 const writes=()=>request.mock.calls.filter(([,init])=>init?.method==='POST');
@@ -54,5 +58,81 @@ describe('template baseline and personal preference isolation',()=>{
   });
   it('renders cached blue on restart while the service is unavailable',async()=>{
     let files=await import('./templateFiles'),store=await import('./themeStore');await files.initializeThemeFiles();await files.loadTemplateFile('claude-mediterranean-blue');store.setTheme(old=>updateThemeColors(old,{accent:'#123456'}));store.flushThemePreferences();vi.resetModules();request.mockRejectedValue(new Error('service unavailable'));store=await import('./themeStore');expect(store.getThemeSnapshot().preferences.colors.accent).toBe('#123456');expect(store.getThemeSnapshot().templateBinding?.name).toBe('地中海蓝');files=await import('./templateFiles');await files.initializeThemeFiles();expect(store.getThemeSnapshot().preferences.surfaceColors.black?.panel).toBe(blue.surfaceColors.black.panel);
+  });
+});
+
+describe('active template icons',()=>{
+  it('loads startup colors without waiting for icons and ignores a late startup pack after switching',async()=>{
+    const files=await import('./templateFiles'),store=await import('./themeStore'),icons=await import('../../shared/icons');
+    let finishIcons:(value:Response)=>void=()=>{};
+    request.mockImplementationOnce(async()=>catalogResponse());
+    request.mockImplementationOnce(async()=>response({template:info,colors:olive,defaults:olive,revision,defaultsRevision:revision}));
+    request.mockImplementationOnce(()=>new Promise<Response>(resolve=>{finishIcons=resolve;}));
+    await files.initializeThemeFiles();
+    expect(request.mock.calls[1][0]).toBe('/api/templates/claude-olive-gold?colorsOnly=1');
+    expect(request.mock.calls[2][0]).toBe('/api/templates/claude-olive-gold/icons');
+    expect(store.getThemeSnapshot().templateId).toBe(info.id);
+    expect(files.getTemplateFilesSnapshot().status).toBe('ready');
+    expect(icons.getDockIconOverrides()).toEqual({});
+
+    request.mockImplementationOnce(async()=>blueResponse({iconPack:iconPack('blue',32)}));
+    await files.loadTemplateFile(blueInfo.id);
+    finishIcons(response(iconPack('olive',40,'过期警告')));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getThemeSnapshot().templateId).toBe(blueInfo.id);
+    expect(icons.getDockIconOverrides().ArrowLeft).toEqual(leftIcon(32));
+    expect(files.getTemplateFilesSnapshot().iconWarning).toBe('');
+  });
+
+  it('accepts icon-only updates and fallbacks while leaving color state and saves independent',async()=>{
+    const files=await import('./templateFiles'),store=await import('./themeStore'),icons=await import('../../shared/icons');
+    await files.initializeThemeFiles();
+    request.mockImplementationOnce(async()=>blueResponse({iconPack:iconPack('blue-one',32)}));
+    await files.loadTemplateFile(blueInfo.id);
+    const preferences=store.getThemeSnapshot().preferences;
+
+    request.mockImplementationOnce(async()=>catalogResponse());
+    request.mockImplementationOnce(async()=>blueResponse({iconPackUnchanged:true}));
+    await files.pollTemplateFiles();
+    expect(request.mock.lastCall?.[0]).toBe(`/api/templates/${blueInfo.id}?iconPackRevision=blue-one`);
+    expect(icons.getDockIconOverrides().ArrowLeft).toEqual(leftIcon(32));
+
+    request.mockImplementationOnce(async()=>catalogResponse());
+    request.mockImplementationOnce(async()=>blueResponse({iconPack:iconPack('blue-two',40,'坏图标已回退')}));
+    await files.pollTemplateFiles();
+    expect(icons.getDockIconOverrides().ArrowLeft).toEqual(leftIcon(40));
+    expect(files.getTemplateFilesSnapshot()).toMatchObject({status:'ready',error:'',iconWarning:'坏图标已回退'});
+    expect(store.getThemeSnapshot().preferences).toBe(preferences);
+    await files.saveCurrentTemplate();
+    expect(JSON.parse(writes()[0][1].body)).not.toHaveProperty('iconPack');
+    expect(icons.getDockIconOverrides().ArrowLeft).toEqual(leftIcon(40));
+
+    request.mockImplementationOnce(async()=>catalogResponse());
+    request.mockImplementationOnce(async()=>blueResponse({iconPack:iconPack('removed')}));
+    await files.pollTemplateFiles();
+    expect(icons.getDockIconOverrides()).toEqual({});
+    expect(files.getTemplateFilesSnapshot().iconWarning).toBe('');
+  });
+
+  it('does not apply a pre-switch poll even when the user returns to the same template',async()=>{
+    const files=await import('./templateFiles'),store=await import('./themeStore'),icons=await import('../../shared/icons');
+    await files.initializeThemeFiles();
+    request.mockImplementationOnce(async()=>blueResponse({iconPack:iconPack('initial',32)}));
+    await files.loadTemplateFile(blueInfo.id);
+    let finishPoll:(value:Response)=>void=()=>{};
+    let markStarted:()=>void=()=>{};
+    const started=new Promise<void>(resolve=>{markStarted=resolve;});
+    request.mockImplementationOnce(async()=>catalogResponse());
+    request.mockImplementationOnce(()=>new Promise<Response>(resolve=>{finishPoll=resolve;markStarted();}));
+    const pending=files.pollTemplateFiles();await started;
+
+    await files.loadTemplateFile(info.id);
+    request.mockImplementationOnce(async()=>blueResponse({iconPack:iconPack('reloaded',40)}));
+    await files.loadTemplateFile(blueInfo.id);
+    finishPoll(blueResponse({iconPack:iconPack('late-poll',48,'过期警告')}));
+    await pending;
+    expect(store.getThemeSnapshot().templateId).toBe(blueInfo.id);
+    expect(icons.getDockIconOverrides().ArrowLeft).toEqual(leftIcon(40));
+    expect(files.getTemplateFilesSnapshot().iconWarning).toBe('');
   });
 });

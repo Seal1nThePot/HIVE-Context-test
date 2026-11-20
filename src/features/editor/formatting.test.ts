@@ -9,6 +9,28 @@ function state(doc:string,from=0,to=from){return EditorState.create({doc,selecti
 function format(doc:string,from:number,to:number){const before=state(doc,from,to);return before.update(inlineFormatting(before,'underline')).state;}
 
 describe('editable text formats',()=>{
+  it('adds and removes ordinary Markdown-compatible highlight markup',()=>{
+    let value=state('保留 高亮文字 后文',3,7);
+    value=value.update(inlineFormatting(value,'highlight')).state;
+    expect(value.sliceDoc()).toBe('保留 <mark>高亮文字</mark> 后文');
+    expect(value.sliceDoc(value.selection.main.from,value.selection.main.to)).toBe('高亮文字');
+    value=value.update(inlineFormatting(value,'highlight')).state;
+    expect(value.sliceDoc()).toBe('保留 高亮文字 后文');
+  });
+  it('can clear part of an existing highlight while keeping the surrounding text highlighted',()=>{
+    const doc='<mark>甲乙丙</mark>';
+    const value=state(doc,7,8);
+    expect(value.update(inlineFormatting(value,'highlight')).state.sliceDoc()).toBe('<mark>甲</mark>乙<mark>丙</mark>');
+    expect(inspectFormatting(state('`<mark>甲</mark>`')).highlights).toHaveLength(0);
+  });
+  it('inserts a details block with its summary ready for typing and preserves adjacent text',()=>{
+    const value=state('前后',1);
+    const updated=value.update(insertStructure(value,'details')).state;
+    expect(updated.sliceDoc()).toBe('前\n\n<details>\n<summary></summary>\n\n折叠块内容\n\n</details>\n\n后');
+    expect(updated.selection.main.from).toBe(updated.sliceDoc().indexOf('</summary>'));
+    const code=state('```\n原文\n```',5);
+    expect(()=>insertStructure(code,'details')).toThrow('代码区域');
+  });
   it('toggles strikethrough and inline code, including literal backticks and selected source',()=>{
     let value=state('文字',0,2);value=value.update(inlineFormatting(value,'strike')).state;expect(value.doc.toString()).toBe('~~文字~~');value=value.update(inlineFormatting(value,'strike')).state;expect(value.doc.toString()).toBe('文字');
     value=state('`内容`',0,4);value=value.update(inlineFormatting(value,'inlineCode')).state;expect(value.doc.toString()).toBe('内容');

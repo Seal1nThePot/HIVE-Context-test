@@ -10,7 +10,7 @@ export default defineConfig(({ command }) => {
   return {
     plugins: [react(), { name: "hive-build-info", generateBundle() { this.emitFile({ type: "asset", fileName: "build-info.json", source: JSON.stringify(info, null, 2) + "\n" }); } }],
     define: { __HIVE_BUILD_INFO__: JSON.stringify(info) },
-    server: { host: "127.0.0.1" },
+    server: { host: "127.0.0.1", watch: { ignored: ["**/.runtime/**"] } },
     test: { exclude: [...configDefaults.exclude, "performance/**", "delivery/**"] },
   };
 });

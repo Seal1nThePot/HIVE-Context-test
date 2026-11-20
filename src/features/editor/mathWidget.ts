@@ -48,8 +48,8 @@ export class MathWidget extends WidgetType{
     const controller:Controller={element,item,doc:this.doc,view,raw:'',source:'',status:'',generation:1,destroyed:false,committed:false,cancelCommit:null};
     controllers.set(element,controller);
     element.addEventListener('mousedown',event=>{
-      if(controller.destroyed)return;
-      event.preventDefault();event.stopPropagation();controller.view.dispatch({selection:{anchor:controller.item.from},userEvent:'select.pointer'});controller.view.focus();
+      if(controller.destroyed||controller.view.state.readOnly)return;
+      event.preventDefault();event.stopPropagation();controller.view.dispatch({selection:{anchor:controller.item.from},userEvent:'select.widget'});controller.view.focus();
     });
     if(item.text){element.textContent='〔'+item.text+'〕';return element;}
     // Only mounted, budget-eligible widgets read their own original source range.

@@ -1,5 +1,5 @@
 import {useEffect,useRef} from 'react';
-import {FilePlus2,FolderOpen,Plus} from 'lucide-react';
+import {DocumentsPanel,Icon,Plus} from "../../shared/icons";
 import './new-tab.css';
 
 export function NewTabButton({onClick,disabled=false}:{onClick:()=>void;disabled?:boolean}){
@@ -12,8 +12,8 @@ export default function NewTabPage({active,busy,onCreate,onOpen}:{active:boolean
   useEffect(()=>{if(active)page.current?.focus({preventScroll:true});},[active]);
   return <div ref={page} className="document-new-page" tabIndex={-1} aria-label="新标签页" aria-busy={busy}>
     <div className="new-tab-actions">
-      <button type="button" disabled={busy} onClick={onCreate} aria-keyshortcuts="Control+N"><FilePlus2 size={17}/><span>新建笔记</span><kbd>Ctrl + N</kbd></button>
-      <button type="button" onClick={onOpen} aria-keyshortcuts="Control+O"><FolderOpen size={17}/><span>打开文件</span><kbd>Ctrl + O</kbd></button>
+      <button type="button" disabled={busy} onClick={onCreate} aria-keyshortcuts="Control+N"><Icon name="file.newNote" size={17}/><span>新建笔记</span><kbd>Ctrl + N</kbd></button>
+      <button type="button" onClick={onOpen} aria-keyshortcuts="Control+O"><DocumentsPanel size={17}/><span>打开文件</span><kbd>Ctrl + O</kbd></button>
     </div>
   </div>;
 }

@@ -166,7 +166,7 @@
   box-shadow: var(--hive-popup-shadow);
   color: var(--hive-popup-text);
 }
-.annotation-tool-active .cm-content,.annotation-tool-active .cm-line {cursor:crosshair;}
+[data-window-annotation]::before { content:attr(data-window-annotation); flex:none; display:inline-grid; place-items:center; min-width:1.25em; height:1.25em; padding:0 2px; border:1px solid currentColor; border-radius:50%; font-size:.76em; color:var(--hive-accent); margin-inline-end:4px; }
 .inline-annotation-editor textarea {
   display: block;
   width: 100%;
@@ -221,22 +221,6 @@
   gap: 3px;
   white-space: nowrap;
 }
-.node-management {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px;
-  margin: 0 0 6px;
-}
-.node-management > small {
-  font-size: var(--outline-font-xs);
-  color: var(--text);
-  margin-right: auto;
-}
-.node-management .icon-button {
-  height: 20px;
-  width: 19px;
-}
 .empty-outline {
   display: flex;
   flex-direction: column;
@@ -253,52 +237,11 @@
 .empty-outline > button {
   font-size: var(--outline-font-sm);
 }
-.modal.outline-node-modal label:not(.check-label),
-.outline-node-modal label > input:not([type="checkbox"]),
-.outline-node-modal .modal-footer button {
-  font-size: var(--outline-font-sm);
-}
-.outline-node-modal .settings-note {
-  font-size: var(--outline-font-xs);
-}
-.outline-node-modal textarea {
-  display: block;
-  width: 100%;
-  height: 140px;
-  min-height: 90px;
-  resize: vertical;
-  margin-top: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--hive-input-border);
-  border-radius: 5px;
-  background: var(--hive-input-bg);
-  color: var(--hive-input-text);
-  line-height: 1.8;
-  font-size: var(--outline-font-sm);
-}
-.outline-node-options {
-  display: grid;
-  grid-template-columns: 100px minmax(0, 1fr);
-  gap: 13px;
-}
-.outline-node-options select {
-  display: block;
-  width: 100%;
-  margin-top: 8px;
-  padding: 9px;
-  border: 1px solid var(--hive-input-border);
-  background: var(--hive-input-bg);
-  border-radius: 5px;
-  color: var(--hive-input-text);
-  font-size: var(--outline-font-xs);
-  min-width: 0;
-}
 .scratch-toolbar > .scratch-file-link {
   justify-content: flex-start;
   padding: 0;
   color: var(--hive-link);
   margin-right: auto;
-  font-size: calc(11px * var(--text-scale, 1));
 }
 @media (max-width: 1000px) {
   .document-pane .document-tabs > .save-button kbd {

@@ -1,23 +1,43 @@
-.cm-editor .cm-table-widget .cm-table-edge{position:absolute;z-index:4;width:18px;height:18px;padding:0;border:1px solid var(--hive-surface-border,var(--line));border-radius:50%;background:var(--hive-popup-bg,var(--panel));color:var(--hive-popup-text,var(--text));font:12px/16px sans-serif;text-align:center;opacity:0;cursor:pointer}
+.cm-editor :is(.cm-table-widget:has(.cm-table-select-table-toolbar),.cm-table-sticky-track){padding-top:0}
+.cm-editor .cm-table-select-table-toolbar{box-sizing:content-box;height:24px;padding-bottom:26px;text-align:right;line-height:0;pointer-events:none}
+.cm-editor .cm-table-select-table-button{position:sticky;right:0;display:inline-grid;place-items:center;vertical-align:top;padding:0;min-width:22px;height:22px;border-radius:5px;border:1px solid var(--hive-surface-border);color:var(--text);background:var(--hive-panel-bg);opacity:0;pointer-events:auto;cursor:pointer}
+.cm-editor .cm-table-widget:hover .cm-table-select-table-button,.cm-editor .cm-table-widget:focus-within .cm-table-select-table-button{opacity:1}
+.cm-editor .cm-table-sticky .cm-table-select-table-button{position:relative;opacity:1}
+.cm-editor .cm-table-widget{overflow-x:auto;max-width:100%;box-sizing:border-box;padding-top:26px}
+.cm-editor .cm-table-widget[data-table-segment]:not([data-table-segment="0"]){padding-top:0}
+.cm-editor .cm-table-widget .cm-preview-table{margin:0 clamp(24px,6.4%,50px)}
+.cm-editor .cm-table-sticky{position:absolute;z-index:5;overflow:hidden;pointer-events:none;background:var(--hive-document-bg,var(--bg))}
+.cm-editor .cm-table-sticky .cm-table-sticky-track{padding-top:26px}
+.cm-editor .cm-table-sticky .cm-preview-table{margin:0}
+.cm-editor .cm-table-sticky th{position:relative}
+.cm-editor :is(.cm-table-widget,.cm-table-sticky) .cm-table-edge{position:absolute;z-index:4;display:grid;place-items:center;width:18px;height:18px;padding:0;border:1px solid var(--hive-surface-border,var(--line));border-radius:50%;background:var(--hive-popup-bg,var(--panel));color:var(--hive-popup-text,var(--text));font:12px/16px sans-serif;text-align:center;opacity:0;cursor:pointer}
 .cm-editor .cm-table-widget td:hover>.cm-table-edge,.cm-editor .cm-table-widget th:hover>.cm-table-edge,.cm-editor .cm-table-widget .cm-table-edge:focus-visible{opacity:1}
-.cm-editor .cm-table-widget .cm-table-edge:focus-visible{outline:2px solid var(--hive-accent,var(--gold))}
+.cm-editor :is(.cm-table-widget,.cm-table-sticky) .cm-table-edge:focus-visible{outline:2px solid var(--hive-accent,var(--gold))}
 /* Join the edge buttons to their cells so crossing the small visual gap keeps hover. */
-.cm-editor .cm-table-widget .cm-table-edge::after{content:"";position:absolute;inset:-6px}
-.cm-editor .cm-table-widget .cm-table-edge:disabled{opacity:0;pointer-events:none}
+.cm-editor :is(.cm-table-widget,.cm-table-sticky) .cm-table-edge::after{content:"";position:absolute;inset:-6px}
+.cm-editor :is(.cm-table-widget,.cm-table-sticky) .cm-table-edge:disabled{opacity:0;pointer-events:none}
 .cm-table-add-column{right:-23px;top:50%;transform:translateY(-50%)}
 .cm-table-add-row{bottom:-23px;left:50%;transform:translateX(-50%)}
 .cm-editor .cm-table-final-segment{padding-bottom:24px}
-.cm-editor .cm-table-widget .cm-table-select-row,.cm-editor .cm-table-widget .cm-table-select-column{font-size:7px;width:14px;height:14px;line-height:12px}
+.cm-editor .cm-table-widget .cm-table-select-row,.cm-editor :is(.cm-table-widget,.cm-table-sticky) .cm-table-select-column{font-size:7px;width:14px;height:14px;line-height:12px}
 .cm-table-select-row{left:-20px;top:50%;transform:translateY(-50%)}
 .cm-table-select-column{top:-20px;left:50%;transform:translateX(-50%)}
+.cm-editor .cm-table-sticky .cm-table-select-column:not(:disabled){opacity:1;pointer-events:auto}
 .cm-table-context-menu{position:fixed;z-index:10000;padding:4px;border:1px solid var(--hive-surface-border,var(--line));border-radius:6px;background:var(--hive-popup-bg,var(--panel));box-shadow:0 3px 12px #0003}
 .cm-table-context-menu button{display:block;border:0;border-radius:4px;padding:6px 12px;background:transparent;color:var(--hive-popup-text,var(--text));cursor:pointer}
 .cm-table-context-menu button:hover:not(:disabled),.cm-table-context-menu button:focus-visible{background:var(--hive-panel-bg,var(--panel-2))}
 .cm-table-context-menu button:disabled{opacity:.45;cursor:default}
 .cm-editor .cm-table-widget textarea{height:auto;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere}
 .cm-table-status:empty{display:none}
-.cm-editor .cm-table-widget .cm-table-cell-preview{min-height:24px;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;cursor:text;outline-offset:2px}
-.cm-editor .cm-table-widget .cm-table-cell-preview code{font-family:monospace;background:color-mix(in srgb, currentColor 9%, transparent);border-radius:3px;padding:0 2px}
-.cm-editor .cm-table-widget .cm-table-cell-preview a{color:var(--hive-accent,var(--gold));text-decoration:underline}
+.cm-editor :is(.cm-table-widget,.cm-table-sticky) .cm-table-cell-preview{min-height:24px;white-space:pre-wrap;overflow-wrap:anywhere}
+.cm-editor .cm-table-widget .cm-table-cell-preview{user-select:text;cursor:text;outline-offset:2px}
+.cm-editor .cm-table-widget .cm-table-cell-preview::selection,.cm-editor .cm-table-widget .cm-table-cell-preview ::selection{background:var(--hive-editor-selection-background);color:var(--hive-editor-selection-text)}
+.cm-editor :is(.cm-table-widget,.cm-table-sticky) .cm-table-cell-preview code{font-family:monospace;background:color-mix(in srgb, currentColor 9%, transparent);border-radius:3px;padding:0 2px}
+.cm-editor :is(.cm-table-widget,.cm-table-sticky) .cm-table-cell-preview a{color:var(--hive-accent,var(--gold));text-decoration:underline}
 .cm-editor .cm-table-widget textarea[hidden],.cm-editor .cm-table-widget .cm-table-cell-preview[hidden]{display:none}
 .cm-editor .cm-table-widget textarea{text-align:inherit}
+.cm-editor .cm-table-source-selected :is(th,td){background:var(--hive-editor-table-selection-background,var(--hive-selection-bg))}
+.cm-editor .cm-table-source-selected tr>:first-child{border-left-color:var(--hive-editor-table-selection-border,var(--hive-accent))}
+.cm-editor .cm-table-source-selected tr>:last-child{border-right-color:var(--hive-editor-table-selection-border,var(--hive-accent))}
+.cm-editor .cm-table-source-selected thead th{border-top-color:var(--hive-editor-table-selection-border,var(--hive-accent))}
+.cm-editor .cm-table-final-segment.cm-table-source-selected :is(tbody tr:last-child,table:not(:has(tbody tr)) thead tr)>*{border-bottom-color:var(--hive-editor-table-selection-border,var(--hive-accent))}

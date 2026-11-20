@@ -1,17 +1,24 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
-import { Lock, LockOpen, PanelsTopLeft, X } from "lucide-react";
+import { Lock, LockOpen, PanelsTopLeft, X } from "../../shared/icons";
 import { filterPanels, groupPanels, panelCategories, type PanelCategory, type PanelItem } from "./panelCatalog";
 export type { PanelCategory, PanelItem } from "./panelCatalog";
 import "./panel-switcher.css";
 
 type Position = { x:number; y:number };
 
+/* 正文编辑区（文档编辑行）不再出现在面板管理器中：
+   编辑器由自身的标签页/面板承载，这里只保留其余分类，使分类计数与列表一致。 */
+const hiddenPanelCategoryIds = new Set<string>(['documents']);
+const isHiddenCategory=(category?:string)=>category!==undefined&&hiddenPanelCategoryIds.has(category);
+const visibleCategories=panelCategories.filter(group=>!isHiddenCategory(group.id)&&group.label!=='正文编辑区');
+
 export default function PanelSwitcher({items,onToggle,onToggleLock,onReveal}: {
   items:PanelItem[]; onToggle:(id:string)=>void; onToggleLock?:(id:string)=>void; onReveal?:(id:string)=>void;
 }) {
   const [open,setOpen]=useState(false),[position,setPosition]=useState<Position|null>(null);
   const [category,setCategory]=useState<PanelCategory|"all">("all"),[query,setQuery]=useState("");
+  const visibleItems=items.filter(item=>!isHiddenCategory(item.category));
   const button=useRef<HTMLButtonElement>(null),dialog=useRef<HTMLDivElement>(null),search=useRef<HTMLInputElement>(null);
   const dragCleanup=useRef<(()=>void)|null>(null);
 
@@ -79,12 +86,12 @@ export default function PanelSwitcher({items,onToggle,onToggleLock,onReveal}: {
       <div className="panel-manager-search"><input ref={search} type="search" aria-label="搜索面板" placeholder="搜索面板名称、说明或关键词" value={query} onChange={event=>setQuery(event.target.value)} /></div>
       <div className="panel-manager-body">
         <nav className="panel-manager-categories" aria-label="面板分类">
-          <button type="button" aria-pressed={category==='all'} onClick={()=>setCategory('all')}>全部 <span>{items.length}</span></button>
-          {panelCategories.map(group=><button key={group.id} type="button" aria-pressed={category===group.id} onClick={()=>setCategory(group.id)}>{group.label} <span>{groupPanels(items)[group.id].length}</span></button>)}
+          <button type="button" aria-pressed={category==='all'} onClick={()=>setCategory('all')}>全部 <span>{visibleItems.length}</span></button>
+          {visibleCategories.map(group=><button key={group.id} type="button" aria-pressed={category===group.id} onClick={()=>setCategory(group.id)}>{group.label} <span>{groupPanels(visibleItems)[group.id].length}</span></button>)}
         </nav>
         <div className="panel-manager-list">
-          {(()=>{const groups=groupPanels(filterPanels(items,category,query)); const count=Object.values(groups).reduce((sum,group)=>sum+group.length,0);
-            return count ? panelCategories.map(group=>groups[group.id].length>0 && <section key={group.id} className="panel-manager-group" aria-label={group.label}>
+          {(()=>{const groups=groupPanels(filterPanels(visibleItems,category,query)); const count=Object.values(groups).reduce((sum,group)=>sum+group.length,0);
+            return count ? visibleCategories.map(group=>groups[group.id].length>0 && <section key={group.id} className="panel-manager-group" aria-label={group.label}>
               <h3>{group.label}</h3>
               {groups[group.id].map(item=>{const locked=item.fixed||!!item.locked; return <div className="panel-manager-row" key={item.id}>
                 <button type="button" className="panel-manager-reveal" title="定位或打开面板" onClick={()=>{if(onReveal){onReveal(item.id);close();}}} disabled={!onReveal}>

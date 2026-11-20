@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const initialPreferences = ipcRenderer.sendSync('hive:preferences-read');
 let collectPreferences = () => {};
 if (initialPreferences !== null) {
-  const exact = new Set(['hive.modelPicker.recent','hive.ai.references.v1','hive.editor-status.v1','hive.editor-status.v2','hive.editor-status.v3','hive.table.sizes.v1','hive.explorer.v1','hive.annotationPreferences.v1','hive.appearance.v1','hive.theme.v1','hive.frontmatter-visible.v1','hive.typography.v1','hive.panelIconDragPreferences.v1','hive.views.v1']);
+  const exact = new Set(['hive.modelPicker.recent','hive.ai.references.v1','hive.editor-status.v1','hive.editor-status.v2','hive.editor-status.v3','hive.table.sizes.v1','hive.explorer.v1','hive.annotationPreferences.v1','hive.shortcuts.v1','hive.appearance.v1','hive.theme.v1','hive.frontmatter-visible.v1','hive.typography.v1','hive.panelIconDragPreferences.v1','hive.views.v1']);
   const allowed = key => {
     if (exact.has(key)) return true;
     if (key.length <= 4096 && ['hive.explorer.v1:', 'hive.views.v1:', 'hive.ai.references.v1:', 'hive.recentDocuments.v1:'].some(prefix => key.startsWith(prefix) && key.length > prefix.length)) return true;
@@ -19,7 +19,7 @@ if (initialPreferences !== null) {
         const data = {};
         for (const key of Object.keys(localStorage).filter(allowed).sort()) {
           const value = localStorage.getItem(key);
-          if (value !== null && (!key.startsWith('hive.reasoning.') || ['default','low','medium','high','xhigh'].includes(value))) data[key] = value;
+          if (value !== null && (!key.startsWith('hive.reasoning.') || ['default','off','minimal','low','medium','high','xhigh','max'].includes(value))) data[key] = value;
         }
         const next = JSON.stringify(data);
         if (next !== last) { ipcRenderer.send('hive:preferences-save', data); last = next; }
@@ -35,6 +35,9 @@ contextBridge.exposeInMainWorld('hiveDesktop', Object.freeze({
   chooseRepositoryDirectory: () => ipcRenderer.invoke('hive:repository-directory'),
   getAboutInfo: () => ipcRenderer.invoke('hive:about-info'),
   openAppDataDirectory: () => ipcRenderer.invoke('hive:open-app-data-directory'),
+  getUpdateMode: () => ipcRenderer.invoke('hive:update-available'),
+  setUpdateSource: source => ipcRenderer.invoke('hive:update-source', source),
+  installUpdate: () => ipcRenderer.invoke('hive:update'),
   windowCommand: (command, panelId) => { if (['minimize','maximize','close','focus','hide'].includes(command) && (panelId === undefined || typeof panelId === 'string')) ipcRenderer.send('hive:window-command', command, panelId); },
   panelReady: (id, placement, inactive) => { if (typeof id === 'string') return ipcRenderer.sendSync('hive:panel-ready', id, placement, inactive === true); return false; },
   panelRect: id => typeof id === 'string' ? ipcRenderer.sendSync('hive:panel-rect', id) : null,

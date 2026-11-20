@@ -3,6 +3,7 @@ import ThemeColorField from './ThemeColorField';
 import EditorColorSettings from './EditorColorSettings';
 import DockColorSettings from './DockColorSettings';
 import DockingColorSettings from './DockingColorSettings';
+import ComposerShadowSettings from './ComposerShadowSettings';
 import {colorRoles,mix,themeTokens,updateThemeColors,type ReasoningTrackColors,type ThemePreferences} from './themePreferences';
 import {surfaceColorGroups,type SurfaceColorRole} from './surfaceAppearance';
 import {rangeProgressStyle} from '../settings/rangeProgress';
@@ -13,11 +14,10 @@ const workspaceInners=['titleBar','ribbonTitleBackground','ribbonTitleText','rib
 
 type Field=readonly [SurfaceColorRole,string];
 
-export default function CustomColorSettings({preferences,onChange,trackDefaults,onBack}:{
+export default function CustomColorSettings({preferences,onChange,trackDefaults}:{
   preferences:ThemePreferences;
   onChange:(next:(old:ThemePreferences)=>ThemePreferences)=>void;
   trackDefaults?:ReasoningTrackColors;
-  onBack:()=>void;
 }){
   const tokens=themeTokens(preferences),surfaces=tokens.surfaces;
   const track=preferences.reasoningTrackProfiles?.[preferences.base]??trackDefaults;
@@ -36,10 +36,7 @@ export default function CustomColorSettings({preferences,onChange,trackDefaults,
     if(trackDefaults)profiles[old.base]=trackDefaults;else delete profiles[old.base];
     return {...old,reasoningTrackProfiles:profiles};
   });
-  return <>
-    <button type="button" className="theme-back" onClick={onBack}>← 返回外观</button>
-    <section className="settings-card theme-settings theme-custom-colors">
-      <h2>自定义配色</h2>
+  return <section className="settings-card theme-settings theme-custom-colors">
       <p className="theme-custom-intro">颜色随当前模板与基础色保存；带透明度的颜色可同时调整不透明度。未自定义的区域沿用主题自动配色。</p>
       <SettingRow title="栏面对比度" description="调整自动配色的层级；下方单独指定的颜色保持不变。">
         <label className="theme-auto-contrast"><input type="checkbox" checked={preferences.surfaceContrastMode==='auto'} onChange={event=>onChange(old=>({...old,surfaceContrastMode:event.target.checked?'auto':'manual'}))}/>自动</label>
@@ -69,6 +66,10 @@ export default function CustomColorSettings({preferences,onChange,trackDefaults,
         </div>
       </details>
       <details className="theme-color-group">
+        <summary>输入框阴影</summary>
+        <ComposerShadowSettings preferences={preferences} onChange={onChange}/>
+      </details>
+      <details className="theme-color-group">
         <summary>文本编辑页面</summary>
         <div className="theme-color-body"><EditorColorSettings preferences={preferences} onChange={onChange}/></div>
       </details>
@@ -84,6 +85,5 @@ export default function CustomColorSettings({preferences,onChange,trackDefaults,
         <summary>停靠引导与拖放</summary>
         <div className="theme-color-body"><DockingColorSettings preferences={preferences} onChange={onChange}/></div>
       </details>
-    </section>
-  </>;
+  </section>;
 }

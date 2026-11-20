@@ -17,16 +17,19 @@ it('creates unique default notes and folders immediately, retaining existing con
 });
 it('moves folders with their notes, annotations and outlines and restores them after deletion',async()=>{
   await files.save({path:'a/note.md',text:'body',baseline:null});await files.folder('b');
-  await fs.writeFile(path.join(state,'text-annotations.json'),JSON.stringify({'document:a/note.md':{revision:1,items:[{id:'one',file:'a/note.md'}]},'scratch:自由草稿':{items:[]}}));
+  await fs.writeFile(path.join(state,'text-annotations.json'),JSON.stringify({'document:a/note.md':{revision:1,items:[{id:'one',file:'a/note.md',order:2}]},'scratch:自由草稿':{items:[]}}));
   await fs.writeFile(path.join(state,'writing-outline-nodes.json'),JSON.stringify({'a/note.md':{revision:2,nodes:[{title:'Node'}]}}));
   await explorer.manage({action:'move',path:'a',parent:'b'});
   expect((await files.read('b/a/note.md')).text).toBe('body');
   const annotations=JSON.parse(await fs.readFile(path.join(state,'text-annotations.json')));
-  expect(annotations['document:b/a/note.md'].items[0].file).toBe('b/a/note.md');expect(annotations['scratch:自由草稿']).toBeDefined();
+  expect(annotations['document:b/a/note.md'].items[0]).toMatchObject({file:'b/a/note.md',order:2});expect(annotations['document:a/note.md']).toBeUndefined();expect(annotations['scratch:自由草稿']).toBeDefined();
   const deleted=await explorer.manage({action:'trash',path:'b/a'});
   expect(await explorer.listTrash()).toHaveLength(1);expect(JSON.stringify(await files.list())).not.toContain('.hive-trash');
   await explorer.manage({action:'restore',id:deleted.id});
   expect((await files.read('b/a/note.md')).text).toBe('body');expect(await explorer.listTrash()).toHaveLength(0);
+  const restoredAnnotations=JSON.parse(await fs.readFile(path.join(state,'text-annotations.json')));
+  expect(restoredAnnotations['document:b/a/note.md'].items[0]).toMatchObject({file:'b/a/note.md',order:2});
+  expect(Object.keys(restoredAnnotations).some(key=>key.startsWith('document:@trash/'+deleted.id))).toBe(false);
   expect(JSON.parse(await fs.readFile(path.join(state,'writing-outline-nodes.json')))['b/a/note.md'].nodes[0].title).toBe('Node');
 });
 it('does not overwrite a collision while renaming, moving or restoring',async()=>{

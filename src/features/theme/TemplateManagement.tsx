@@ -1,4 +1,5 @@
 import {useState} from 'react';
+import {ArrowLeft} from '../../shared/icons';
 import SettingRow from '../settings/SettingRow';
 import {useTheme} from './themeStore';
 import {initializeThemeFiles,loadTemplateFile,openCurrentTemplateFolder,refreshTemplateCatalog,saveCurrentTemplate,useTemplateFiles} from './templateFiles';
@@ -13,7 +14,7 @@ export default function TemplateManagement({onBack}:{onBack:()=>void}){
     try{await action();setNotice(message);}catch(error){setNotice((error as Error).message);}finally{setPending(false);}
   }
   return <>
-    <button type="button" className="theme-back" onClick={onBack}>← 返回外观</button>
+    <button type="button" className="theme-back" onClick={onBack}><ArrowLeft size={14}/>返回外观</button>
     <section className="settings-card theme-template-management">
       <h2>模板管理</h2>
       <SettingRow title="当前模板" description={current?.description||'模板文件与配色文件保存在同一文件夹。'}><span>{current?.name||'青苔鎏金'}</span></SettingRow>

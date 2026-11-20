@@ -89,6 +89,19 @@ describe('saved views',()=>{
     const {floatingToolbarVisible:_toolbar,...legacy}=view.appearance;
     expect(parseViewCollection(JSON.stringify({version:1,views:[{...view,appearance:legacy}]})).views[0].appearance.floatingToolbarVisible).toBe(true);
   });
+  it('restores preview mode and swapped split order while accepting older view presets',()=>{
+    const view=sample();
+    view.editors[0].displayMode='preview';
+    view.appearance.splitOrder='semantic-first';
+    const saved=parseViewCollection(encode(view)).views[0];
+    expect(saved.editors[0].displayMode).toBe('preview');
+    expect(saved.appearance.splitOrder).toBe('semantic-first');
+    const {splitOrder:_order,...appearance}=view.appearance;
+    const legacy={...view,appearance,editors:view.editors.map(item=>({...item,displayMode:'live'}))};
+    const loaded=parseViewCollection(JSON.stringify({version:1,views:[legacy]})).views[0];
+    expect(loaded.appearance.splitOrder).toBe('source-first');
+    expect(loaded.editors[0].displayMode).toBe('live');
+  });
   it('restores an independent basis panel with its minimized icon',()=>{
     const view=sample();view.layout.open.push('basis');view.layout.rects.basis=rect;
     const opened=parseViewCollection(encode(view)).views[0];expect(opened.layout.open).toContain('basis');

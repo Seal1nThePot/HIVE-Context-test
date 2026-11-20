@@ -1,21 +1,12 @@
 import {useCallback,useEffect,useLayoutEffect,useRef,useState} from 'react';
 import type {EditorView} from '@codemirror/view';
+import {Icon} from '../../shared/icons';
 import {inlineProposalField,type InlineProposal} from './proposalInline';
 import './proposalInline.css';
 
 type Props={view:EditorView|null;proposal:InlineProposal|null;accept:()=>void;reject:(adjust?:boolean)=>void};
 
 type Position={top:number;left:number;width:number};
-
-const ICONS={
-  adjust:'<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
-  reject:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
-  accept:'<path d="M20 6 9 17l-5-5"/>',
-};
-
-function Icon({name}:{name:keyof typeof ICONS}){
-  return <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{__html:ICONS[name]}}/>;
-}
 
 /** 建议上方那条很薄的操作条：浮在正文上，滚到框外时贴住视口顶部继续跟随，直到这段建议走完。 */
 export function ProposalOverlay({view,proposal,accept,reject}:Props){
@@ -93,9 +84,9 @@ export function ProposalOverlay({view,proposal,accept,reject}:Props){
       <span className="proposal-bar-tag">{tag}</span>
       <span className="proposal-bar-reason" title={reason}>{reason}</span>
       <span className="proposal-bar-actions">
-        <button type="button" className="proposal-bar-button adjust" title="撤掉并回到对话里继续调整" aria-label="撤掉并回到对话里继续调整" onClick={()=>reject(true)}><Icon name="adjust"/></button>
-        <button type="button" className="proposal-bar-button reject" title="撤掉这段建议，恢复原样" aria-label="撤掉这段建议，恢复原样" onClick={()=>reject()}><Icon name="reject"/></button>
-        <button type="button" className="proposal-bar-button accept" title={stale?'这段文字已被改动，请先核对':'保留这段建议（之后按 Ctrl+S 才写入磁盘）'} aria-label={stale?'这段文字已被改动，请先核对':'保留这段建议（之后按 Ctrl+S 才写入磁盘）'} onClick={accept}><Icon name="accept"/></button>
+        <button type="button" className="proposal-bar-button adjust" title="撤掉并回到对话里继续调整" aria-label="撤掉并回到对话里继续调整" onClick={()=>reject(true)}><Icon name="proposal.adjust" size={14}/></button>
+        <button type="button" className="proposal-bar-button reject" title="撤掉这段建议，恢复原样" aria-label="撤掉这段建议，恢复原样" onClick={()=>reject()}><Icon name="proposal.reject" size={14}/></button>
+        <button type="button" className="proposal-bar-button accept" title={stale?'这段文字已被改动，请先核对':'保留这段建议（之后按 Ctrl+S 才写入磁盘）'} aria-label={stale?'这段文字已被改动，请先核对':'保留这段建议（之后按 Ctrl+S 才写入磁盘）'} onClick={accept}><Icon name="proposal.accept" size={14}/></button>
       </span>
     </div>
   );

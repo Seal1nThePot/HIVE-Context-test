@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronsDown, ChevronsLeft, ChevronsRight, ChevronsUp, Maximize2, Menu, PanelLeftOpen, X } from "lucide-react";
+import { Check, ChevronsDown, ChevronsLeft, ChevronsRight, ChevronsUp, Icon, Maximize2, Menu, PanelLeftOpen, X } from "../../shared/icons";
 import type {DockEdge} from "./panelLayout";
 import { placePanelActions } from "./panelUiGeometry";
 import { usePanelDocument } from '../../shared/panelDocument';
@@ -29,7 +29,7 @@ export default function PanelControl({ label, panelId, floating, onToggleFloat, 
   const choices: PanelAction[] = actionsOnly ? actions : [
     ...actions,
     floatAction || {label:memberActions?'整组浮动':'浮动面板',icon:<Maximize2 size={14}/>,run:onToggleFloat,disabled:detached||primary||floating||!movable},
-    ...(memberActions?[{label:'整组收纳',run:onMinimize,disabled:primary}]:[]),
+    ...(memberActions?[{label:'整组收纳',icon:<Icon name="panel.stashGroup" size={14}/>,run:onMinimize,disabled:primary}]:[]),
     {label:memberActions?'整组关闭':'关闭面板',icon:<X size={14}/>,run:onClose,disabled:primary},
     {label:memberActions?'整组打开停靠':'打开面板',icon:<PanelLeftOpen size={14}/>,run:onOpen,disabled:detached||primary||!canDock},
     ...(detached?[]:memberActions||[]),
@@ -39,8 +39,8 @@ export default function PanelControl({ label, panelId, floating, onToggleFloat, 
     const rect = contextAnchor?{...contextAnchor,width:0,height:0}:button.current.getBoundingClientRect();
     const scale=Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale'))||1;
     const textScale=Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--text-scale'))||1;
-    setPosition(placePanelActions({x:rect.x,y:rect.y,width:rect.width,height:rect.height},{width:window.innerWidth,height:window.innerHeight},choices.length+(memberActions?1:0),scale,textScale));
-    menu.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    setPosition(placePanelActions({x:rect.x,y:rect.y,width:rect.width,height:rect.height},{width:window.innerWidth,height:window.innerHeight},choices.length,scale,textScale));
+    menu.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
   }, [open, choices.length, document,contextAnchor]);
   useEffect(()=>{
     if(!panelId)return;
@@ -63,10 +63,10 @@ export default function PanelControl({ label, panelId, floating, onToggleFloat, 
     };
     const escape = (event: KeyboardEvent) => { if(event.key==='Escape'){setOpen(false);button.current?.focus();} };
     const close = () => setOpen(false);
-    document.addEventListener('pointerdown',outside); document.addEventListener('keydown',escape);
-    window.addEventListener('resize',close);
-    return () => {document.removeEventListener('pointerdown',outside);document.removeEventListener('keydown',escape);window.removeEventListener('resize',close);};
-  },[open, document]);
+    document.addEventListener('pointerdown',outside,true); document.addEventListener('keydown',escape);
+    window.addEventListener('resize',close);window.addEventListener('blur',close);
+    return () => {document.removeEventListener('pointerdown',outside,true);document.removeEventListener('keydown',escape);window.removeEventListener('resize',close);window.removeEventListener('blur',close);};
+  },[open, document, window]);
   return <div className="panel-controls" data-no-drag onPointerDown={event=>event.stopPropagation()} onDoubleClick={event=>event.stopPropagation()}>
     {!actionsOnly&&(!primary||detached)&&<button type="button" className="panel-mini-button" aria-label={`收纳${label}面板`} title="收纳到主窗口侧栏" onClick={onMinimize}><CollapseIcon size={11}/></button>}
     {!actionsOnly&&!detached&&floating&&<button type="button" className="panel-mini-button panel-close-button" aria-label={`关闭${label}面板`} title="关闭面板" onClick={onClose}><X size={11}/></button>}
@@ -80,13 +80,17 @@ export default function PanelControl({ label, panelId, floating, onToggleFloat, 
     {open&&createPortal(<div ref={menu} className="panel-action-rail vertical" role="menu" aria-label={`${label}面板操作`} style={{left:position.x,top:position.y,width:position.width,maxHeight:position.height}}
       onContextMenu={event=>event.preventDefault()}
       onKeyDown={event=>{
-        const buttons=Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button'));
-        const index=buttons.indexOf(document.activeElement as HTMLButtonElement);
         if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){
-          event.preventDefault();buttons[event.key==='Home'?0:event.key==='End'?buttons.length-1:(index+(event.key==='ArrowDown'?1:buttons.length-1))%buttons.length]?.focus();
+          event.preventDefault();
+          const buttons=Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+          if (!buttons.length) return;
+          const index=buttons.indexOf(document.activeElement as HTMLButtonElement);
+          const last=buttons.length-1;
+          const next=event.key==='Home'?0:event.key==='End'?last:event.key==='ArrowDown'?(index+1)%buttons.length:index<=0?last:index-1;
+          buttons[next].focus();
         } else if(event.key==='Tab'){setOpen(false);}
       }}>
-      {choices.map((choice,index)=><Fragment key={choice.label}>{memberActions&&index===choices.length-memberActions.length&&<div className="panel-actions-section" role="presentation">当前窗口：{label}</div>}<button type="button" role={choice.checked===undefined?'menuitem':'menuitemcheckbox'} aria-checked={choice.checked} disabled={choice.disabled} key={choice.label} onClick={()=>{setOpen(false);button.current?.focus();choice.run();}}>{choice.icon}<span>{choice.label}</span>{choice.checked&&<Check className="panel-action-check" size={14}/>}</button></Fragment>)}
+      {choices.map(choice=><button type="button" role={choice.checked===undefined?'menuitem':'menuitemcheckbox'} aria-checked={choice.checked} disabled={choice.disabled} key={choice.label} onClick={()=>{setOpen(false);button.current?.focus();choice.run();}}>{choice.icon}<span>{choice.label}</span>{choice.checked&&<Check className="panel-action-check" size={14}/>}</button>)}
     </div>,document.body)}
   </div>;
 }

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
 import Editor, { makeState } from "../editor/Editor";
-import { Download, Save } from "lucide-react";
+import { Download, Save } from "../../shared/icons";
 import { minimalReplacement, visibleCount } from "../../shared/core";
 import {usePanelDocument} from '../../shared/panelDocument';
 type Snapshot = { text: string; hash: string | null };
@@ -18,8 +18,9 @@ export default function ScratchPad({
   onShowAnnotations,
   onEditorFocus,
   onFind,
-  searchActive=false,
+  onDraftSelection,
   annotationTool=false,
+  searchActive=false,
   active = false,
   keepAlive=false,
 }: {
@@ -32,9 +33,10 @@ export default function ScratchPad({
   onUnmarkSelection?:(id?:string)=>void;
   onShowAnnotations?:(context:import('../editor/EditorContextMenu').AnnotationContext)=>void;
   onEditorFocus?:()=>void;
-  onFind?:()=>void;
-  searchActive?:boolean;
+  onFind?:(replace?:boolean)=>void;
+  onDraftSelection?:(text:string)=>void;
   annotationTool?:boolean;
+  searchActive?:boolean;
   active?: boolean;
   keepAlive?:boolean;
 }) {
@@ -80,7 +82,7 @@ export default function ScratchPad({
       saved.current = { text, hash: data.hash };
       callbacks.current.onSaved?.();
       dirty.current = state.current.doc.toString() !== text;
-      if (alive.current) setStatus(dirty.current ? "等待保存…" : "草稿已保存");
+      if (alive.current) setStatus(dirty.current ? "等待保存…" : data.warning ?? "草稿已保存");
       if (dirty.current && alive.current)
         timer.current = setTimeout(() => void saveRef.current(), 500);
       return !dirty.current;
@@ -231,7 +233,7 @@ export default function ScratchPad({
       </div>
       <div className="scratch-meta">文档目录中的 Markdown 文件 · 自动保存</div>
       {ready ? (
-        <Editor keepAlive={keepAlive} initialState={state.current} documentFile="自由草稿.md" annotationTool={annotationTool} searchActive={searchActive} onFind={onFind} onReady={onReady} onUpdate={onUpdate} onMarkSelection={onMarkSelection} onUnmarkSelection={onUnmarkSelection} onShowAnnotations={onShowAnnotations} onError={onError} onFocus={onEditorFocus}/>
+        <Editor keepAlive={keepAlive} initialState={state.current} documentFile="自由草稿.md" annotationTool={annotationTool} searchActive={searchActive} onFind={onFind} onDraftSelection={onDraftSelection} onReady={onReady} onUpdate={onUpdate} onMarkSelection={onMarkSelection} onUnmarkSelection={onUnmarkSelection} onShowAnnotations={onShowAnnotations} onError={onError} onFocus={onEditorFocus}/>
       ) : !ready && active ? (
         <div className="scratch-loading">
           <p>{status}</p>

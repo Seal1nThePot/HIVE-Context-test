@@ -1,4 +1,4 @@
-import type {PanelGroup} from './panelLayout';
+import {pruneFloatingGroup,type FloatingGroup as PanelGroup} from './floatingLayout';
 import type {NativePanelHome} from './nativePanelState';
 
 export type PanelOperationKind = 'open' | 'float' | 'drag' | 'dock' | 'minimize' | 'close' | 'restore';
@@ -58,7 +58,7 @@ export class PanelLifecycle {
     for(const [owner,group] of this.groups){
       if(!group.panels.some(id=>selected.has(id)))continue;
       const panels=group.panels.filter(id=>!selected.has(id)),pending=this.pendingGroups.has(owner);
-      if(panels.length>1)this.groups.set(owner,{...group,panels,active:panels.includes(group.active)?group.active:panels[0]});
+      if(panels.length>1)this.groups.set(owner,pruneFloatingGroup(group,panels));
       else{this.groups.delete(owner);this.pendingGroups.delete(owner);if(pending){this.invalidate(panels);for(const id of panels)this.queue(id);}}
     }
   }

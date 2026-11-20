@@ -1,0 +1,59 @@
+.writing-outline-row {
+  display: grid;
+  grid-template-columns: 24px minmax(20px, auto) minmax(0, 1fr) 26px;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 3px;
+  border: 1px solid var(--hive-surface-border);
+  border-radius: 6px;
+  margin-bottom: 5px;
+  color: var(--hive-header-text);
+  background: var(--hive-panel-bg);
+}
+.writing-outline-row.selected { background: var(--hive-selection-bg); color: var(--hive-selection-text); }
+.writing-outline-row[data-drop="before"] { box-shadow: 0 -2px var(--hive-accent); }
+.writing-outline-row[data-drop="after"] { box-shadow: 0 2px var(--hive-accent); }
+.writing-outline-row .icon-button { width: 24px; height: 28px; color: inherit; }
+.writing-outline-row .outline-sort-handle:not(:disabled) { cursor: grab; }
+.writing-outline-row .outline-sort-handle:active { cursor: grabbing; }
+.outline-row-number { color: var(--muted); text-align: center; font-size: var(--outline-font-xs); font-variant-numeric: tabular-nums; }
+.writing-outline-row .outline-row-title {
+  justify-content: flex-start;
+  min-width: 0;
+  min-height: 28px;
+  padding: 3px 5px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: inherit;
+  text-align: left;
+  font-size: var(--outline-font-md);
+}
+.outline-row-title:hover:not(:disabled) { border-color: var(--hive-surface-border); background: var(--hive-header-bg); }
+.outline-row-title > span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.outline-node-editor { display: flex; flex-direction: column; min-height: 0; flex: 1; font-size: var(--outline-font-sm); }
+.outline-node-fields { min-height: 0; overflow: auto; padding: 18px; flex: 1; display: flex; flex-direction: column; gap: 14px; }
+.outline-node-fields label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.outline-node-fields input, .outline-node-fields textarea, .outline-node-fields select {
+  width: 100%;
+  border: 1px solid var(--hive-input-border);
+  border-radius: 5px;
+  background: var(--hive-input-bg);
+  color: var(--hive-input-text);
+  font: inherit;
+  padding: 8px 10px;
+}
+.outline-node-fields textarea { min-height: 112px; max-height: 40vh; resize: vertical; line-height: 1.7; }
+.outline-node-options { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 13px; }
+.outline-node-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--hive-surface-border);
+}
+.outline-node-actions > div { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.outline-node-save { margin-left: auto; }
+.outline-node-error { margin: 0; color: var(--hive-danger); }

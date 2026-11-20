@@ -1,6 +1,6 @@
 import {useEffect,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
-import {Check,FolderOpen,Save,SquarePen,Trash2,X} from 'lucide-react';
+import {Check,FolderOpen,Save,SquarePen,Trash2,X} from "../../shared/icons";
 import {modeLabels,type Mode} from '../../shared/core';
 import {useViewPresets} from './useViewPresets';
 import type {ViewPreset,ViewSnapshot} from './viewPresets';

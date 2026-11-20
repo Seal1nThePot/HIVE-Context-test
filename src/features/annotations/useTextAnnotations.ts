@@ -12,6 +12,8 @@ import {
   subtractAnnotationRanges,
   mergeAnnotationRecords,
   mapAnnotations,
+  orderedAnnotations,
+  reorderAnnotations,
   textFingerprint,
   validateSubmission,
   type AnnotationSource,
@@ -63,7 +65,7 @@ export function useTextAnnotations(
   main: RefObject<EditorView | null>,
   scratch: RefObject<EditorView | null>,
   scratchReady: number,
-  onError: (message: string) => void,
+  onError: (message: string, persistent?: boolean) => void,
 ) {
   const fileWorkspace=useFileWorkspace(),fetch=fileWorkspace.request;
   const data = useRef<Partial<Record<AnnotationSource, Dataset>>>({}),
@@ -113,7 +115,7 @@ export function useTextAnnotations(
             encodeURIComponent(record.file),
         );
         const latest = await currentResponse.json();
-        if (!currentResponse.ok) throw new Error(latest.error);
+        if (!currentResponse.ok) throw Object.assign(new Error(latest.error), {code:latest.code});
         const remote = (latest.items as TextAnnotation[]).map((item) => ({
           ...item,
           stale: item.stale || latest.fingerprint !== fingerprint,
@@ -126,7 +128,7 @@ export function useTextAnnotations(
         response = await post(latest.revision, savedItems);
       }
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error);
+      if (!response.ok) throw Object.assign(new Error(result.error), {code:result.code});
       record.revision = result.revision;
       record.items =
         record.seq === seq
@@ -136,7 +138,7 @@ export function useTextAnnotations(
       record.savedSeq = seq;
     } catch (error) {
       record.error = (error as Error).message;
-      errorRef.current(record.error + " 当前标注仍保留在界面，可导出备份。");
+      errorRef.current(record.error + " 当前标注仍保留在界面，可导出备份。", (error as {code?:string})?.code === 'HIVE_STATE_CORRUPT');
     } finally {
       record.busy = false;
       if(record.cache)pruneAnnotationCache(record.cache,data.current.document);
@@ -196,7 +198,7 @@ export function useTextAnnotations(
           encodeURIComponent(record.file),
       );
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error);
+      if (!response.ok) throw Object.assign(new Error(result.error), {code:result.code});
       const capturedText = record.text;
       const fingerprint = await textFingerprint(capturedText);
       if (data.current[record.source] !== record) return;
@@ -223,7 +225,9 @@ export function useTextAnnotations(
       redraw();
     } catch (error) {
       record.error = (error as Error).message;
-      errorRef.current("标注载入失败：" + record.error);
+      if (data.current[record.source] === record && mounted.current) {
+        errorRef.current("标注载入失败：" + record.error, (error as {code?:string})?.code === 'HIVE_STATE_CORRUPT');
+      }
       redraw();
     } finally { record.loading=false;if(record.cache)pruneAnnotationCache(record.cache,data.current.document); }
   }
@@ -338,9 +342,19 @@ export function useTextAnnotations(
     record.items = ranges.length ? subtractAnnotationRanges(before, ranges, editor.state.doc.toString()) : annotationId ? before.filter(item => item.id !== annotationId) : before;
     if (JSON.stringify(before) !== JSON.stringify(record.items)) { record.text = editor.state.doc.toString(); touch(record); }
   }, [main, scratch, touch]);
-  const items = (
-    data.current.document?.file === file ? data.current.document.items : []
-  ).concat(data.current.scratch?.items || []);
+  function visibleRecords(){
+    const {document,scratch}=data.current;
+    return [document?.file===activeFile.current?document:undefined,scratch].filter((record):record is Dataset=>!!record);
+  }
+  const items=orderedAnnotations(visibleRecords().flatMap(record=>record.items));
+  function reorder(id:string,before:string|null){
+    const records=visibleRecords(),current=records.flatMap(record=>record.items);
+    const next=new Map(reorderAnnotations(current,id,before).map(item=>[item.id,item]));
+    for(const record of records){
+      const updated=record.items.map(item=>next.get(item.id)||item);
+      if(updated.some((item,index)=>item!==record.items[index])){record.items=updated;touch(record);}
+    }
+  }
   useEffect(() => {
     for (const source of ["document", "scratch"] as const) {
       const record = data.current[source],
@@ -400,7 +414,8 @@ export function useTextAnnotations(
         result.push(...validateSubmission(subset, record.text, record.file));
     }
     if (!result.length) throw new Error("请先勾选要发送的标注。");
-    return result;
+    const byId=new Map(result.map(item=>[item.id,item]));
+    return [...wanted].flatMap(id=>{const item=byId.get(id);return item?[item]:[];});
   }
   function reanchor(item: TextAnnotation) {
     const editor = item.source === "document" ? main.current : scratch.current,
@@ -427,6 +442,7 @@ export function useTextAnnotations(
     items,
     selected,
     mark,
+    reorder,
     lastMarkedIds,
     syncEditor,mapStoredDocument,
     unmark,

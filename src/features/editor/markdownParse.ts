@@ -3,8 +3,9 @@ import {TreeFragment,type ChangedRange,type Input,type Tree} from '@lezer/common
 import {parser,GFM} from '@lezer/markdown';
 import {documentFrontmatter} from '../../shared/frontmatter';
 import {outlineMarkdownParser} from './sourceSyntax';
+import {quotedStrong} from './quotedStrong';
 
-const markdownParser=parser.configure(GFM);
+const markdownParser=parser.configure([GFM,quotedStrong]);
 type ParsedDocument={doc:Text;fragments:readonly TreeFragment[];tree?:Tree;outlineFragments:readonly TreeFragment[];outlineTree?:Tree};
 const cache=new WeakMap<Text,ParsedDocument>();
 function record(doc:Text){let value=cache.get(doc);if(!value){value={doc,fragments:[],outlineFragments:[]};cache.set(doc,value);}return value;}

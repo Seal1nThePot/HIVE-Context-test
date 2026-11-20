@@ -26,7 +26,7 @@
 .explorer-tools>button{width:auto;height:24px;padding:3px 5px;white-space:nowrap;font-size:10px}
 .explorer-menu button.explorer-menu-ai:not(:disabled){background:var(--gold-bg);color:var(--gold);font-weight:600;}
 .explorer-menu button.explorer-menu-ai:not(:disabled):hover,.explorer-menu button.explorer-menu-ai:not(:disabled):focus-visible{background:var(--hive-selection-bg);outline:1px solid var(--gold);outline-offset:-1px;}
-.explorer-menu button.explorer-menu-ai span{display:inline-flex;align-items:center;gap:7px;}
+.explorer-menu-label{display:inline-flex;align-items:center;gap:7px;}
 .explorer-menu button:disabled{opacity:.45;cursor:default;}
 .explorer-menu button:disabled:hover{background:none;}
 .file-explorer{position:relative}

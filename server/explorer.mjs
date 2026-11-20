@@ -17,13 +17,23 @@ export function explorerStore({root,files,state},launch=spawn,opts={}) {
   async function parent(relative=''){if(!relative)return root;const dir=await files.resolve(relative,true);if(!(await fs.stat(dir)).isDirectory())throw fail('目标必须是文件夹。');return dir;}
   const nameCheck=name=>{if(typeof name!=='string'||!name.trim()||name!==name.trim()||/[\\/]/.test(name)||/[. ]$/.test(name)||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(name))throw fail('文件名称无效。');};
   async function unique(dir,name,type){const ext=type==='file'?path.extname(name)||'.md':'';const stem=ext?name.slice(0,-ext.length):name;for(let n=1;n<10000;n++){const value=stem+(n===1?'':' '+n)+ext;if(!await exists(path.join(dir,value)))return value;}throw fail('同名文件过多。');}
+  async function prepareCreate(input){
+    const type=input.type==='folder'?'folder':'file',dir=await parent(input.parent);
+    let name=input.name;
+    if(name===undefined)name=await unique(dir,type==='folder'?'新建文件夹':'新建文档.md',type);
+    else{
+      nameCheck(name);
+      if(type==='file'&&!/\.md$/i.test(name))name+='.md';
+    }
+    const relative=[input.parent,name].filter(Boolean).join('/');
+    return {path:relative,name,type,destination:await files.resolve(relative,type==='folder')};
+  }
   async function relocate(from,to,source,destination){if(await exists(destination))throw fail('目标已存在，请换一个名称。',409);await fs.rename(source,destination);try{await remapMetadata(state,from,to);}catch(error){await fs.rename(destination,source);throw error;}}
   async function manage(input){return files.transaction(async()=>{
     if(!input||typeof input!=='object')throw fail('文件操作无效。');
     const {action}=input;
     if(action==='create') {
-      const type=input.type==='folder'?'folder':'file',dir=await parent(input.parent),name=await unique(dir,type==='folder'?'新建文件夹':'新建文档.md',type);
-      const relative=[input.parent,name].filter(Boolean).join('/'),destination=await files.resolve(relative,type==='folder');
+      const {path:relative,type,destination}=await prepareCreate(input);
       if(type==='folder')await fs.mkdir(destination);else await fs.writeFile(destination,'',{flag:'wx'});
       return {path:relative,type};
     }
@@ -88,6 +98,6 @@ export function explorerStore({root,files,state},launch=spawn,opts={}) {
     }
     return {matches,truncated};
   }
-  return {manage,listTrash,search,previewTrash:retention.preview,purgeTrash:retention.purge,deleteTrash:retention.remove};
+  return {manage,prepareCreate,listTrash,search,previewTrash:retention.preview,purgeTrash:retention.purge,deleteTrash:retention.remove};
 }
 

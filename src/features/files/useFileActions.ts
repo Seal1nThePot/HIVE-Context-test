@@ -4,13 +4,12 @@ import {documentMatchesText} from '../editor/documentText';
 import {diskSyncDecision} from './fileSync';
 import {workspaceTreeSync} from './workspaceSync';
 import {isImagePath} from './fileKinds';
+import {writeDocument} from './writeDocument';
 import type { Dispatch, FormEvent, RefObject, SetStateAction } from 'react';
 import type { ApiClient } from '../../shared/api';
 import type { DiskFile } from '../../shared/fileTypes';
 import type { EditorSession } from '../editor/editorSessionTypes';
 import type { Dialog } from '../editor/editorDialogTypes';
-import type { EditorState } from '@codemirror/state';
-import type { EditorView } from '@codemirror/view';
 import type { Anchor, Proposal, UndoEdit } from '../../shared/core';
 import { headings } from '../../shared/core';
 import { makeState } from '../editor/Editor';
@@ -31,15 +30,10 @@ type FileActionsOptions = {
     sessions: RefObject<Map<string, EditorSession>>;
     activeSession: RefObject<string>;
     activeTextSource: RefObject<'document' | 'scratch'>;
-    editorState: RefObject<EditorState | null>;
-    view: RefObject<EditorView | null>;
-    disk: RefObject<DiskFile | null>;
     proposal: RefObject<Proposal | null>;
     undo: RefObject<UndoEdit[]>;
     prompt: string;
     dialog: Dialog | null;
-    file: string;
-    dirty: boolean;
     running: RefObject<boolean>;
     requestAnchor: RefObject<Anchor | null>;
     structuring: RefObject<boolean>;
@@ -57,8 +51,6 @@ type FileActionsOptions = {
     stop: () => void;
     redraw: () => void;
     inform: (message: string) => void;
-    setFile: (path: string) => void;
-    setDirty: (dirty: boolean) => void;
     setError: (message: string) => void;
     setFileBusy: (busy: boolean) => void;
     setNewNoteBusy: (busy: boolean) => void;
@@ -74,6 +66,7 @@ type FileActionsOptions = {
     setOutline: (value: ReturnType<typeof headings>) => void;
     setSelection: (value: { from: number; to: number; text: string }) => void;
     setWritingNodeId: (value: null) => void;
+    onApplied?: (action:FileAction,result:FileResult,actor:'human'|'ai')=>void;
 };
 
 /**
@@ -81,7 +74,13 @@ type FileActionsOptions = {
  * 固定目标与请求世代，保留同文件状态/历史；磁盘变化沿用冲突与事务规则。
  */
 export function useFileActions(options: FileActionsOptions) {
-    const { api, uid, workspace, sessions, activeSession, activeTextSource, editorState, view, disk, proposal, undo, prompt, dialog, file, dirty, running, requestAnchor, structuring, switching, viewApplying, creatingNote, savingPaths, fileWorkspace, saveSession, applyDiskFile, annotations, references, bindings, stop, redraw, inform, setFile, setDirty, setError, setFileBusy, setNewNoteBusy, setEntries, setRoot, setConfirm, setDialog, setFilter, setRenameRequest, setCollapsed, setTrashRevision, setInlineRequest, setOutline, setSelection, setWritingNodeId } = options;
+    const {
+        api, uid, workspace, sessions, activeSession, activeTextSource, proposal, undo, prompt, dialog,
+        running, requestAnchor, structuring, switching, viewApplying, creatingNote, savingPaths,
+        fileWorkspace, saveSession, applyDiskFile, annotations, references, bindings, stop, redraw, inform,
+        setError, setFileBusy, setNewNoteBusy, setEntries, setRoot, setConfirm, setDialog, setFilter,
+        setRenameRequest, setCollapsed, setTrashRevision, setInlineRequest, setOutline, setSelection, setWritingNodeId,
+    } = options;
     const treeSync=workspaceTreeSync(setEntries,fileWorkspace.info),treeOwner=treeSync.owner();
 
     const scope=()=>options.appAlive?.current!==false&&!switching.current;
@@ -127,7 +126,6 @@ export function useFileActions(options: FileActionsOptions) {
         const same=session.disk?.path===data.path&&(session.view?.state||session.state);
         if(same){
             if(!reconcileKnownFile(data))return false;
-            if(targetId===activeSession.current){disk.current=session.disk;editorState.current=session.view?.state||session.state;setFile(session.disk!.path);setDirty(session.dirty);}
             if(!workspace.isOpen?.(targetId))workspace.open(targetId);
             redraw();return;
         }
@@ -141,9 +139,9 @@ export function useFileActions(options: FileActionsOptions) {
         session.view?.setState(nextState);
         if(targetId!==activeSession.current){if(!workspace.isOpen?.(targetId))workspace.open(targetId);redraw();return;}
         if(writing())stop();
-        proposal.current=null;undo.current=[];disk.current=nextDisk;editorState.current=nextState;
+        proposal.current=null;undo.current=[];
         workspace.open(targetId);annotations.syncEditor('document',session.view,data.path);
-        setFile(data.path);setWritingNodeId(null);setInlineRequest(null);setDirty(session.dirty);setOutline(headings(nextState));
+        setWritingNodeId(null);setInlineRequest(null);setOutline(headings(nextState));
         setSelection({from:0,to:0,text:''});activeTextSource.current='document';setError('');redraw();
     }
     async function readFile(path:string,targetId:string,ticket:ReturnType<typeof beginRead>){
@@ -158,7 +156,7 @@ export function useFileActions(options: FileActionsOptions) {
         finally{ticket.cancel();}
     }
     function safeSwitch(action: () => void) {
-        if (dirty)
+        if (sessions.current.get(activeSession.current)?.dirty)
             setConfirm({
                 text: '当前文档尚未保存。继续会放弃本次手改；也可以取消后先按 Ctrl+S 保存。',
                 action,
@@ -166,9 +164,11 @@ export function useFileActions(options: FileActionsOptions) {
         else
             action();
     }
-    function openSaveAs(path = file || '未命名.md') {
-        if (path)
-            setDialog({ kind: 'saveAs', title: '另存为 Markdown', value: path.replace(/\.md$/i, '-副本.md') });
+    function openSaveAs(path?: string) {
+        const current = sessions.current.get(activeSession.current);
+        const name = path ?? (current?.imagePath || current?.disk?.path || '未命名.md');
+        if (name)
+            setDialog({ kind: 'saveAs', title: '另存为 Markdown', value: name.replace(/\.md$/i, '-副本.md') });
     }
     async function save() {
         await saveSession(activeSession.current);
@@ -238,7 +238,7 @@ export function useFileActions(options: FileActionsOptions) {
                 await api('/image-file/info?path='+encodeURIComponent(path));if(!requireRead(ticket))return;
                 const session:EditorSession={id:targetId,imagePath:path,disk:null,state:null,view:null,dirty:false};
                 sessions.current.set(targetId,session);
-                if(targetId===activeSession.current){view.current=null;disk.current=null;editorState.current=null;setFile(path);setDirty(false);setOutline([]);setSelection({from:0,to:0,text:''});}
+                if(targetId===activeSession.current){setOutline([]);setSelection({from:0,to:0,text:''});}
                 workspace.openDocumentTab(targetId);redraw();
             }finally{ticket.cancel();}
             return;
@@ -282,7 +282,7 @@ export function useFileActions(options: FileActionsOptions) {
         try{await prepareFileActions(actions);}
         finally{structuring.current=false;release();}
     }
-    async function manageFile(action: FileAction, actionOptions?:{quiet?:boolean}): Promise<FileResult> {
+    async function manageFile(action: FileAction, actionOptions?:{quiet?:boolean;actor?:'human'|'ai'|null}): Promise<FileResult> {
         requireFileActionStart();
         if (action.action === 'reveal')return api<FileResult>('/explorer', action);
         structuring.current = true;
@@ -295,6 +295,7 @@ export function useFileActions(options: FileActionsOptions) {
             const snapshots=affected.map(session=>({session,path:session.imagePath||session.disk?.path,doc:(session.view?.state||session.state)?.doc,version:session.contentVersion||0,proposal:proposalFor(session.id)}));
             const result = await api<FileResult>('/explorer', action);
             if(!scope())return result;
+            if(actionOptions?.actor!==null)options.onApplied?.(action,result,actionOptions?.actor||'human');
             if (action.path && ['move', 'rename'].includes(action.action)) {
                 references.remap(action.path, result.path);
                 for (const session of affected) {
@@ -305,9 +306,6 @@ export function useFileActions(options: FileActionsOptions) {
                         session.context.undo = [];
                     }
                 }
-                const current = sessions.current.get(activeSession.current)!;
-                disk.current = current.disk;
-                setFile(current.imagePath||current.disk?.path || '');
                 setCollapsed(old => new Set([...old].map(path => mapEntryPath(path, action.path!, result.path))));
                 if(affected.some(session=>session.id===activeSession.current)){
                     setInlineRequest(null);
@@ -388,7 +386,6 @@ export function useFileActions(options: FileActionsOptions) {
     function bindSavedFile(data:DiskFile,targetId:string){
         const session=sessions.current.get(targetId)!;
         session.disk=data;session.dirty=false;session.landing=false;session.contentVersion=(session.contentVersion||0)+1;
-        if(targetId===activeSession.current){disk.current=data;editorState.current=session.view?.state||session.state;setFile(data.path);setDirty(false);}
         redraw();
     }
     async function submitDialog(event:FormEvent){
@@ -399,6 +396,7 @@ export function useFileActions(options: FileActionsOptions) {
         const dialogUnchanged=()=>!options.dialogRef||options.dialogRef.current===dialog;
         const ticket=dialog.kind==='folder'?null:beginRead(targetId),release=ticket?()=>ticket.cancel():beginFileActivity(sessions,loading);
         const allowed=()=>dialogUnchanged()&&requireRead(ticket!);
+        let completed = dialog.kind === 'folder' ? '文件夹已建立。' : '已完成。';
         setError('');
         try{
             if((dialog.kind==='saveAs'||dialog.kind==='rename')&&source&&pendingReview(source.path))throw new Error('请先审阅这个文件的建议，再另存或重命名。');
@@ -411,15 +409,15 @@ export function useFileActions(options: FileActionsOptions) {
                 // The rename already happened on disk. Retain every local text/history even
                 // if a view was edited while the server was moving the original file.
                 for(const session of sessions.current.values())if(session.disk?.path===source.path){session.disk={...session.disk,path:data.path,hash:data.hash};session.contentVersion=(session.contentVersion||0)+1;}
-                if(targetId===activeSession.current&&target?.disk?.path===data.path){disk.current=target.disk;setFile(data.path);}
                 redraw();
             }else{
                 if(!path.endsWith('.md'))path+='.md';
-                const state=target?.view?.state||target?.state||(targetId===activeSession.current?editorState.current:null);
+                const state=target?.view?.state ?? target?.state;
                 if(dialog.kind==='saveAs'&&!state)throw new Error('没有可另存的正文，当前内容仍保留。');
                 const text=dialog.kind==='saveAs'?state!.doc.toString():`# ${path.split('/').at(-1)!.replace(/\.md$/i,'')}\n\n`;
                 if(!allowed())return;
-                const saved=await api<{hash:string}>('/file',{path,text,baseline:null,eol:source?.eol||'LF',bom:false});
+                const saved=await writeDocument(api,{path,text,baseline:null,eol:source?.eol||'LF',bom:false});
+                completed = saved.warning ?? completed;
                 if(!allowed())return;
                 const data=await api<DiskFile>('/file?path='+encodeURIComponent(path));
                 if(!allowed())return;
@@ -427,7 +425,7 @@ export function useFileActions(options: FileActionsOptions) {
                 if(dialog.kind==='saveAs')bindSavedFile(data,targetId);else showFile(data,targetId);
             }
             if(!scope())return;
-            await refresh();if(!scope()||!dialogUnchanged())return;setDialog(null);inform(dialog.kind==='folder'?'文件夹已建立。':'已完成。');
+            await refresh();if(!scope()||!dialogUnchanged())return;setDialog(null);inform(completed);
         }catch(error){if(scope()&&dialogUnchanged()&&(!ticket||ticket.current()))setError((error as Error).message);}
         finally{release();}
     }
@@ -437,11 +435,11 @@ export function useFileActions(options: FileActionsOptions) {
         const targetId=activeSession.current,ticket=beginRead(targetId);
         try{
             const raw=await source.text();if(!requireRead(ticket))return;
-            const saved=await api<{hash:string}>('/file',{path:source.name,text:raw.replace(/^\uFEFF/,'').replace(/\r\n/g,'\n'),baseline:null,eol:raw.includes('\r\n')?'CRLF':'LF',bom:raw.startsWith('\uFEFF')});
+            const saved=await writeDocument(api,{path:source.name,text:raw.replace(/^\uFEFF/,'').replace(/\r\n/g,'\n'),baseline:null,eol:raw.includes('\r\n')?'CRLF':'LF',bom:raw.startsWith('\uFEFF')});
             if(!requireRead(ticket))return;
             const data=await api<DiskFile>('/file?path='+encodeURIComponent(source.name));if(!requireRead(ticket))return;
             if(data.hash!==saved.hash)throw new Error('导入副本在读取前发生外部变化，当前正文未替换。');
-            showFile(data,targetId);await refresh();if(scope())inform('已将文件副本导入工作空间。');
+            showFile(data,targetId);await refresh();if(scope())inform(saved.warning ?? '已将文件副本导入工作空间。');
         }catch(error){if(ticket.current())setError((error as Error).message);}
         finally{ticket.cancel();}
     }

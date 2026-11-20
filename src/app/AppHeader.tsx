@@ -1,7 +1,6 @@
-import type { RefObject } from 'react';
-import type { EditorState } from '@codemirror/state';
-import { ChevronDown, CircleHelp, Download, FolderOpen, Lock, LockOpen, Save, Settings2, Minus, Square, X } from 'lucide-react';
-import type { EditorSession } from '../features/editor/editorSessionTypes';
+import {useShortcutPreferences} from '../features/settings/ShortcutPreferences';
+import {shortcutLabel} from '../features/settings/shortcuts';
+import { ChevronDown, CircleHelp, Icon, Lock, LockOpen, Save, Settings2, Minus, Square, X } from "../shared/icons";
 import type { PanelWorkspaceApi } from '../features/workspace/PanelFrame';
 import type { useFileWorkspace } from '../features/files/WorkspaceContext';
 import {repositoryLabel} from '../features/files/WorkspaceContext';
@@ -12,16 +11,10 @@ import {useDesktopPanels} from '../features/workspace/DesktopPanels';
 
 type AppHeaderProps = {
     workspace: PanelWorkspaceApi;
-    sessions: RefObject<Map<string, EditorSession>>;
-    editorState: RefObject<EditorState | null>;
-    editorIds: string[];
-    panelLabel: (id: string) => string;
-    activateEditor: (id: string) => void;
-    closeEditor: (id: string) => void;
     openChat: (tab?: 'conversation' | 'annotations') => void;
     openSettings: (section?: SettingsSection) => void;
+    openHistory: () => void;
     save: () => Promise<void>;
-    openSaveAs: (path?: string) => void;
     fileWorkspace: ReturnType<typeof useFileWorkspace>;
     config: Config;
     file: string;
@@ -32,9 +25,9 @@ type AppHeaderProps = {
     setHelp: (open: boolean) => void;
 };
 
-/** 顶栏：写作空间、保存/自动保存、模型、面板切换器、帮助/锁定/设置。 */
-export function AppHeader({ workspace, sessions, editorState, editorIds, panelLabel, activateEditor, closeEditor, openChat, openSettings, save, openSaveAs, fileWorkspace, config, file, fileBusy, chatOpen, leftOpen, setError, setHelp }: AppHeaderProps) {
-    const desktop=useDesktopPanels();
+/** 顶栏：写作空间、保存/自动保存、帮助、模型、面板切换器、锁定/设置。 */
+export function AppHeader({ workspace, openChat, openSettings, openHistory, save, fileWorkspace, config, file, fileBusy, chatOpen, leftOpen, setError, setHelp }: AppHeaderProps) {
+    const desktop=useDesktopPanels(),{bindings}=useShortcutPreferences();
     const modelLabel=activeModelLabel(config);
     return (
         <header className="app-header" onPointerDown={event=>{if(desktop.enabled)desktop.beginDrag('$main',event);}}
@@ -49,16 +42,17 @@ export function AppHeader({ workspace, sessions, editorState, editorIds, panelLa
             workspace.open('repositories');
           }}
         >
-          <FolderOpen className="workspace-switcher-icon" aria-hidden="true" />
+          <Icon name="panel.repositories" className="workspace-switcher-icon" />
           <b>{repositoryLabel(fileWorkspace.info.repositories.find(item=>item.id===fileWorkspace.info.id)||fileWorkspace.info)}</b>
           <ChevronDown className="workspace-switcher-chevron" aria-hidden="true" />
         </button>
-        <div className="quick-file-actions" aria-label="文档保存操作">
+        <div className="quick-file-actions" aria-label="文档保存与帮助操作">
           <div className="save-with-autosave">
-            <button type="button" className="header-save-button" aria-label="保存正文" title="保存 · Ctrl+S" disabled={!file||fileBusy} onClick={()=>void save()}><Save size={16}/></button>
+            <button type="button" className="header-save-button" aria-label="保存正文" title={`保存 · ${shortcutLabel(bindings,'save')}`} disabled={!file||fileBusy} onClick={()=>void save()}><Save size={16}/></button>
             <label className="auto-save-toggle" data-no-drag title={fileWorkspace.info.autoSave?'自动保存已开启 · 点击关闭':'自动保存已关闭 · 点击开启'}><input type="checkbox" role="switch" aria-label="自动保存正文" checked={fileWorkspace.info.autoSave} onChange={event=>void fileWorkspace.update({autoSave:event.target.checked}).catch(error=>setError(error.message))}/></label>
           </div>
-          <button type="button" className="header-save-as" aria-label="另存为" title="另存为 Markdown" disabled={fileBusy||!editorState.current?.doc.length} onClick={()=>openSaveAs()}><Download size={16}/></button>
+          <button type="button" className="header-help" aria-label="使用指南" title="使用指南" onClick={() => setHelp(true)}><CircleHelp size={17}/></button>
+          <button type="button" className="header-help" aria-label="历史记录" title="历史记录" onClick={openHistory}><Icon name="history.open" size={17}/></button>
         </div>
         </div>
         <div className="header-right"><div className="header-actions">
@@ -79,7 +73,6 @@ export function AppHeader({ workspace, sessions, editorState, editorIds, panelLa
             {id:"files",label:"文档（文件列表）",open:leftOpen,category:'files',keywords:['目录','文件夹','浏览器']},
             {id:'repositories',label:'仓库管理',open:workspace.isOpen('repositories'),category:'files',keywords:['仓库','项目','目录','切换']},
             {id:"trash",label:"回收站",open:workspace.isOpen('trash'),category:'files',keywords:['恢复','删除','清理']},
-            ...editorIds.map(id=>({id,label:panelLabel(id),open:workspace.isOpen(id),fixed:id==='editor',category:'documents',description:`正文 ${editorIds.indexOf(id)+1}`,keywords:['笔记','文章','Markdown']})),
             {id:"conversation",label:"对话",open:chatOpen,category:'ai',keywords:['聊天','模型']},
             {id:"annotations",label:"标注",open:workspace.isOpen("annotations"),category:'writing',keywords:['选区','批注']},
             {id:"outline",label:"大纲",open:workspace.isOpen("outline"),category:'writing',keywords:['节点','章节']},
@@ -88,21 +81,11 @@ export function AppHeader({ workspace, sessions, editorState, editorIds, panelLa
             {id:"scratch",label:"草稿",open:workspace.isOpen("scratch"),category:'writing',keywords:['草稿纸','临时']},
             {id:"basis",label:"依据",open:workspace.isOpen("basis"),category:'ai',keywords:['参考','资料','上下文']},
             {id:"search",label:"查找替换",open:workspace.isOpen("search"),category:'tools',keywords:['查找','搜索','替换']},
-          ].map(item=>({...item,category:item.category as PanelCategory,locked:workspace.isPositionLocked(item.id)}))} onToggleLock={workspace.togglePositionLock} onReveal={id=>{workspace.open(id);workspace.panel(id).raise();if(sessions.current.has(id))activateEditor(id);requestAnimationFrame(()=>{const element=workspace.panel(id).ref.current;if(element){element.tabIndex=-1;element.focus({preventScroll:true});element.classList.add('panel-located');setTimeout(()=>element.classList.remove('panel-located'),1200);}});}} onToggle={id=>{
-            if(sessions.current.has(id)){
-              if(workspace.isOpen(id))closeEditor(id);else{workspace.open(id);activateEditor(id);}
-            } else if(id==="conversation") {
+          ].map(item=>({...item,category:item.category as PanelCategory,locked:workspace.isPositionLocked(item.id)}))} onToggleLock={workspace.togglePositionLock} onReveal={id=>{workspace.open(id);workspace.panel(id).raise();requestAnimationFrame(()=>{const element=workspace.panel(id).ref.current;if(element){element.tabIndex=-1;element.focus({preventScroll:true});element.classList.add('panel-located');setTimeout(()=>element.classList.remove('panel-located'),1200);}});}} onToggle={id=>{
+            if(id==="conversation") {
               if(chatOpen)workspace.close(id);else openChat("conversation");
             } else workspace.toggle(id);
           }}/>
-          <button
-            className="icon-button"
-            title="使用指南"
-            aria-label="使用指南"
-            onClick={() => setHelp(true)}
-          >
-            <CircleHelp size={17} />
-          </button>
           <button
             className={'icon-button workspace-lock-button'+(workspace.locked?' active':'')}
             title={workspace.locked?'解锁工作区位置 · 面板仍可打开和收纳':'锁定工作区位置 · 浮窗仍可移动'}

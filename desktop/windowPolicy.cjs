@@ -65,6 +65,7 @@ function dockFeedback(value) {
     if(!value.colors||typeof value.colors!=='object'||Array.isArray(value.colors))throw new Error('Invalid docking colors');colors={};
     for(const [key,field] of Object.entries(dockingColorFields))if(value.colors[key]!==undefined){const color=value.colors[key];if(typeof color!=='string'||!(field.alpha?/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i:/^#[0-9a-f]{6}$/i).test(color))throw new Error('Invalid docking color');colors[key]=color.toLowerCase();}
   }
-  return {guides,ready,...(rail ? {rail} : {}),...(colors?{colors}:{})};
+  const host=typeof value.host==='string'&&/^[a-zA-Z0-9_:.-]{1,128}$/.test(value.host)?value.host:undefined;
+  return {guides,ready,...(host?{host}:{}),...(rail ? {rail} : {}),...(colors?{colors}:{})};
 }
 module.exports = { validCommand, allowNavigation, commandAllowed, readyPanels, contentPoint, nativePanelBounds, panelContentRect, dragAllowed, dragPosition, dragBounds, withTargetSize, restoredPosition, toolbarPosition, resizeBounds, dockFeedback };

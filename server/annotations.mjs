@@ -1,20 +1,14 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { readStateObject } from "./state-json.mjs";
 const fail = (message, status = 400) =>
   Object.assign(new Error(message), { status });
 export function annotationStore(root) {
   const target = path.join(root, "text-annotations.json");
   let queue = Promise.resolve();
   const key = (source, file) => source + ":" + file;
-  async function all() {
-    try {
-      return JSON.parse(await fs.readFile(target, "utf8"));
-    } catch (error) {
-      if (error.code === "ENOENT") return {};
-      throw error;
-    }
-  }
+  const all = async () => (await readStateObject(target, '标注存储')) ?? {};
   async function read(source, file) {
     const records = await all();
     return Object.hasOwn(records, key(source, file))
@@ -54,6 +48,7 @@ export function annotationStore(root) {
         item.note.length > 20000 ||
         typeof item.stale !== "boolean" ||
         (!item.stale && item.to - item.from !== item.original.length) ||
+        (item.order !== undefined && (!Number.isInteger(item.order) || item.order < 0 || item.order >= 4000)) ||
         typeof item.createdAt !== "string" ||
         item.createdAt.length > 80 ||
         (item.respondedSignature !== undefined &&
@@ -71,6 +66,7 @@ export function annotationStore(root) {
         note: item.note,
         stale: item.stale,
         createdAt: item.createdAt,
+        ...(item.order!==undefined?{order:item.order}:{}),
         ...(item.respondedSignature
           ? { respondedSignature: item.respondedSignature }
           : {}),

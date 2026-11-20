@@ -1,7 +1,7 @@
 {
   "name": "hive-writing-prototype",
   "private": true,
-  "version": "0.1.5",
+  "version": "0.1.7",
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
@@ -14,6 +14,7 @@
     "desktop:folder": "npm run build && electron-builder --win --dir",
     "verify:app": "node scripts/verify-app.mjs",
     "verify:package": "node scripts/verify-release.mjs",
+    "update:bundle": "node scripts/make-local-update.mjs",
     "desktop:portable": "npm run build && electron-builder --win portable"
   },
   "dependencies": {
@@ -62,6 +63,7 @@
       "dist/**",
       "server/**",
       "desktop/**",
+      "shared/**",
       "templates/**",
       "LICENSE",
       "!**/*.test.*",

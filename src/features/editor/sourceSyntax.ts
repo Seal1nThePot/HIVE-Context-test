@@ -2,6 +2,7 @@ import {Language} from '@codemirror/language';
 import {markdownLanguage} from '@codemirror/lang-markdown';
 import {NodeProp} from '@lezer/common';
 import {Table,type MarkdownConfig,type MarkdownParser} from '@lezer/markdown';
+import {quotedStrong} from './quotedStrong';
 
 export const compactSourceThreshold=100000;
 const compactMode=new NodeProp<boolean>();
@@ -37,7 +38,7 @@ const compactTables:MarkdownConfig={parseBlock:[{
   },
 }]};
 
-const original=markdownLanguage.parser as MarkdownParser;
+const original=(markdownLanguage.parser as MarkdownParser).configure(quotedStrong);
 const full=original.configure({props:[compactMode.add(type=>type.name==='Document'?false:undefined)]});
 const compact=original.configure([compactTables,{props:[compactMode.add(type=>type.name==='Document'?true:undefined)]}]);
 const adaptive=full.configure({wrap(inner,input,fragments,ranges){

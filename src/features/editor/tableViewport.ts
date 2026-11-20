@@ -28,6 +28,44 @@ export function tableCell(item:PreviewReplacement,row:number,col:number):Preview
   return end&&col<(item.columns??0)?{from:end.to,to:end.to,text:'',virtual:col,trailing:end.trailing}:undefined;
 }
 
+const columnWidths=new WeakMap<PreviewReplacement,number[]>();
+const defaultColumnWidth=6,bodyWidthLimit=20,headerWidthLimit=12,outlierWidthLimit=8;
+const widthAllowance=2,maxSampleRows=32,wideCharacter=/[\u2E80-\u9FFF\uAC00-\uD7AF\uFF01-\uFF60]/u;
+
+function approximateLength(text:string,limit:number){
+  let length=0;
+  for(const character of text){
+    length+=wideCharacter.test(character)?1:.58;
+    if(length>=limit)return limit;
+  }
+  return length;
+}
+
+/** Use the same font-relative widths in every mounted segment of a source table. */
+export function defaultTableWidths(item:PreviewReplacement){
+  const existing=columnWidths.get(item);if(existing)return existing;
+  const rows=item.rows??[],header=rows[0]??[];
+  const lengths=Array.from({length:item.columns??header.length},()=>[] as number[]);
+  const bodyRows=Math.max(0,rows.length-1),sampleCount=Math.min(bodyRows,maxSampleRows);
+  for(let index=0;index<sampleCount;index++){
+    const row=rows[1+Math.floor(index*(bodyRows-1)/Math.max(1,sampleCount-1))];
+    row.forEach((cell,col)=>{
+      if(cell.text)lengths[col]?.push(approximateLength(cell.text,bodyWidthLimit-widthAllowance));
+    });
+  }
+  const widths=lengths.map((values,col)=>{
+    values.sort((a,b)=>a-b);
+    // The lower-ranked 75th percentile leaves a lone outlier out of a short sample.
+    const typical=values[Math.floor((values.length-1)*.75)]??0;
+    const label=approximateLength(header[col]?.text??'',headerWidthLimit-widthAllowance);
+    const longest=values.at(-1)??0;
+    // Let an exceptional value use several lines, with a bounded allowance for compact columns.
+    const outlier=Math.min(outlierWidthLimit,longest/3+widthAllowance);
+    return Math.ceil(Math.max(defaultColumnWidth,typical+widthAllowance,label+widthAllowance,outlier));
+  });
+  columnWidths.set(item,widths);return widths;
+}
+
 /** DOM identity follows the source table, including independently mounted row segments. */
 export function sameSourceTable(a:Element|null|undefined,b:Element|null|undefined){
   if(!a||!b)return false;

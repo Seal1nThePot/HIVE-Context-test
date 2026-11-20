@@ -6,10 +6,11 @@ export type WorkspaceInfo={id:string;root:string;autoSave:boolean;revision:numbe
 export const repositoryName=(root:string)=>root.replace(/[\\/]+$/,'').split(/[\\/]/).pop()||root;
 export const repositoryLabel=(item:RepositoryInfo)=>item.name?.trim()||repositoryName(item.root);
 type Guard=()=>Promise<string|void>;
-type WorkspaceContextValue={info:WorkspaceInfo;request:typeof fetch;update:(patch:Partial<Pick<WorkspaceInfo,'root'|'autoSave'>>)=>Promise<void>;manage:(action:RepositoryAction)=>Promise<void>;register:(guard:Guard)=>()=>void;flush:()=>Promise<void>};
+type WorkspaceContextValue={info:WorkspaceInfo;request:typeof fetch;update:(patch:Partial<Pick<WorkspaceInfo,'root'|'autoSave'>>)=>Promise<void>;manage:(action:RepositoryAction)=>Promise<void>;adopt:(next:WorkspaceInfo)=>void;register:(guard:Guard)=>()=>void;flush:()=>Promise<void>};
 const Context=createContext<WorkspaceContextValue|null>(null);
 export function WorkspaceProvider({info,onChange,children}:{info:WorkspaceInfo;onChange:(info:WorkspaceInfo)=>void;children:ReactNode}) {
   const guards=useRef(new Set<Guard>());
+  const latestInfo=useRef(info);latestInfo.current=info;
   const request=useMemo<typeof fetch>(()=>(input,init)=>{
     const headers=new Headers(init?.headers);headers.set('X-Hive-Workspace',info.id);
     return fetch(input,{...init,headers});
@@ -21,6 +22,7 @@ export function WorkspaceProvider({info,onChange,children}:{info:WorkspaceInfo;o
   const value:WorkspaceContextValue={info,request,register:guard=>{guards.current.add(guard);return()=>{guards.current.delete(guard);};},
     flush:async()=>{for(const guard of guards.current){const error=await guard();if(error)throw new Error(error);}},
     update:patch=>write('/api/workspace',{...patch,revision:info.revision}),
+    adopt:next=>{const current=latestInfo.current;if(next.id===current.id&&next.revision>=current.revision)onChange(next);},
     manage:action=>write('/api/workspace/repositories',{...action,revision:info.revision})};
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

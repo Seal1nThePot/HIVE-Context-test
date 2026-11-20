@@ -1,6 +1,6 @@
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
 import type {Text} from '@codemirror/state';
-import {Plus,Trash2} from 'lucide-react';
+import {Icon,Trash2} from "../../shared/icons";
 import type {InsertTarget} from './EditorInsertDialog';
 import {notePropertiesTransaction,readNoteProperties,type NoteProperty,type PropertyType} from './noteProperties';
 import {useFrontmatterVisibility} from './frontmatterVisibility';
@@ -18,13 +18,14 @@ function ValueArea({value,onChange,label,placeholder}:{value:string;onChange:(va
   useLayoutEffect(()=>{const node=ref.current;if(!node)return;const resize=()=>{node.style.height='auto';node.style.height=node.scrollHeight+'px';};resize();let width=node.clientWidth;const observer=typeof ResizeObserver==='undefined'?null:new ResizeObserver(()=>{if(node.clientWidth!==width){width=node.clientWidth;resize();}});observer?.observe(node);return()=>observer?.disconnect();},[value]);
   return <textarea ref={ref} aria-label={label} rows={1} placeholder={placeholder} value={value} onChange={event=>onChange(event.target.value)}/>;
 }
-export default function NotePropertiesPanel({target,targetKey,onApplied}:{target:InsertTarget|null;targetKey:string;onApplied:()=>void}){
+export default function NotePropertiesPanel({target,targetKey,onApplied,onTargetAvailability}:{target:InsertTarget|null;targetKey:string;onApplied:()=>void;onTargetAvailability?:(ready:boolean)=>void}){
   const {visible,setVisible,error:visibilityError}=useFrontmatterVisibility();
   const [drafts,setDrafts]=useState<Record<string,Draft>>({}),[selected,setSelected]=useState(''),[error,setError]=useState('');
   const counter=useRef(0),currentKey=target?targetKey:'';
   useEffect(()=>{if(!target||!targetKey){setSelected('');return;}setDrafts(old=>old[targetKey]?old:{...old,[targetKey]:makeDraft(target)});setSelected(targetKey);setError('');},[targetKey,!!target]);
   useEffect(()=>{if(!target||!targetKey)return;setDrafts(old=>{const item=old[targetKey];return item&&!item.dirty&&item.snapshot!==target.editor.state.doc?{...old,[targetKey]:makeDraft(target)}:old;});},[targetKey,target?.editor.state.doc]);
   const key=selected||currentKey,draft=drafts[key],current=!!target&&key===currentKey;
+  useLayoutEffect(()=>{onTargetAvailability?.(current);},[current,onTargetAvailability]);
   function update(fn:(draft:Draft)=>Draft){setDrafts(old=>old[key]?{...old,[key]:{...fn(old[key]),dirty:true}}:old);setError('');}
   function change(id:string,part:Partial<NoteProperty>){update(item=>({...item,rows:item.rows.map(row=>row.id===id?{...row,...part}:row)}));}
   function apply(){
@@ -46,7 +47,7 @@ export default function NotePropertiesPanel({target,targetKey,onApplied}:{target
         {row.type==='boolean'?<select aria-label={`属性值 ${index+1}`} value={row.value} onChange={event=>change(row.id,{value:event.target.value})}><option value="false">否</option><option value="true">是</option></select>:row.type==='date'?<input type="date" aria-label={`属性值 ${index+1}`} value={row.value} onChange={event=>change(row.id,{value:event.target.value})}/>:<ValueArea label={`属性值 ${index+1}`} placeholder={row.type==='list'?'每行一项':'属性值'} value={row.value} onChange={value=>change(row.id,{value})}/>}
         <button type="button" className="property-remove" aria-label={`删除属性 ${index+1}`} onClick={()=>update(item=>({...item,rows:item.rows.filter(value=>value.id!==row.id)}))}><Trash2 size={14}/></button>
       </div>)}</div>
-      <button type="button" className="property-add" disabled={draft.rows.length>=64} onClick={()=>update(item=>({...item,rows:[...item.rows,{id:'new:'+(++counter.current),key:'',type:'text',value:''}]}))}><Plus size={14}/>添加属性</button>
+      <button type="button" className="property-add" disabled={draft.rows.length>=64} onClick={()=>update(item=>({...item,rows:[...item.rows,{id:'new:'+(++counter.current),key:'',type:'text',value:''}]}))}><Icon name="properties.add" size={14}/>添加属性</button>
       </>}
       {error&&<p role="alert" className="properties-error">{error}</p>}
     </form></div>

@@ -10,7 +10,7 @@ export default function ComposerShadowSettings({preferences,onChange}:{preferenc
     <div className="theme-detail-grid">
       <div><span>阴影颜色</span><ThemeColorField label="输入框阴影" alpha value={value.color} onChange={color=>update({color})}/></div>
       <div><span>模糊半径</span><input aria-label="阴影模糊半径" type="range" min={0} max={40} step={1} value={value.blur} style={rangeProgressStyle(value.blur,0,40)} onChange={event=>update({blur:Number(event.target.value)})}/><output>{value.blur}px</output></div>
-      <div><span>垂直偏移</span><input aria-label="阴影垂直偏移" type="range" min={0} max={24} step={1} value={value.offsetY} style={rangeProgressStyle(value.offsetY,0,24)} onChange={event=>update({offsetY:Number(event.target.value)})}/><output>{value.offsetY}px</output></div>
+      <div><span>垂直偏移</span><input aria-label="阴影垂直偏移" type="range" min={-24} max={24} step={1} value={value.offsetY} style={rangeProgressStyle(value.offsetY,-24,24)} onChange={event=>update({offsetY:Number(event.target.value)})}/><output>{value.offsetY}px</output></div>
       <div><span>预览与重置</span><span className="composer-shadow-preview" aria-hidden="true" style={{boxShadow:`0 ${value.offsetY}px ${value.blur}px ${value.color}`}}/><button type="button" className="settings-secondary" onClick={()=>onChange(old=>({...old,composerShadow:{...defaultComposerShadow}}))}>恢复默认</button></div>
     </div>
   </div>;

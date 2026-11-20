@@ -1,5 +1,6 @@
-import { ListPlus, ListTree, Maximize2, PanelLeftOpen, Minus, X, Square } from 'lucide-react';
+import { ContentsPanel, Icon, NoteProperties, Maximize2, PanelLeftOpen, Minus, X, Square } from "../../shared/icons";
 import type { ReactNode, RefObject } from 'react';
+import {useWindowAnnotations} from '../annotations/windowAnnotations';
 import type { AnnotationSource } from '../annotations/annotations';
 import type { EditorSession } from '../editor/editorSessionTypes';
 import DisplayModeControl from '../editor/DisplayModeControl';
@@ -37,7 +38,7 @@ export const emptyPanelFooter = (title: string) => <div className="panel-status-
 
 export function PanelControls({ chrome, id, groupMembers }: { chrome: PanelChrome; id: string; groupMembers?: string[] }) {
     const desktop = useDesktopPanels(), detached = desktop.windows.has(id);
-    groupMembers=groupMembers||desktop.members(id);
+    groupMembers=groupMembers||desktop.paneMembers(id);
     const { workspace, sessions, editorIds, panelLabel, closeEditor, minimizeEditor, activateEditor, redraw, activeTextSource, ribbonCommand } = chrome;
     const panel = workspace.panel(id), isEditor = sessions.current.has(id);
     const label = isEditor ? `正文 ${editorIds.indexOf(id) + 1}` : panelLabel(id);
@@ -60,8 +61,8 @@ export function PanelControls({ chrome, id, groupMembers }: { chrome: PanelChrom
             { label: '打开当前窗口并停靠', disabled: panel.primary || !panel.canDock, run: panel.openDocked },
         ] : undefined}
         actions={[...(detached?nativeWindowActions(desktop.owner(id)):[]),...(isEditor ? [
-            { label: '插入笔记属性', icon: <ListPlus size={14} />, disabled: !sessions.current.get(id)?.view, run: () => { activateEditor(id); activeTextSource.current = 'document'; ribbonCommand('properties'); } },
-            { label: '标题目录', icon: <ListTree size={14} />, checked: workspace.isOpen('toc'), run: () => { activateEditor(id); workspace.toggle('toc'); } },
+            { label: '插入笔记属性', icon: <NoteProperties size={14} />, disabled: !sessions.current.get(id)?.view, run: () => { activateEditor(id); activeTextSource.current = 'document'; ribbonCommand('properties'); } },
+            { label: '标题目录', icon: <ContentsPanel size={14} />, checked: workspace.isOpen('toc'), run: () => { activateEditor(id); workspace.toggle('toc'); } },
         ] : [])]} detached={detached} />;
     return isEditor
         ? <div className="document-panel-controls"><DisplayModeControl label={label} displayMode={sessions.current.get(id)?.displayMode || 'live'} onDisplayMode={mode => { sessions.current.get(id)!.displayMode = mode; redraw(); }} typewriter={!!sessions.current.get(id)?.typewriter} onTypewriter={enabled => { sessions.current.get(id)!.typewriter = enabled; redraw(); }} />{controls}</div>
@@ -70,11 +71,12 @@ export function PanelControls({ chrome, id, groupMembers }: { chrome: PanelChrom
 
 /** 停靠/浮动面板的外框：标题栏 + 面板控制按钮 + 底栏 + 拖拽把手。 */
 export function PanelFrame({ chrome, id, title, className, children }: { chrome: PanelChrome; id: string; title: string; className: string; children: ReactNode }) {
-    const panel = chrome.workspace.panel(id);
+    const panel = chrome.workspace.panel(id),{markedPanels}=useWindowAnnotations();
     return <DesktopPanel id={id} title={title} open={chrome.workspace.isOpen(id)} visible={panel.visible}><aside key={id} ref={panel.ref} data-panel-id={id} aria-label={`${title}面板`}
         className={`workspace-panel independent-workspace-panel ${className} ${panel.grouped ? 'panel-grouped' : ''} ${panel.floating ? "panel-floating" : "panel-docked"}`}
         style={panel.style} onPointerDownCapture={panel.raise}>
-        <div className="independent-panel-header panel-drag-header" data-lock-panel={id} data-position-locked={panel.positionLocked || undefined} title={panel.lockHint} onPointerDown={panel.beginDrag}>
+        <div className="independent-panel-header panel-drag-header" data-window-annotation={markedPanels.indexOf(id)+1||undefined} data-lock-panel={id} data-position-locked={panel.positionLocked || undefined} title={panel.lockHint} onPointerDown={panel.beginDrag}>
             <b>{title}</b><PanelControls chrome={chrome} id={id} />
+            {panel.positionLocked&&<Icon name="panel.positionLocked" className="panel-position-lock-icon" size={11}/>}
         </div>{children}{id !== "scratch" && emptyPanelFooter(title)}{panel.handles}</aside></DesktopPanel>;
 }

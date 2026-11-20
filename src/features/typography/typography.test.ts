@@ -59,22 +59,18 @@ describe('semantic paragraph typography',()=>{
     const source=state.update({effects:setDisplayMode.of('source')}).state;
     expect(source.sliceDoc()).toBe(text);expect(source.field(markdownPreview).size).toBe(0);
   });
-  it('only marks long tokens in prose, preserving code, math, explicit alignment and normal words',()=>{
-    const url='https://example.org/research/2026/notes?language=English',path='C:/SyntheticProject/chapters/chapter-001.md',word='SupercalifragilisticexpialidociousSupercalifragilisticexpialidocious';
-    const text=`普通 international ${url} ${path} ${word}\n\n\`${url}\`\n\n$$\n${word}\n$$\n\n- ${url}\n\n<div style="text-align: left;">\n\n${url}\n\n</div>`;
-    const state=create(text),plan=previewPlan(state),tokens=plan.styles.filter(style=>style.className?.includes('cm-typography-long-token'));
-    expect(tokens.map(item=>state.sliceDoc(item.from,item.to))).toEqual([url,path,word]);
-    expect(tokens[0].className).not.toContain('cm-typography-break-token');
-    expect(tokens.slice(1).every(item=>item.className?.includes('cm-typography-break-token'))).toBe(true);
-    expect(previewPlan(state.update({selection:{anchor:4}}).state)).toBe(plan);
-    expect(state.update({effects:setDisplayMode.of('source')}).state.field(markdownPreview).size).toBe(0);
-    expect(state.sliceDoc()).toBe(text);
-  });
-  it('allows long technical inline code to wrap without marking ordinary code words',()=>{
-    const path='markdownPresentation/formatting',text=`文字 \`${path}\` 与 \`international\`。`;
-    const state=create(text),tokens=previewPlan(state).styles.filter(style=>style.className==='cm-typography-code-break');
-    expect(tokens.map(item=>state.sliceDoc(item.from,item.to))).toEqual([path]);
-    expect(state.sliceDoc()).toBe(text);
+  it('renders the same inline code style for long technical paths and ordinary names after editing',()=>{
+    const technicalPath='markdownPresentation/formatting';
+    const text=`文字 \`${technicalPath}\` 与 \`international\`。\n\n- \`${technicalPath}\``;
+    let state=create(text);
+    const inlineCode=()=>previewPlan(state).styles.filter(style=>style.className==='cm-preview-inline-code').map(style=>state.sliceDoc(style.from,style.to));
+    expect(inlineCode()).toEqual([technicalPath,'international',technicalPath]);
+    const edited=text.indexOf('/formatting');
+    state=state.update({changes:{from:edited,to:edited+'/formatting'.length,insert:'/editor'}}).state;
+    expect(inlineCode()).toEqual(['markdownPresentation/editor','international',technicalPath]);
+    state=state.update({effects:setDisplayMode.of('source')}).state;
+    expect(state.field(markdownPreview).size).toBe(0);
+    expect(state.sliceDoc()).toBe(text.replace('/formatting','/editor'));
   });
   it('switches display modes repeatedly without accumulating spacing, changing text or losing undo/selections',()=>{
     let state=create('第一段。\n\n第二段。');state=state.update({changes:{from:4,insert:'新增'},selection:EditorSelection.create([EditorSelection.range(1,3),EditorSelection.cursor(10)]),userEvent:'input.type'}).state;

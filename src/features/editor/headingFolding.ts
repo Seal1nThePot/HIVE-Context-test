@@ -1,6 +1,7 @@
 import {StateEffect, StateField, type EditorState, type Extension} from '@codemirror/state';
 import {codeFolding, foldEffect, unfoldEffect, foldedRanges} from '@codemirror/language';
 import {Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet} from '@codemirror/view';
+import {createUiIcon} from '../../shared/icons';
 import {outlineTree} from './markdownParse';
 
 export type HeadingFold = {from:number; to:number; lineFrom:number; level:number};
@@ -30,8 +31,9 @@ class FoldButton extends WidgetType {
   constructor(readonly range:HeadingFold,readonly folded:boolean){super();}
   eq(other:FoldButton){return this.range.from===other.range.from&&this.range.to===other.range.to&&this.folded===other.folded;}
   toDOM(view:EditorView){
-    const button=view.dom.ownerDocument.createElement('button');button.type='button';button.className='cm-heading-fold';
-    button.textContent=this.folded?'▸':'▾';button.setAttribute('aria-label',this.folded?'展开标题内容':'折叠标题内容');button.title=button.getAttribute('aria-label')!;
+    const document=view.dom.ownerDocument;
+    const button=document.createElement('button');button.type='button';button.className='cm-heading-fold';
+    button.append(createUiIcon(document,this.folded?'disclosure.expand':'disclosure.collapse',12));button.setAttribute('aria-label',this.folded?'展开标题内容':'折叠标题内容');button.title=button.getAttribute('aria-label')!;
     button.addEventListener('mousedown',event=>event.preventDefault());
     button.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();view.dispatch({effects:(this.folded?unfoldEffect:foldEffect).of({from:this.range.from,to:this.range.to})});});
     return button;

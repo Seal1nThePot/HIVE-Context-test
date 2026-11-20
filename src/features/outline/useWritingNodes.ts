@@ -2,12 +2,7 @@ import {useFileWorkspace} from "../files/WorkspaceContext";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type { EditorView } from "@codemirror/view";
 import { headings } from "../../shared/core";
-import { initialWritingNodes, type WritingNode } from "./writingNodes";
-type Snapshot = {
-  revision: number;
-  initialized: boolean;
-  nodes: WritingNode[];
-};
+import { initialWritingNodes, type WritingNode, type WritingOutlineSnapshot as Snapshot } from "./writingNodes";
 async function sendRequest(
   fetch:typeof globalThis.fetch,
   file: string,
@@ -39,7 +34,7 @@ export function useWritingNodes(
   const request=(file:string,nodes?:WritingNode[],revision?:number)=>sendRequest(fetch,file,nodes,revision);
   const cache = useRef(new Map<string, Snapshot>()),
     active = useRef(file),
-    errors = useRef(onError);
+    errors = useRef(onError), saving=useRef(false);
   active.current = file;
   errors.current = onError;
   const [snapshot, setSnapshot] = useState<Snapshot>({
@@ -50,7 +45,7 @@ export function useWritingNodes(
     [busy, setBusy] = useState(false),
     [ready, setReady] = useState(false),
     [reload, setReload] = useState(0);
-  useEffect(()=>fileWorkspace.register(async()=>busy?"大纲正在保存，请稍后再切换。":undefined),[busy]);
+  useEffect(()=>fileWorkspace.register(async()=>saving.current?"大纲正在保存，请稍后再切换。":undefined),[fileWorkspace]);
   function retry() {
     cache.current.delete(file);
     setReload((value) => value + 1);
@@ -102,19 +97,28 @@ export function useWritingNodes(
   }, [file, reload]);
   async function save(nodes: WritingNode[]) {
     if (!ready || busy) throw new Error("大纲正在载入或保存，请稍后再试。");
-    const currentFile = file;
+    return saveFor(file,nodes,snapshot.revision);
+  }
+  async function saveFor(currentFile:string,nodes:WritingNode[],revision:number){
+    if(saving.current)throw new Error('大纲正在保存，请稍后再试。');
+    saving.current=true;
     setBusy(true);
     try {
-      const next = await request(currentFile, nodes, snapshot.revision);
+      const next = await request(currentFile, nodes, revision);
       cache.current.set(currentFile, next);
       if (active.current === currentFile) setSnapshot(next);
+      return next;
     } catch (error) {
       errors.current((error as Error).message);
-      if ((error as { status?: number }).status === 409) retry();
+      if ((error as { status?: number }).status === 409) {
+        cache.current.delete(currentFile);
+        if(active.current===currentFile)setReload(value=>value+1);
+      }
       throw error;
     } finally {
+      saving.current=false;
       setBusy(false);
     }
   }
-  return { nodes: snapshot.nodes, save, busy, ready, retry };
+  return { nodes: snapshot.nodes, save, saveFor, readFor:(path:string)=>request(path), busy, ready, retry };
 }

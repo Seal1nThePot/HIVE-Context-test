@@ -9,6 +9,16 @@ export const hash = (text) =>
   crypto.createHash("sha256").update(text).digest("hex");
 const fail = (message, status = 400) =>
   Object.assign(new Error(message), { status });
+
+async function readIfPresent(file) {
+  try {
+    return await fs.readFile(file, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 export function fileStore(root, state, options = {}) {
   const times = state ? fileTimes(state) : null;
   const locks = new Map();
@@ -110,12 +120,7 @@ export function fileStore(root, state, options = {}) {
     if (typeof text !== "string" || Buffer.byteLength(text) > 2_000_000)
       throw fail("文件内容无效或超过 2 MB。");
     return exclusive(target, async () => {
-      let old = null;
-      try {
-        old = await fs.readFile(target, "utf8");
-      } catch (e) {
-        if (e.code !== "ENOENT") throw e;
-      }
+      const old = await readIfPresent(target);
       if (
         (old !== null && hash(old) !== baseline) ||
         (old === null && baseline != null)
@@ -124,9 +129,10 @@ export function fileStore(root, state, options = {}) {
           "磁盘文件已变化，已阻止覆盖。请另存，或重新打开后核对。",
           409,
         );
-      const timeData=times ? await times.read() : null;
-      let originalCreatedAt;
-      if(times && old !== null) originalCreatedAt=times.observe(timeData,relative,await fs.stat(target)).createdAt;
+      const timeData = times ? await times.read() : null;
+      const originalCreatedAt = times && old !== null
+        ? times.observe(timeData, relative, await fs.stat(target)).createdAt
+        : undefined;
       const raw =
         (bom ? "\uFEFF" : "") +
         (eol === "CRLF" ? text.replace(/\r?\n/g, "\r\n") : text);
@@ -137,28 +143,29 @@ export function fileStore(root, state, options = {}) {
       );
       try {
         await fs.writeFile(temp, raw, { encoding: "utf8", flag: "wx" });
-        // Recheck immediately before the atomic replacement, catching external edits during preparation.
-        let latest = null;
-        try {
-          latest = await fs.readFile(target, "utf8");
-        } catch (e) {
-          if (e.code !== "ENOENT") throw e;
-        }
+        // Recheck after preparing the file. External writers can still race the rename.
+        const latest = await readIfPresent(target);
         if (latest !== old)
           throw fail("保存期间磁盘文件发生变化，已阻止覆盖。", 409);
-        if (old === null) {
+        if (old === null)
           await fs.link(temp, target);
-          await fs.unlink(temp);
-        } else await fs.rename(temp, target);
+        else await fs.rename(temp, target);
       } finally {
         await fs.rm(temp, { force: true }).catch(() => {});
       }
-      if(times) {
-        const stat=await fs.stat(target);
-        times.replaced(timeData,relative,stat,originalCreatedAt ?? stat.birthtimeMs);
-        await times.write(timeData);
+      const result = { hash: hash(raw), path: relative };
+      if (times) {
+        try {
+          const stat = await fs.stat(target);
+          times.replaced(timeData, relative, stat, originalCreatedAt ?? stat.birthtimeMs);
+          await times.write(timeData);
+        } catch {
+          times.clear();
+          // The file is already published. The caller still needs its new baseline.
+          return { ...result, warning: "正文已保存，但未能更新文件时间记录。" };
+        }
       }
-      return { hash: hash(raw), path: relative };
+      return result;
     });
   }
   async function folder(relative) {

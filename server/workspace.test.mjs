@@ -17,6 +17,40 @@ it('persists the chosen root and automatic-save preference across restart',async
   expect(restarted.read()).toEqual(changed);
   expect(changed.root).toBe(await fs.realpath(other));
 });
+it('projects repository changes into the application directory and repairs a stale manifest on restart',async()=>{
+  const appData=path.join(temp,'appdata'),manifest=path.join(appData,'repositories.json');
+  const store=await workspaceStore(local,root,{repositoryManifestDirectory:appData});
+  try{
+    const readManifest=async()=>JSON.parse(await fs.readFile(manifest,'utf8'));
+    expect((await readManifest()).repositories).toEqual([{id:store.read().id,name:'A',path:await fs.realpath(root)}]);
+    const added=await store.manage({action:'add',root:other,revision:0}),entry=added.repositories[1];
+    await store.manage({action:'rename',id:entry.id,name:'项目乙',revision:1});
+    expect((await readManifest()).repositories[1]).toEqual({id:entry.id,name:'项目乙',path:await fs.realpath(other)});
+    await store.manage({action:'remove',id:entry.id,revision:2});
+    expect((await readManifest()).repositories).toHaveLength(1);
+    await fs.writeFile(manifest,JSON.stringify({revision:90,repositories:[{id:entry.id,name:'过期',path:other}]}));
+    const reopened=await workspaceStore(local,root,{repositoryManifestDirectory:appData});
+    try {expect(await readManifest()).toEqual(await reopened.readRepositoryManifest(reopened.read().id));}
+    finally {await reopened.close();}
+  }finally{await store.close();}
+});
+it('removes an unregistered empty folder after a failed write and retries without duplicated registration',async()=>{
+  const config=path.join(local,'workspace.json'),folder=path.join(other,'甲仓库');
+  const initial=spaces.read(),input={name:'甲仓库',parent:other,workspaceId:initial.id,revision:initial.revision};
+  await fs.mkdir(config);
+  await expect(spaces.createRepository(input)).rejects.toThrow();
+  await expect(fs.access(folder)).rejects.toHaveProperty('code','ENOENT');
+  expect(spaces.read()).toEqual(initial);
+  const manifest=JSON.parse(await fs.readFile(path.join(local,'repositories.json'),'utf8'));
+  expect(manifest).toMatchObject({revision:initial.revision,repositories:[{id:initial.id}]});
+  await fs.rmdir(config);
+  const created=await spaces.createRepository(input);
+  expect(created.repository.root).toBe(await fs.realpath(folder));
+  await fs.writeFile(path.join(folder,'继续写.md'),'保留原文');
+  const retry=await spaces.createRepository({...input,revision:created.workspace.revision});
+  expect(retry).toEqual(created);
+  expect(await fs.readFile(path.join(folder,'继续写.md'),'utf8')).toBe('保留原文');
+});
 it('isolates same-name files and metadata and restores the original namespace',async()=>{
   const first=spaces.read(),old=spaces.capture(first.id);
   await old.files.save({path:'same.md',text:'A',baseline:null});

@@ -1,6 +1,6 @@
 import {useEffect,useMemo,useState} from 'react';
 import type {EditorState} from '@codemirror/state';
-import {Settings2} from 'lucide-react';
+import {Settings2} from "../../shared/icons";
 import {countDescription,defaultStatus,documentStatistics,normalizeStatusOptions,paragraphDescription,readStatusOptions,statusLabel,textStatistics,type CountMode,type StatusKey,type StatusOptions} from './statusModel';
 import './status-bar-settings.css';
 import {cachedDocumentStatistics} from './statusModel';

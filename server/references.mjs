@@ -1,11 +1,24 @@
+import { isReferenceAttachmentId, referenceAttachmentStore } from './reference-attachments.mjs';
+
 const fail=message=>Object.assign(new Error(message),{status:400});
 export const MAX_REFERENCE_CHARACTERS=60000;
-export async function resolveReferences({files},input){
+export async function resolveReferences({files,state},input){
   if(!input||!Array.isArray(input.sources)||input.sources.length>32)throw fail('参考资料列表无效，最多添加 32 项。');
   if(!Number.isInteger(input.budget)||input.budget<0||input.budget>MAX_REFERENCE_CHARACTERS)throw fail('参考资料长度无效。');
-  const sources=[],sourceKeys=new Set(),candidates=[],seen=new Set(),warnings=[];
+  const sources=[],sourceKeys=new Set(),attachmentIds=new Set(),candidates=[],seen=new Set(),warnings=[];
   let overflow=false;
   for(const item of input.sources){
+    if(item?.type==='attachment'){
+      if(!isReferenceAttachmentId(item.id)||typeof item.path!=='string'||item.path.length>1000)
+        throw fail('参考附件标识无效。');
+      if(attachmentIds.has(item.id))continue;
+      const reference={type:'attachment',id:item.id,path:item.path};
+      attachmentIds.add(item.id);
+      sources.push(reference);
+      if(candidates.length>=256){overflow=true;continue;}
+      candidates.push({path:reference.path,source:reference.path,attachment:reference});
+      continue;
+    }
     if(!item||!['file','folder'].includes(item.type)||typeof item.path!=='string'||item.path.length>2000)throw fail('参考资料路径无效。');
     const path=item.path.replace(/\\/g,'/');await files.resolve(path,item.type==='folder');
     const key=path.toLocaleLowerCase();if(sourceKeys.has(key))continue;sourceKeys.add(key);sources.push({path,type:item.type});
@@ -29,12 +42,25 @@ export async function resolveReferences({files},input){
   const included=[];let remaining=input.budget;
   for(const candidate of candidates){
     if(remaining<=0){warnings.push('未加入“'+candidate.path+'”：本轮参考空间已满。');continue;}
-    let disk;try{disk=await files.read(candidate.path);}catch(error){if(candidate.explicit)throw fail('无法读取参考笔记“'+candidate.path+'”：'+error.message);warnings.push('未加入“'+candidate.path+'”：无法读取。');continue;}
-    const override=overrides.get(candidate.path.toLocaleLowerCase()),text=override?.text??disk.text,characters=override?.characters??text.length;
+    const {attachment,explicit}=candidate;
+    let {path,source}=candidate;
+    let disk;
+    try{
+      if(attachment){
+        disk=await referenceAttachmentStore(state).read(attachment.id);
+        attachment.path=source=path=disk.name;
+      }else disk=await files.read(path);
+    }catch(error){
+      if(attachment){if(error.code!=='ENOENT')throw error;throw fail('参考附件“'+path+'”已不存在，请重新添加。');}
+      if(explicit)throw fail('无法读取参考笔记“'+path+'”：'+error.message);
+      warnings.push('未加入“'+path+'”：无法读取。');
+      continue;
+    }
+    const override=attachment?undefined:overrides.get(path.toLocaleLowerCase()),text=override?.text??disk.text,characters=override?.characters??text.length;
     if(override&&characters>0&&!text.length){warnings.push('未加入“'+candidate.path+'”：未保存内容超出本轮空间，请提高优先级或先保存。');continue;}
     const selected=text.slice(0,remaining),truncated=selected.length<characters;
-    included.push({...candidate,text:selected,characters,truncated,...(override?{unsaved:true}:{})});remaining-=selected.length;
+    included.push({path,source,text:selected,characters,truncated,...(override?{unsaved:true}:{})});remaining-=selected.length;
     if(truncated)warnings.push('“'+candidate.path+'”已截短，优先保留开头 '+selected.length+' 个字符。');
   }
-  return {sources,files:included.map(({explicit,...file})=>file),warnings};
+  return {sources,files:included,warnings};
 }
