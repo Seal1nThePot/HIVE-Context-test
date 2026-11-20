@@ -65,11 +65,13 @@
       "desktop/**",
       "shared/**",
       "templates/**",
+      "assets/brand/hive.png",
       "LICENSE",
       "!**/*.test.*",
       "package.json"
     ],
     "win": {
+      "icon": "assets/brand/hive.ico",
       "target": [
         "portable"
       ]

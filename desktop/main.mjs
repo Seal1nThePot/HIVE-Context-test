@@ -15,6 +15,7 @@ import {createLocalUpdate,markUpdateReady} from './localUpdate.cjs';
 import {dockIconPayload} from '../shared/iconPack.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const appIcon = path.join(root, 'assets', 'brand', 'hive.png');
 const appName = 'HIVE markdown editor';
 app.setName(appName);
 // Keep existing documents, preferences and the single-instance identity after renaming.
@@ -137,13 +138,13 @@ function secureWindow(window, primary = false, entry = '') {
       const y = Math.max(area.y, Math.min(area.y + area.height - height, Math.round(base.y + (base.height - height) / 2)));
       return { action: 'allow', overrideBrowserWindowOptions: {
         parent, modal: true, frame: false, show: false, minimizable: false, maximizable: false,
-        resizable: true, thickFrame: true, backgroundColor: '#18181b', webPreferences,
+        resizable: true, thickFrame: true, backgroundColor: '#18181b', icon: appIcon, webPreferences,
         x, y, width, height, minWidth: Math.min(childSize.minWidth, width), minHeight: Math.min(childSize.minHeight, height),
       } };
     }
     const toolbar = id === 'global-toolbar';
     const windowOptions = toolbar ? { width: 352, height: 104, minWidth: 352, minHeight: 104, resizable: false, minimizable: false, transparent: true, backgroundColor: '#00000000' } : { minWidth: id === 'settings' ? 450 : 220, minHeight: id === 'settings' ? 260 : 140, resizable: true, thickFrame: true, backgroundColor: '#18181b' };
-    return { action: 'allow', overrideBrowserWindowOptions: { ...panelBounds(features, id), ...windowOptions, frame: false, maximizable: false, show: false, webPreferences } };
+    return { action: 'allow', overrideBrowserWindowOptions: { ...panelBounds(features, id), ...windowOptions, frame: false, maximizable: false, show: false, icon: appIcon, webPreferences } };
   });
 }
 async function stopService() {
@@ -412,7 +413,7 @@ else {
       preferenceStore = preferencesModule.preferenceStore(path.join(app.getPath('userData'), 'ui-preferences.json'));
       initialPreferences = await preferenceStore.read();
       const port = await startService(); origin = `http://127.0.0.1:${port}`;
-      mainWindow = new BrowserWindow({ width: 1280, height: 800, minWidth: 640, minHeight: 420, frame: false, resizable: true, thickFrame: true, backgroundColor: '#18181b', show: false, webPreferences });
+      mainWindow = new BrowserWindow({ width: 1280, height: 800, minWidth: 640, minHeight: 420, frame: false, resizable: true, thickFrame: true, backgroundColor: '#18181b', show: false, icon: appIcon, webPreferences });
       secureWindow(mainWindow, true, `${origin}/`);
       mainWindow.on('move', updateDockOverlay);
       mainWindow.on('resize', updateDockOverlay);
